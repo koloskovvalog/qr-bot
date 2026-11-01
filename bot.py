@@ -25,7 +25,7 @@ DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu
 # КУРС USDT (сколько рублей за 1 USDT)
 USDT_RATE = 90.0
 
-# ВАШ TELEGRAM ID
+# ВАШ TELEGRAM ID (Сюда будут приходить уведомления)
 ADMIN_ID = 7653934214
 ALLOWED_USERS = {ADMIN_ID} 
 
@@ -47,7 +47,6 @@ async def init_db():
         statement_cache_size=0 
     )
     
-    # Создаем таблицы, если их вдруг нет (на всякий случай)
     async with db_pool.acquire() as conn:
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -224,12 +223,24 @@ async def handle_rollypay_webhook(request: web.Request):
                             ON CONFLICT (user_id) DO UPDATE SET balance = users.balance + EXCLUDED.balance
                         """, user_id, amount)
                         
-                        msg = f"🟢 **Баланс пополнен!**\nЗачислено: {amount:.2f} ₽"
-                        
+                        # 1. Уведомление пользователю
+                        user_msg = f"🟢 **Баланс пополнен!**\nЗачислено: {amount:.2f} ₽"
                         try:
-                            await bot.send_message(user_id, msg, parse_mode="Markdown")
+                            await bot.send_message(user_id, user_msg, parse_mode="Markdown")
                         except Exception as e:
-                            logging.error(f"Не удалось отправить: {e}")
+                            logging.error(f"Не удалось отправить пользователю: {e}")
+
+                        # 2. УВЕДОМЛЕНИЕ АДМИНУ (НОВОЕ)
+                        admin_msg = (
+                            f"🔔 **Новое пополнение!**\n\n"
+                            f"👤 Пользователь ID: `{user_id}`\n"
+                            f"💵 Сумма: {amount:.2f} ₽\n"
+                            f"🧾 Номер заказа: #{db_id}"
+                        )
+                        try:
+                            await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
+                        except Exception as e:
+                            logging.error(f"Не удалось отправить админу: {e}")
 
         return web.Response(text="OK", status=200)
     except Exception as e:
