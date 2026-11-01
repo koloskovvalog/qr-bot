@@ -7,23 +7,30 @@ from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
 from rollypay import RollyPayClient
+import os
+import hmac
+import hashlib
+import json
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
 ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
-WEBHOOK_PORT = 8080
+WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
+
+# ВАШ TELEGRAM ID (УЗНАЙТЕ У @userinfobot)
+ADMIN_ID = 7653934214  # <--- ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ НА ВАШ ID
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 
-
 # --- БАЗА ДАННЫХ ---
 async def init_db():
     async with aiosqlite.connect("orders.db") as db:
+        # Таблица заказов
         await db.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,20 +41,63 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Таблица разрешенных пользователей
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                user_id INTEGER PRIMARY KEY
+            )
+        ''')
         await db.commit()
+        
+        # Автоматически добавляем админа в белый список при запуске
+        await db.execute("INSERT OR IGNORE INTO allowed_users (user_id) VALUES (?)", (ADMIN_ID,))
+        await db.commit()
+
+# Функция проверки доступа
+async def is_allowed(user_id: int) -> bool:
+    async with aiosqlite.connect("orders.db") as db:
+        async with db.execute("SELECT 1 FROM allowed_users WHERE user_id = ?", (user_id,)) as cursor:
+            return await cursor.fetchone() is not None
 
 # --- КОМАНДЫ ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    # Проверка доступа
+    if not await is_allowed(message.from_user.id):
+        return  # Если не в белом списке — бот молчит
+
     await message.answer(
         "Привет! Я бот для создания счетов на оплату.\n\n"
         "Используй команду `/new [сумма]`, чтобы создать заказ.\n"
         "Пример: `/new 100`"
     )
 
+# КОМАНДА ДЛЯ ВЫДАЧИ ДОСТУПА (только для вас)
+@dp.message(Command("allow"))
+async def cmd_allow(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return  # Только админ может выдавать доступ
+
+    if not command.args:
+        await message.answer("Укажите ID пользователя: `/allow 123456789`")
+        return
+
+    try:
+        new_user_id = int(command.args.strip())
+        async with aiosqlite.connect("orders.db") as db:
+            await db.execute("INSERT OR IGNORE INTO allowed_users (user_id) VALUES (?)", (new_user_id,))
+            await db.commit()
+        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен в белый список.")
+    except ValueError:
+        await message.answer("Ошибка! ID должен состоять только из цифр.")
+
 @dp.message(Command("new"))
 async def cmd_new(message: types.Message, command: CommandObject):
+    # Проверка доступа
+    if not await is_allowed(message.from_user.id):
+        return
+
     if not command.args:
         await message.answer("Пожалуйста, укажите сумму после команды /new.\nПример: `/new 500`")
         return
@@ -101,22 +151,16 @@ async def cmd_new(message: types.Message, command: CommandObject):
         await message.answer("Не удалось создать платеж. Попробуйте позже.")
 
 # --- ВЕБХУКИ ---
-import hmac
-import hashlib
-import json
 
 async def handle_rollypay_webhook(request: web.Request):
     try:
-        # Читаем сырые байты тела запроса
         raw_body = await request.read()
         signature = request.headers.get("X-Signature")
         timestamp = request.headers.get("X-Timestamp")
 
         if not signature or not timestamp:
-            logging.warning("Вебхук без подписи или метки времени")
             return web.Response(text="Missing signature", status=400)
 
-        # Проверка подлинности подписи RollyPay
         message = f"{timestamp}.{raw_body.decode('utf-8')}"
         expected_signature = hmac.new(
             SIGNING_SECRET.encode('utf-8'),
@@ -125,13 +169,10 @@ async def handle_rollypay_webhook(request: web.Request):
         ).hexdigest()
 
         if not hmac.compare_digest(signature, expected_signature):
-            logging.warning("Неверная подпись вебхука RollyPay!")
             return web.Response(text="Invalid signature", status=403)
 
-        # Парсим JSON и проверяем тип события
         data = json.loads(raw_body)
-        logging.info(f"Получен вебхук RollyPay: {data}")
-
+        
         if data.get("event_type") == "payment.paid" or data.get("status") == "paid":
             payment_id = data.get("payment_id")
             
@@ -155,12 +196,10 @@ async def handle_rollypay_webhook(request: web.Request):
                         except Exception as e:
                             logging.error(f"Не удалось отправить сообщение: {e}")
 
-        # RollyPay требует ответ 2xx в течение 10 секунд
         return web.Response(text="OK", status=200)
     except Exception as e:
         logging.error(f"Ошибка вебхука: {e}")
         return web.Response(text="Error", status=500)
-
 
 # --- ЗАПУСК ---
 async def main():
