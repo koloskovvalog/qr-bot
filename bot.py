@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiohttp import web
-from rollypay import RollyPayClient, RollyPayError
+from rollypay import RollyPayClient
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
@@ -98,7 +98,7 @@ async def cmd_new(message: types.Message, command: CommandObject):
             disable_web_page_preview=True
         )
 
-    except RollyPayError as e:
+    except Exception as e:
         logging.error(f"Ошибка RollyPay: {e}")
         await message.answer("Не удалось создать платеж. Попробуйте позже.")
 
