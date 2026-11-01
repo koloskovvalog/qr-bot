@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
-)
+
 
 # --- БАЗА ДАННЫХ ---
 async def init_db():
