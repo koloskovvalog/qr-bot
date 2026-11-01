@@ -27,7 +27,6 @@ USDT_RATE = 90.0
 
 # ВАШ TELEGRAM ID (Сюда будут приходить уведомления)
 ADMIN_ID = 7653934214
-ALLOWED_USERS = {ADMIN_ID} 
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -48,12 +47,14 @@ async def init_db():
     )
     
     async with db_pool.acquire() as conn:
+        # Таблица балансов
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 balance REAL DEFAULT 0
             );
         ''')
+        # Таблица заказов
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id BIGSERIAL PRIMARY KEY,
@@ -65,13 +66,28 @@ async def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         ''')
-    logging.info("Подключение к Supabase успешно!")
+        # НОВАЯ ТАБЛИЦА: Белый список
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                user_id BIGINT PRIMARY KEY
+            );
+        ''')
+        # Автоматически добавляем админа в базу, чтобы он всегда имел доступ
+        await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
+        
+    logging.info("Подключение к Supabase успешно! Таблицы готовы.")
+
+# --- ФУНКЦИЯ ПРОВЕРКИ ДОСТУПА ---
+async def is_user_allowed(user_id: int) -> bool:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT 1 FROM allowed_users WHERE user_id = $1", user_id)
+        return row is not None
 
 # --- КОМАНДЫ ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    if message.from_user.id not in ALLOWED_USERS:
+    if not await is_user_allowed(message.from_user.id):
         return
     
     await message.answer(
@@ -90,14 +106,15 @@ async def cmd_allow(message: types.Message, command: CommandObject):
         return
     try:
         new_user_id = int(command.args.strip())
-        ALLOWED_USERS.add(new_user_id)
-        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен в белый список.")
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", new_user_id)
+        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен в белый список навсегда.")
     except ValueError:
         await message.answer("Ошибка! ID должен состоять только из цифр.")
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
-    if message.from_user.id not in ALLOWED_USERS:
+    if not await is_user_allowed(message.from_user.id):
         return
     
     async with db_pool.acquire() as conn:
@@ -149,7 +166,7 @@ async def create_deposit_invoice(message: types.Message, amount: float):
 
 @dp.message(Command("deposit"))
 async def cmd_deposit(message: types.Message, command: CommandObject):
-    if message.from_user.id not in ALLOWED_USERS:
+    if not await is_user_allowed(message.from_user.id):
         return
     if not command.args:
         await message.answer("Укажите сумму: `/deposit 500`")
@@ -164,7 +181,7 @@ async def cmd_deposit(message: types.Message, command: CommandObject):
 
 @dp.message(Command("new"))
 async def cmd_new(message: types.Message, command: CommandObject):
-    if message.from_user.id not in ALLOWED_USERS:
+    if not await is_user_allowed(message.from_user.id):
         return
     if not command.args:
         await message.answer("Пожалуйста, укажите сумму после команды /new.\nПример: `/new 500`")
@@ -230,7 +247,7 @@ async def handle_rollypay_webhook(request: web.Request):
                         except Exception as e:
                             logging.error(f"Не удалось отправить пользователю: {e}")
 
-                        # 2. УВЕДОМЛЕНИЕ АДМИНУ (НОВОЕ)
+                        # 2. УВЕДОМЛЕНИЕ АДМИНУ
                         admin_msg = (
                             f"🔔 **Новое пополнение!**\n\n"
                             f"👤 Пользователь ID: `{user_id}`\n"
