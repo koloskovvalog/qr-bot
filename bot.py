@@ -18,10 +18,7 @@ WEBHOOK_PORT = 8080
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-rolly_client = RollyPayClient(
-    api_key=ROLLYPAY_API_KEY,
-    terminal_id=TERMINAL_ID,
-    signing_secret=SIGNING_SECRET
+rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 )
 
 # --- БАЗА ДАННЫХ ---
@@ -70,6 +67,7 @@ async def cmd_new(message: types.Message, command: CommandObject):
         payment = rolly_client.payments.create(
             amount=str(amount),
             order_id=order_id_str,
+            terminal_id=TERMINAL_ID,
             description=f"Оплата заказа на сумму {amount:.2f} ₽",
             customer_id=str(user_id),
             redirect_url=f"https://t.me/{(await bot.get_me()).username}"
