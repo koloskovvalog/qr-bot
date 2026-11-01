@@ -101,20 +101,45 @@ async def cmd_new(message: types.Message, command: CommandObject):
         await message.answer("Не удалось создать платеж. Попробуйте позже.")
 
 # --- ВЕБХУКИ ---
+import hmac
+import hashlib
+import json
 
 async def handle_rollypay_webhook(request: web.Request):
     try:
-        data = await request.json()
-        logging.info(f"Получен вебхук: {data}")
+        # Читаем сырые байты тела запроса
+        raw_body = await request.read()
+        signature = request.headers.get("X-Signature")
+        timestamp = request.headers.get("X-Timestamp")
 
-        # Для первого запуска мы опускаем сложную проверку подписи (HMAC),
-        # чтобы бот просто заработал. Позже её можно добавить.
-        
-        if data.get("event") == "payment.succeeded":
-            payment_id = data["payment"]["payment_id"]
+        if not signature or not timestamp:
+            logging.warning("Вебхук без подписи или метки времени")
+            return web.Response(text="Missing signature", status=400)
+
+        # Проверка подлинности подписи RollyPay
+        message = f"{timestamp}.{raw_body.decode('utf-8')}"
+        expected_signature = hmac.new(
+            SIGNING_SECRET.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_signature):
+            logging.warning("Неверная подпись вебхука RollyPay!")
+            return web.Response(text="Invalid signature", status=403)
+
+        # Парсим JSON и проверяем тип события
+        data = json.loads(raw_body)
+        logging.info(f"Получен вебхук RollyPay: {data}")
+
+        if data.get("event_type") == "payment.paid" or data.get("status") == "paid":
+            payment_id = data.get("payment_id")
             
             async with aiosqlite.connect("orders.db") as db:
-                async with db.execute("SELECT id, user_id, amount FROM orders WHERE payment_id = ? AND status = 'pending'", (payment_id,)) as cursor:
+                async with db.execute(
+                    "SELECT id, user_id, amount FROM orders WHERE payment_id = ? AND status = 'pending'", 
+                    (payment_id,)
+                ) as cursor:
                     row = await cursor.fetchone()
                     if row:
                         db_id, user_id, amount = row
@@ -130,10 +155,12 @@ async def handle_rollypay_webhook(request: web.Request):
                         except Exception as e:
                             logging.error(f"Не удалось отправить сообщение: {e}")
 
-        return web.Response(text="OK")
+        # RollyPay требует ответ 2xx в течение 10 секунд
+        return web.Response(text="OK", status=200)
     except Exception as e:
         logging.error(f"Ошибка вебхука: {e}")
         return web.Response(text="Error", status=500)
+
 
 # --- ЗАПУСК ---
 async def main():
