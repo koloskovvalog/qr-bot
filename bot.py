@@ -14,19 +14,19 @@ import json
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
-ROLLYPAY_API_KEY = "aMkEd8u-F3EY1PM5Zzki5oFfPVx7pnRUiux-YUJQLS5ts"
+ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
-# ВАША СТРОКА ПОДКЛЮЧЕНИЯ ИЗ SUPABASE (ЗАМЕНИТЕ [YOUR-PASSWORD] НА ВАШ ПАРОЛЬ!)
+# СТРОКА ПОДКЛЮЧЕНИЯ К SUPABASE (С вашим паролем)
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
 # КУРС USDT (сколько рублей за 1 USDT)
 USDT_RATE = 90.0
 
-# ВАШ TELEGRAM ID (Узнать можно у @userinfobot)
-ADMIN_ID = 7653934214  # <--- ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ НА ВАШ ID!
+# ВАШ TELEGRAM ID
+ADMIN_ID = 7653934214
 ALLOWED_USERS = {ADMIN_ID} 
 
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +39,6 @@ db_pool: asyncpg.Pool = None
 
 async def init_db():
     global db_pool
-    # Создаем пул соединений
     db_pool = await asyncpg.create_pool(
         DATABASE_URL, 
         min_size=1, 
@@ -47,6 +46,26 @@ async def init_db():
         ssl="require", 
         statement_cache_size=0 
     )
+    
+    # Создаем таблицы, если их вдруг нет (на всякий случай)
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                balance REAL DEFAULT 0
+            );
+        ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT,
+                amount REAL,
+                payment_id TEXT UNIQUE,
+                status TEXT,
+                order_type TEXT DEFAULT 'deposit',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        ''')
     logging.info("Подключение к Supabase успешно!")
 
 # --- КОМАНДЫ ---
@@ -57,10 +76,10 @@ async def cmd_start(message: types.Message):
         return
     
     await message.answer(
-        "Привет! Я бот с постоянной базой данных.\n\n"
+        "Привет! Я бот для пополнения баланса.\n\n"
         "💰 **/balance** — проверить баланс (в USDT)\n"
-        "📥 **/deposit [сумма]** — пополнить баланс (в рублях)\n"
-        "🛒 **/new [сумма]** — создать счет на оплату"
+        "📥 **/new [сумма]** — создать счет на пополнение\n"
+        "📥 **/deposit [сумма]** — альтернативная команда для пополнения"
     )
 
 @dp.message(Command("allow"))
@@ -94,22 +113,8 @@ async def cmd_balance(message: types.Message):
         parse_mode="Markdown"
     )
 
-@dp.message(Command("deposit"))
-async def cmd_deposit(message: types.Message, command: CommandObject):
-    if message.from_user.id not in ALLOWED_USERS:
-        return
-
-    if not command.args:
-        await message.answer("Пожалуйста, укажите сумму для пополнения.\nПример: `/deposit 500`")
-        return
-
-    try:
-        amount = float(command.args.replace(',', '.'))
-        if amount <= 0: raise ValueError
-    except ValueError:
-        await message.answer("Ошибка! Сумма должна быть положительным числом.")
-        return
-
+# Единая функция для создания счета на пополнение
+async def create_deposit_invoice(message: types.Message, amount: float):
     user_id = message.from_user.id
     order_id_str = f"deposit_{user_id}_{int(datetime.now().timestamp())}"
 
@@ -133,7 +138,7 @@ async def cmd_deposit(message: types.Message, command: CommandObject):
         builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
         
         await message.answer(
-            f"**Пополнение на {amount:.2f} ₽**\n\n"
+            f"**Счет на пополнение: {amount:.2f} ₽**\n\n"
             f"🟡 **Ожидает оплату...**",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown",
@@ -143,54 +148,35 @@ async def cmd_deposit(message: types.Message, command: CommandObject):
         logging.error(f"Ошибка RollyPay: {e}")
         await message.answer("Не удалось создать платеж.")
 
-@dp.message(Command("new"))
-async def cmd_new(message: types.Message, command: CommandObject):
+@dp.message(Command("deposit"))
+async def cmd_deposit(message: types.Message, command: CommandObject):
     if message.from_user.id not in ALLOWED_USERS:
         return
-
     if not command.args:
-        await message.answer("Пожалуйста, укажите сумму после команды /new.\nПример: `/new 500`")
+        await message.answer("Укажите сумму: `/deposit 500`")
         return
-
     try:
         amount = float(command.args.replace(',', '.'))
         if amount <= 0: raise ValueError
     except ValueError:
         await message.answer("Ошибка! Сумма должна быть положительным числом.")
         return
+    await create_deposit_invoice(message, amount)
 
-    user_id = message.from_user.id
-    order_id_str = f"order_{user_id}_{int(datetime.now().timestamp())}"
-
+@dp.message(Command("new"))
+async def cmd_new(message: types.Message, command: CommandObject):
+    if message.from_user.id not in ALLOWED_USERS:
+        return
+    if not command.args:
+        await message.answer("Пожалуйста, укажите сумму после команды /new.\nПример: `/new 500`")
+        return
     try:
-        payment = rolly_client.payments.create(
-            amount=str(amount), 
-            order_id=order_id_str, 
-            terminal_id=TERMINAL_ID,
-            description=f"Оплата заказа на сумму {amount:.2f} ₽", 
-            customer_id=str(user_id),
-            redirect_url=f"https://t.me/{(await bot.get_me()).username}"
-        )
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO orders (user_id, amount, payment_id, status, order_type) VALUES ($1, $2, $3, $4, $5)",
-                user_id, amount, payment['payment_id'], "pending", "product"
-            )
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
-        
-        await message.answer(
-            f"**Заказ на {amount:.2f} ₽**\n\n"
-            f"🟡 **Ожидает оплату...**",
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown",
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        logging.error(f"Ошибка RollyPay: {e}")
-        await message.answer("Не удалось создать платеж.")
+        amount = float(command.args.replace(',', '.'))
+        if amount <= 0: raise ValueError
+    except ValueError:
+        await message.answer("Ошибка! Сумма должна быть положительным числом.")
+        return
+    await create_deposit_invoice(message, amount)
 
 # --- ВЕБХУКИ ---
 
@@ -221,22 +207,24 @@ async def handle_rollypay_webhook(request: web.Request):
             async with db_pool.acquire() as conn:
                 async with conn.transaction():
                     row = await conn.fetchrow(
-                        "SELECT id, user_id, amount, order_type FROM orders WHERE payment_id = $1 AND status = 'pending'", 
+                        "SELECT id, user_id, amount FROM orders WHERE payment_id = $1 AND status = 'pending'", 
                         payment_id
                     )
                     if row:
-                        db_id, user_id, amount, order_type = row['id'], row['user_id'], row['amount'], row['order_type']
+                        db_id = row['id']
+                        user_id = row['user_id']
+                        amount = row['amount']
+                        
+                        # Обновляем статус заказа
                         await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", db_id)
                         
-                        if order_type == 'deposit':
-                            # Начисляем баланс
-                            await conn.execute("""
-                                INSERT INTO users (user_id, balance) VALUES ($1, $2)
-                                ON CONFLICT (user_id) DO UPDATE SET balance = users.balance + EXCLUDED.balance
-                            """, user_id, amount)
-                            msg = f"🟢 **Баланс пополнен!**\nЗачислено: {amount:.2f} ₽"
-                        else:
-                            msg = f"🟢 **Заказ #{db_id}** оплачен!\nСумма: {amount:.2f} ₽"
+                        # Начисляем баланс
+                        await conn.execute("""
+                            INSERT INTO users (user_id, balance) VALUES ($1, $2)
+                            ON CONFLICT (user_id) DO UPDATE SET balance = users.balance + EXCLUDED.balance
+                        """, user_id, amount)
+                        
+                        msg = f"🟢 **Баланс пополнен!**\nЗачислено: {amount:.2f} ₽"
                         
                         try:
                             await bot.send_message(user_id, msg, parse_mode="Markdown")
