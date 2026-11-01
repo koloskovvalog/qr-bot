@@ -20,7 +20,7 @@ SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
 # ВАША СТРОКА ПОДКЛЮЧЕНИЯ ИЗ SUPABASE (ЗАМЕНИТЕ [YOUR-PASSWORD] НА ВАШ ПАРОЛЬ!)
-DATABASE_URL = "postgresql://postgres:Koloskov2006@db.qrfqdihhoqvlaqkuyols.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
 # КУРС USDT (сколько рублей за 1 USDT)
 USDT_RATE = 90.0
