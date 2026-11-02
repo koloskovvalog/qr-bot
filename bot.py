@@ -23,7 +23,9 @@ WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
-MIN_WITHDRAW_USDT = 50.0
+# --- ЛИМИТЫ И КОМИССИИ ---
+MIN_TRC20_USDT = 10.0
+MIN_BEP20_USDT = 50.0
 TRC20_FEE_USDT = 3.0
 ADMIN_ID = 7653934214
 
@@ -85,7 +87,6 @@ async def init_db():
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS allowed_users (user_id BIGINT PRIMARY KEY);
         ''')
-        # Добавляем колонку network в таблицу выводов
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount_usdt REAL,
@@ -138,9 +139,11 @@ async def cmd_start(message: types.Message):
         f"Текущий курс вывода: **1 USDT = {current_rate:.2f} ₽** (Rapira + 3₽)\n\n"
         "💰 **/balance** — баланс\n"
         "📥 **/new [сумма]** — пополнить (в рублях)\n"
-        f"💸 **/withdraw [сумма] [сеть] [адрес]** — вывод (от {MIN_WITHDRAW_USDT} USDT)\n\n"
-        "🌐 **Доступные сети:** `BEP20` (без комиссии), `TRC20` (комиссия сети 3 USDT)\n"
-        "Пример: `/withdraw 50 TRC20 TQ5N...`"
+        f"💸 **/withdraw [сумма] [сеть] [адрес]** — вывод\n\n"
+        f"🌐 **Доступные сети:**\n"
+        f"├ `BEP20` — без комиссии (от {MIN_BEP20_USDT} USDT)\n"
+        f"└ `TRC20` — комиссия сети {TRC20_FEE_USDT} USDT (от {MIN_TRC20_USDT} USDT)\n\n"
+        "Пример: `/withdraw 15 TRC20 TQ5N...`"
     )
 
 @dp.message(Command("allow"))
@@ -212,14 +215,13 @@ async def cmd_deposit_new(message: types.Message, command: CommandObject):
     except Exception as e:
         await message.answer("Ошибка создания платежа.")
 
-# --- ВЫВОД СРЕДСТВ (BEP20 и TRC20) ---
+# --- ВЫВОД СРЕДСТВ (РАЗНЫЕ ЛИМИТЫ) ---
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
     
-    # Проверяем, что введены все 3 параметра: Сумма, Сеть, Адрес
     if not command.args or len(command.args.split()) < 3:
-        return await message.answer(f"Ошибка формата!\nИспользуйте: `/withdraw [сумма] [сеть] [адрес]`\nПример: `/withdraw 50 TRC20 TQ5N...`")
+        return await message.answer(f"Ошибка формата!\nИспользуйте: `/withdraw [сумма] [сеть] [адрес]`\nПример: `/withdraw 15 TRC20 TQ5N...`")
 
     try:
         args = command.args.split()
@@ -227,13 +229,17 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
         network = args[1].upper().strip()
         address = args[2].strip()
         
-        if amount_usdt < MIN_WITHDRAW_USDT:
-            return await message.answer(f"❌ Минимум: **{MIN_WITHDRAW_USDT} USDT**.", parse_mode="Markdown")
-        
-        # Проверка сети и адреса
+        # Проверка сети
         if network not in ['BEP20', 'TRC20']:
             return await message.answer("❌ Неверная сеть. Доступно только `BEP20` или `TRC20`.")
         
+        # ИНДИВИДУАЛЬНАЯ ПРОВЕРКА ЛИМИТОВ
+        if network == 'TRC20' and amount_usdt < MIN_TRC20_USDT:
+            return await message.answer(f"❌ Минимальная сумма для сети **TRC20** — {MIN_TRC20_USDT} USDT.", parse_mode="Markdown")
+        if network == 'BEP20' and amount_usdt < MIN_BEP20_USDT:
+            return await message.answer(f"❌ Минимальная сумма для сети **BEP20** — {MIN_BEP20_USDT} USDT.", parse_mode="Markdown")
+        
+        # Проверка адреса
         if network == 'BEP20' and (not address.startswith("0x") or len(address) < 40):
             return await message.answer("❌ Неверный адрес для сети BEP20 (должен начинаться с `0x`).")
         if network == 'TRC20' and (not address.startswith("T") or len(address) < 30):
@@ -450,7 +456,6 @@ async def cb_admin_user_wths(callback: CallbackQuery):
     limit, offset = 5, page * 5
 
     async with db_pool.acquire() as conn:
-        # Добавили network в запрос
         wths = await conn.fetch("SELECT id, amount_usdt, status, address, network, created_at FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
         total_wths = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id)
 
@@ -488,7 +493,6 @@ async def cb_manage_wth(callback: CallbackQuery):
     w_id = int(callback.data.split("_")[2])
 
     async with db_pool.acquire() as conn:
-        # Добавили network
         row = await conn.fetchrow("SELECT user_id, amount_usdt, address, network, status FROM withdrawals WHERE id = $1", w_id)
         if not row: return await callback.answer("Заявка не найдена.", show_alert=True)
         
@@ -535,7 +539,6 @@ async def process_user_cancel(callback: CallbackQuery):
             if not row: return await callback.answer("Заявка не найдена.", show_alert=True)
             if row['status'] != 'pending': return await callback.answer("Заявка уже в обработке.", show_alert=True)
             await conn.execute("UPDATE withdrawals SET status = 'cancelled' WHERE id = $1", w_id)
-            # Возвращаем сумму с учетом комиссии (amount_rub уже содержит комиссию)
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", row['amount_rub'], user_id)
     await callback.message.edit_text(f"❌ **Заявка #{w_id} отменена.**\nДеньги (включая комиссию) возвращены.", parse_mode="Markdown")
     await callback.answer("Отменено.")
