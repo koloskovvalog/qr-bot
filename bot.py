@@ -23,14 +23,10 @@ WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
-# --- ЛИМИТЫ ---
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
-
-# --- НАЦЕНКА И ПРИБЫЛЬ ---
-MARKUP_RUB = 3.0          # Наценка к курсу Рапира для клиента
-ADMIN_FEE_PER_USDT = 1.0  # Ваша чистая прибыль (в рублях) с каждого USDT
-
+MARKUP_RUB = 3.0
+ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
 
 logging.basicConfig(level=logging.INFO)
@@ -38,13 +34,10 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 
-# --- ФУНКЦИЯ РАСЧЕТА КОМИССИИ СЕТИ (КАК В ROLLYPAY) ---
+# --- ФУНКЦИЯ РАСЧЕТА КОМИССИИ СЕТИ ---
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
-    if network == 'TRC20':
-        return 3.0
-    elif network == 'BEP20':
-        # 1% от суммы + 2 USDT
-        return (amount_usdt * 0.01) + 2.0
+    if network == 'TRC20': return 3.0
+    elif network == 'BEP20': return (amount_usdt * 0.01) + 2.0
     return 0.0
 
 # --- ДИНАМИЧЕСКИЙ КУРС ---
@@ -154,10 +147,9 @@ async def cmd_start(message: types.Message):
         "💰 **/balance** — баланс\n"
         "📥 **/new [сумма]** — пополнить (в рублях)\n"
         f"💸 **/withdraw [сумма] [сеть] [адрес]** — вывод\n\n"
-        f"🌐 **Доступные сети и комиссии:**\n"
-        f"├ `TRC20` — комиссия сети 3 USDT (от {MIN_TRC20_USDT} USDT)\n"
-        f"└ `BEP20` — комиссия 1% + 2 USDT (от {MIN_BEP20_USDT} USDT)\n\n"
-        "Пример: `/withdraw 15 TRC20 TQ5N...`"
+        f"🌐 **Доступные сети:**\n"
+        f"├ `TRC20` — комиссия 3 USDT (от {MIN_TRC20_USDT} USDT)\n"
+        f"└ `BEP20` — комиссия 1%+2 USDT (от {MIN_BEP20_USDT} USDT)"
     )
 
 @dp.message(Command("allow"))
@@ -171,11 +163,9 @@ async def cmd_allow(message: types.Message, command: CommandObject):
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", new_user_id)
             await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", new_user_id)
-        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен в белый список.")
+        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен.")
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка базы: {e}")
 
 @dp.message(Command("deny"))
 async def cmd_deny(message: types.Message, command: CommandObject):
@@ -187,9 +177,46 @@ async def cmd_deny(message: types.Message, command: CommandObject):
         target_id = int(command.args.strip())
         async with db_pool.acquire() as conn:
             await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
-        await message.answer(f"🚫 Пользователь `{target_id}` удален из белого списка.")
+        await message.answer(f"🚫 Пользователь `{target_id}` заблокирован.")
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
+
+# --- РУЧНОЕ СПИСАНИЕ СРЕДСТВ (НОВОЕ) ---
+@dp.message(Command("deduct"))
+async def cmd_deduct(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if not command.args or len(command.args.split()) < 2:
+        return await message.answer("Используйте: `/deduct [ID] [Сумма]`\nПример: `/deduct 123456789 500`")
+    
+    try:
+        args = command.args.split()
+        target_id = int(args[0])
+        amount = float(args[1].replace(',', '.'))
+        if amount <= 0: raise ValueError
+    except ValueError:
+        return await message.answer("❌ Ошибка формата. Проверьте ID и сумму.")
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", target_id)
+            if not row:
+                return await message.answer(f"❌ Пользователь `{target_id}` не найден в базе.")
+            
+            current_bal = row['balance'] if row['balance'] is not None else 0.0
+            if current_bal < amount:
+                return await message.answer(f"❌ Недостаточно средств у пользователя!\nЕго баланс: {current_bal:.2f} ₽\nВы хотите списать: {amount:.2f} ₽")
+            
+            # Списываем
+            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount, target_id)
+    
+    await message.answer(f"✅ Успешно списано **{amount:.2f} ₽** с пользователя `{target_id}`.", parse_mode="Markdown")
+    
+    # Уведомляем пользователя
+    try:
+        await bot.send_message(target_id, f"⚠️ **Администратор списал с вашего баланса {amount:.2f} ₽.**\nТекущий баланс: {current_bal - amount:.2f} ₽", parse_mode="Markdown")
+    except Exception:
+        pass
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
@@ -201,7 +228,7 @@ async def cmd_balance(message: types.Message):
     
     text = f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT по курсу {current_rate:.2f})"
     if message.from_user.id == ADMIN_ID:
-        text += "\n\n👑 *Это ваш административный счет (включая прибыль).*"
+        text += "\n\n👑 *Это ваш административный счет.*"
         
     await message.answer(text, parse_mode="Markdown")
 
@@ -234,7 +261,7 @@ async def cmd_deposit_new(message: types.Message, command: CommandObject):
     except Exception as e:
         await message.answer("Ошибка создания платежа.")
 
-# --- ВЫВОД СРЕДСТВ (ТОЧНЫЙ РАСЧЕТ КОМИССИЙ) ---
+# --- ВЫВОД СРЕДСТВ ---
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
@@ -257,23 +284,19 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
             return await message.answer(f"❌ Минимальная сумма для сети **BEP20** — {MIN_BEP20_USDT} USDT.", parse_mode="Markdown")
         
         if network == 'BEP20' and (not address.startswith("0x") or len(address) < 40):
-            return await message.answer("❌ Неверный адрес для сети BEP20 (должен начинаться с `0x`).")
+            return await message.answer("❌ Неверный адрес для сети BEP20.")
         if network == 'TRC20' and (not address.startswith("T") or len(address) < 30):
-            return await message.answer("❌ Неверный адрес для сети TRC20 (должен начинаться с `T`).")
+            return await message.answer("❌ Неверный адрес для сети TRC20.")
             
     except ValueError: 
         return await message.answer("Ошибка! Неверная сумма.")
 
-    # Считаем комиссию сети (как в RollyPay) и общую сумму к списанию
     network_fee_usdt = calculate_network_fee(network, amount_usdt)
     total_usdt_to_deduct = amount_usdt + network_fee_usdt
     
     current_rate = await get_usdt_rate()
     total_rub_to_deduct = total_usdt_to_deduct * current_rate
-    
-    # ВАША ПРИБЫЛЬ: фиксировано +1 рубль с каждого USDT (без учета сетевой комиссии)
     admin_profit_rub = amount_usdt * ADMIN_FEE_PER_USDT
-    
     user_id = message.from_user.id
 
     async with db_pool.acquire() as conn:
@@ -290,18 +313,12 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
                     f"У вас: {bal:.2f} ₽"
                 )
 
-            # 1. Списываем у пользователя полную сумму (вывод + комиссия)
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub_to_deduct, user_id)
-            
-            # 2. Создаем заявку (в базе amount_rub хранит полную сумму, включая комиссию)
             await conn.execute(
                 "INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5)",
                 user_id, amount_usdt, total_rub_to_deduct, address, network
             )
-            
-            # 3. Начисляем вам +1 рубль с каждого USDT (чистая прибыль)
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", admin_profit_rub, ADMIN_ID)
-            
             w_id = (await conn.fetchrow("SELECT lastval()"))[0]
 
     builder = InlineKeyboardBuilder()
@@ -312,8 +329,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
         f"Сеть: **{network}**\n"
         f"К получению: **{amount_usdt:.2f} USDT**\n"
         f"Комиссия сети: **{network_fee_usdt:.2f} USDT**\n"
-        f"Адрес: `{address}`\n"
-        f"Списано с баланса: **{total_rub_to_deduct:.2f} ₽**", 
+        f"Списано: **{total_rub_to_deduct:.2f} ₽**", 
         reply_markup=builder.as_markup(), parse_mode="Markdown"
     )
 
@@ -351,8 +367,6 @@ async def cb_admin_stats(callback: CallbackQuery):
         total_withdrawn = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
         pending_withdrawals = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status IN ('pending', 'processing')")
         total_user_balances = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE user_id != $1", ADMIN_ID)
-        
-        # Чистая прибыль админа (1 руб с каждого USDT)
         total_profit = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled' AND status != 'rejected'", ADMIN_FEE_PER_USDT)
         admin_balance = await conn.fetchval("SELECT balance FROM users WHERE user_id = $1", ADMIN_ID)
 
@@ -362,8 +376,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"💰 Пополнено: **{total_deposited:.2f} ₽**\n"
         f"💸 Выведено: **{total_withdrawn:.2f} USDT**\n"
         f"⏳ Активных заявок: **{pending_withdrawals}**\n\n"
-        f"💼 Баланс юзеров: **{total_user_balances:.2f} ₽**\n"
-        f"💱 Текущий курс: **{current_rate:.2f} ₽** (Рапира +{MARKUP_RUB}₽)\n\n"
+        f"💼 Баланс юзеров: **{total_user_balances:.2f} ₽**\n\n"
         f"👑 **ВАШ ДОХОД:**\n"
         f"📈 Прибыль (+{ADMIN_FEE_PER_USDT}₽/USDT): **{total_profit:.2f} ₽**\n"
         f"💳 Ваш баланс: **{admin_balance:.2f} ₽**"
@@ -435,11 +448,23 @@ async def cb_admin_user_view(callback: CallbackQuery):
     builder.button(text="📥 История пополнений", callback_data=f"admin_user_orders_{target_id}_0")
     builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
     builder.row(
-        InlineKeyboardButton(text="🚫 Заблокировать доступ", callback_data=f"admin_block_{target_id}"),
-        InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_0")
+        InlineKeyboardButton(text="📝 Списать средства", callback_data=f"admin_deduct_info_{target_id}"),
+        InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin_block_{target_id}")
     )
+    builder.row(InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_0"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_deduct_info_"))
+async def cb_admin_deduct_info(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[3])
+    await callback.message.answer(
+        f"Чтобы списать средства с пользователя `{target_id}`, отправьте сообщение:\n"
+        f"`/deduct {target_id} 500` (где 500 — сумма в рублях).",
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_block_"))
@@ -570,18 +595,15 @@ async def process_user_cancel(callback: CallbackQuery):
     user_id = callback.from_user.id
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow("SELECT amount_rub, amount_usdt, status, network FROM withdrawals WHERE id = $1 AND user_id = $2", w_id, user_id)
+            row = await conn.fetchrow("SELECT amount_rub, amount_usdt, status FROM withdrawals WHERE id = $1 AND user_id = $2", w_id, user_id)
             if not row: return await callback.answer("Заявка не найдена.", show_alert=True)
             if row['status'] != 'pending': return await callback.answer("Заявка уже в обработке.", show_alert=True)
             
             await conn.execute("UPDATE withdrawals SET status = 'cancelled' WHERE id = $1", w_id)
-            # Возвращаем пользователю полную сумму
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", row['amount_rub'], user_id)
-            
-            # Забираем прибыль у админа (1р с каждого выводимого USDT)
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", row['amount_usdt'] * ADMIN_FEE_PER_USDT, ADMIN_ID)
 
-    await callback.message.edit_text(f"❌ **Заявка #{w_id} отменена.**\nДеньги (включая комиссию) возвращены.", parse_mode="Markdown")
+    await callback.message.edit_text(f"❌ **Заявка #{w_id} отменена.**\nДеньги возвращены.", parse_mode="Markdown")
     await callback.answer("Отменено.")
 
 @dp.callback_query(F.data.startswith("admin_take_"))
@@ -608,10 +630,7 @@ async def process_admin_reject(callback: CallbackQuery):
             if not row or row['status'] not in ['pending', 'processing']: return await callback.answer("Нельзя.", show_alert=True)
             
             await conn.execute("UPDATE withdrawals SET status = 'rejected' WHERE id = $1", w_id)
-            # Возвращаем пользователю
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", row['amount_rub'], row['user_id'])
-            
-            # Забираем прибыль у админа
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", row['amount_usdt'] * ADMIN_FEE_PER_USDT, ADMIN_ID)
 
     await callback.message.edit_text(f"🔴 Заявка #{w_id} отклонена. Деньги возвращены.")
