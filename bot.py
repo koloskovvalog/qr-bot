@@ -31,28 +31,44 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 
-# --- ДИНАМИЧЕСКИЙ КУРС ---
+# --- ДИНАМИЧЕСКИЙ КУРС (RAPIRA + 3 РУБЛЯ) ---
 _cached_rate = 0.0
 _last_rate_update = 0
 
 async def get_usdt_rate():
     global _cached_rate, _last_rate_update
+    
+    # Если курс обновлялся менее 10 минут назад, отдаем из кэша
     if time.time() - _last_rate_update < 600 and _cached_rate > 0:
         return _cached_rate
 
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub"
+        # Официальный публичный API Rapira для получения курсов
+        url = "https://api.rapira.net/open/market/rates"
         async with ClientSession() as session:
-            async with session.get(url, timeout=5) as resp:
+            async with session.get(url, timeout=10) as resp:
                 data = await resp.json()
-                base_rate = float(data['tether']['rub'])
-                _cached_rate = base_rate + 3.0
-                _last_rate_update = time.time()
-                logging.info(f"Курс обновлен: {base_rate} + 3 = {_cached_rate}")
-                return _cached_rate
+                
+                # Ищем в массиве данных пару USDT/RUB
+                rate_data = next((item for item in data.get('data', []) if item.get('symbol') == 'USDT/RUB'), None)
+                
+                if rate_data:
+                    # Берем цену закрытия (close). Если она 0, берем цену покупки (askPrice)
+                    base_rate = float(rate_data.get('close') or rate_data.get('askPrice') or 0)
+                    
+                    if base_rate > 0:
+                        # ВАША НАЦЕНКА: +3 рубля
+                        _cached_rate = base_rate + 3.0
+                        _last_rate_update = time.time()
+                        logging.info(f"Курс Rapira обновлен: {base_rate} + 3 = {_cached_rate}")
+                        return _cached_rate
+                
+                logging.warning("Не удалось найти пару USDT/RUB в ответе Rapira")
     except Exception as e:
-        logging.error(f"Ошибка получения курса: {e}")
-        return _cached_rate if _cached_rate > 0 else 95.0
+        logging.error(f"Ошибка получения курса с Rapira: {e}")
+    
+    # Если API недоступно, возвращаем последний известный курс или 95 по умолчанию
+    return _cached_rate if _cached_rate > 0 else 95.0
 
 # --- БАЗА ДАННЫХ ---
 db_pool: asyncpg.Pool = None
@@ -127,7 +143,7 @@ async def cmd_start(message: types.Message):
     current_rate = await get_usdt_rate()
     await message.answer(
         f"Привет! Я бот для пополнения и вывода средств.\n\n"
-        f"Текущий курс вывода: **1 USDT = {current_rate:.2f} ₽**\n\n"
+        f"Текущий курс вывода: **1 USDT = {current_rate:.2f} ₽** (Rapira + 3₽)\n\n"
         "💰 **/balance** — баланс\n"
         "📥 **/new [сумма]** — пополнить (в рублях)\n"
         f"💸 **/withdraw [сумма] [адрес]** — вывод (от {MIN_WITHDRAW_USDT} USDT)"
@@ -150,7 +166,6 @@ async def cmd_allow(message: types.Message, command: CommandObject):
     except Exception as e:
         await message.answer(f"❌ Ошибка базы: {e}")
 
-# --- НОВАЯ КОМАНДА: ЗАБЛОКИРОВАТЬ ---
 @dp.message(Command("deny"))
 async def cmd_deny(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -160,9 +175,8 @@ async def cmd_deny(message: types.Message, command: CommandObject):
     try:
         target_id = int(command.args.strip())
         async with db_pool.acquire() as conn:
-            # Удаляем только из белого списка, баланс сохраняется в таблице users
             await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
-        await message.answer(f"🚫 Пользователь `{target_id}` удален из белого списка. Бот больше не будет ему отвечать.")
+        await message.answer(f"🚫 Пользователь `{target_id}` удален из белого списка.")
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
@@ -242,7 +256,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
         f"✅ **Заявка #{w_id} создана!**\n\n"
         f"Сумма: {amount_usdt:.2f} USDT\n"
         f"Адрес: `{address}`\n"
-        f"Списано: {amount_rub:.2f} ₽ (по курсу {current_rate:.2f})", 
+        f"Списано: {amount_rub:.2f} ₽ (по курсу Rapira +3₽: {current_rate:.2f})", 
         reply_markup=builder.as_markup(), parse_mode="Markdown"
     )
 
@@ -266,7 +280,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     current_rate = await get_usdt_rate()
     async with db_pool.acquire() as conn:
-        users_count = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") # Показываем только активных
+        users_count = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
         total_deposited = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'")
         total_withdrawn = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
         pending_withdrawals = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status IN ('pending', 'processing')")
@@ -279,7 +293,7 @@ async def cb_admin_stats(callback: CallbackQuery):
         f"💸 Выведено: **{total_withdrawn:.2f} USDT**\n"
         f"⏳ Активных заявок: **{pending_withdrawals}**\n\n"
         f"💼 Баланс всех юзеров: **{total_user_balances:.2f} ₽** ({total_user_balances/current_rate:.2f} USDT)\n"
-        f"💱 Текущий курс: **{current_rate:.2f} ₽**"
+        f"💱 Текущий курс: **{current_rate:.2f} ₽** (Rapira +3₽)"
     )
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Назад в меню", callback_data="admin_main")
@@ -296,7 +310,6 @@ async def cb_admin_users(callback: CallbackQuery):
     offset = page * limit
 
     async with db_pool.acquire() as conn:
-        # Показываем только тех, кто в белом списке
         users = await conn.fetch("""
             SELECT u.user_id, u.balance, u.last_active 
             FROM users u
@@ -356,7 +369,6 @@ async def cb_admin_user_view(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
 
-# --- БЛОКИРОВКА ИЗ АДМИНКИ ---
 @dp.callback_query(F.data.startswith("admin_block_"))
 async def cb_admin_block(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
@@ -368,8 +380,110 @@ async def cb_admin_block(callback: CallbackQuery):
     await callback.message.edit_text(f"🚫 Пользователь `{target_id}` успешно заблокирован (удален из белого списка).\nБаланс и история сохранены в базе.", parse_mode="Markdown")
     await callback.answer("Пользователь заблокирован!")
 
-# ... (Остальные обработчики истории пополнений/выводов остаются без изменений, я их пропущу для краткости, они идентичны прошлому коду)
-# ВАЖНО: Вам нужно вставить сюда обработчики admin_user_orders_, admin_user_wths_, manage_wth_ и т.д. из предыдущего сообщения.
+@dp.callback_query(F.data.startswith("admin_user_orders_"))
+async def cb_admin_user_orders(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    parts = callback.data.split("_")
+    target_id, page = int(parts[3]), int(parts[4])
+    limit, offset = 5, page * 5
+
+    async with db_pool.acquire() as conn:
+        orders = await conn.fetch("SELECT id, amount, status, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
+        total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id)
+
+    text = f"📥 **Пополнения пользователя** `{target_id}`:\n\n"
+    if not orders: text += "Нет пополнений."
+
+    builder = InlineKeyboardBuilder()
+    for o in orders:
+        status_emoji = "🟢" if o['status'] == 'paid' else "🟡"
+        date_str = o['created_at'].strftime('%d.%m %H:%M')
+        amt = o['amount'] if o['amount'] is not None else 0.0
+        text += f"{status_emoji} #{o['id']} | {amt:.2f} ₽ | {date_str}\n"
+
+    nav_builder = InlineKeyboardBuilder()
+    if page > 0: nav_builder.button(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}")
+    if offset + limit < total_orders: nav_builder.button(text="➡️", callback_data=f"admin_user_orders_{target_id}_{page+1}")
+    builder.attach(nav_builder)
+    builder.row(InlineKeyboardButton(text="🔙 Назад к профилю", callback_data=f"admin_user_view_{target_id}"))
+
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_user_wths_"))
+async def cb_admin_user_wths(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    parts = callback.data.split("_")
+    target_id, page = int(parts[3]), int(parts[4])
+    limit, offset = 5, page * 5
+
+    async with db_pool.acquire() as conn:
+        wths = await conn.fetch("SELECT id, amount_usdt, status, address, created_at FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
+        total_wths = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id)
+
+    text = f"💸 **Выводы пользователя** `{target_id}`:\n\n"
+    if not wths: text += "Нет заявок на вывод."
+
+    builder = InlineKeyboardBuilder()
+    for w in wths:
+        st = w['status']
+        emoji = "✅" if st == 'completed' else "🟡" if st == 'pending' else "⏳" if st == 'processing' else "🔴" if st == 'rejected' else "❌"
+        date_str = w['created_at'].strftime('%d.%m %H:%M')
+        addr_short = f"{w['address'][:6]}...{w['address'][-4:]}" if w['address'] else "Нет адреса"
+        amt = w['amount_usdt'] if w['amount_usdt'] is not None else 0.0
+        text += f"{emoji} #{w['id']} | {amt:.2f} USDT\n└ {addr_short} | {date_str}\n"
+        
+        if st in ['pending', 'processing']:
+            builder.button(text=f"Управлять #{w['id']}", callback_data=f"manage_wth_{w['id']}")
+
+    nav_builder = InlineKeyboardBuilder()
+    if page > 0: nav_builder.button(text="⬅️", callback_data=f"admin_user_wths_{target_id}_{page-1}")
+    if offset + limit < total_wths: nav_builder.button(text="➡️", callback_data=f"admin_user_wths_{target_id}_{page+1}")
+    
+    builder.adjust(1)
+    builder.attach(nav_builder)
+    builder.row(InlineKeyboardButton(text="🔙 Назад к профилю", callback_data=f"admin_user_view_{target_id}"))
+
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("manage_wth_"))
+async def cb_manage_wth(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    w_id = int(callback.data.split("_")[2])
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT user_id, amount_usdt, address, status FROM withdrawals WHERE id = $1", w_id)
+        if not row: return await callback.answer("Заявка не найдена.", show_alert=True)
+        
+        if row['status'] == 'pending':
+            await conn.execute("UPDATE withdrawals SET status = 'processing' WHERE id = $1", w_id)
+            row = await conn.fetchrow("SELECT user_id, amount_usdt, address, status FROM withdrawals WHERE id = $1", w_id)
+        elif row['status'] == 'completed':
+            return await callback.answer("Заявка уже выполнена.", show_alert=True)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнено", callback_data=f"admin_done_{w_id}")
+    builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
+
+    await callback.message.edit_text(
+        f"⚙️ **Управление заявкой #{w_id}**\n\n"
+        f"👤 ID: `{row['user_id']}`\n"
+        f"💵 Сумма: {row['amount_usdt']:.2f} USDT\n"
+        f"🏦 Адрес: `{row['address']}`\n\n"
+        f"Статус: **В работе**",
+        reply_markup=builder.as_markup(), parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_main")
+async def cb_admin_main(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📈 Общая статистика", callback_data="admin_stats")
+    builder.button(text="👥 Список пользователей", callback_data="admin_users_0")
+    await callback.message.edit_text("👑 **Админ-панель**\nВыберите раздел:", reply_markup=builder.as_markup())
+    await callback.answer()
 
 # --- ОБРАБОТКА ЗАЯВОК ---
 @dp.callback_query(F.data.startswith("user_cancel_"))
