@@ -47,6 +47,9 @@ async def init_db():
             );
         ''')
         await conn.execute('''
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();
+        ''')
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL,
                 payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit',
@@ -73,12 +76,29 @@ async def is_user_allowed(user_id: int) -> bool:
 
 def format_last_seen(last_active: datetime):
     if not last_active: return "Неизвестно"
+    # Если время без часового пояса, добавляем UTC
+    if last_active.tzinfo is None:
+        last_active = last_active.replace(tzinfo=timezone.utc)
+        
     diff = datetime.now(timezone.utc) - last_active
     seconds = diff.total_seconds()
-    if seconds < 60: return "🟢 Только что (В сети)"
+    
+    if seconds < 0: return "🟢 Только что (В сети)" # Защита от рассинхрона
+    elif seconds < 60: return "🟢 Только что (В сети)"
     elif seconds < 3600: return f"🟡 {int(seconds // 60)} мин. назад"
     elif seconds < 86400: return f"🟠 {int(seconds // 3600)} ч. назад"
     else: return f"🔴 {int(seconds // 86400)} дн. назад"
+
+# --- MIDDLEWARE ---
+@dp.message.middleware()
+async def track_activity_middleware(handler, event: types.Message, data):
+    if event.from_user:
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO users (user_id, last_active) VALUES ($1, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET last_active = NOW()
+            ''', event.from_user.id)
+    return await handler(event, data)
 
 # --- КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ---
 
@@ -97,7 +117,7 @@ async def cmd_balance(message: types.Message):
     if not await is_user_allowed(message.from_user.id): return
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
-        bal = row['balance'] if row else 0.0
+        bal = row['balance'] if row and row['balance'] is not None else 0.0
     await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / USDT_RATE:.2f} USDT)", parse_mode="Markdown")
 
 @dp.message(Command("deposit"))
@@ -150,7 +170,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", user_id)
-            bal = row['balance'] if row else 0.0
+            bal = row['balance'] if row and row['balance'] is not None else 0.0
             if bal < amount_rub: return await message.answer(f"❌ Недостаточно средств!\nНужно: {amount_rub:.2f} ₽\nУ вас: {bal:.2f} ₽")
 
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount_rub, user_id)
@@ -169,7 +189,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     admin_builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
     await bot.send_message(ADMIN_ID, f"💸 **ЗАЯВКА #{w_id}**\n👤 ID: `{user_id}`\n💵 Сумма: {amount_usdt:.2f} USDT\n🏦 Адрес: `{address}`", reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
 
-# --- АДМИН ПАНЕЛЬ (ИНТЕРАКТИВНАЯ) ---
+# --- АДМИН ПАНЕЛЬ (ИСПРАВЛЕНА) ---
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
@@ -177,7 +197,6 @@ async def cmd_admin(message: types.Message):
     builder = InlineKeyboardBuilder()
     builder.button(text="📈 Общая статистика", callback_data="admin_stats")
     builder.button(text="👥 Список пользователей", callback_data="admin_users_0")
-    
     await message.answer("👑 **Админ-панель**\nВыберите раздел:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "admin_stats")
@@ -206,7 +225,11 @@ async def cb_admin_stats(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("admin_users_"))
 async def cb_admin_users(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
-    page = int(callback.data.split("_")[2])
+    try:
+        page = int(callback.data.split("_")[2])
+    except IndexError:
+        page = 0
+    
     limit = 5
     offset = page * limit
 
@@ -214,30 +237,41 @@ async def cb_admin_users(callback: CallbackQuery):
         users = await conn.fetch("SELECT user_id, balance, last_active FROM users ORDER BY last_active DESC LIMIT $1 OFFSET $2", limit, offset)
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
 
-    builder = InlineKeyboardBuilder()
+    # Собираем кнопки вручную (безопасный способ)
+    keyboard = []
     for u in users:
-        builder.button(text=f"👤 ID: {u['user_id']} | {u['balance']:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")
+        bal = u['balance'] if u['balance'] is not None else 0.0
+        keyboard.append([InlineKeyboardButton(text=f"👤 ID: {u['user_id']} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
     
-    builder.adjust(1) # Кнопки друг под другом
-
-    # Кнопки пагинации
-    nav_builder = InlineKeyboardBuilder()
+    # Кнопки навигации
+    nav_row = []
     if page > 0:
-        nav_builder.button(text="⬅️ Назад", callback_data=f"admin_users_{page-1}")
+        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_users_{page-1}"))
     if offset + limit < total_users:
-        nav_builder.button(text="Вперед ➡️", callback_data=f"admin_users_{page+1}")
+        nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_users_{page+1}"))
     
-    # Объединяем кнопки
-    builder.attach(nav_builder)
-    builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main"))
+    if nav_row:
+        keyboard.append(nav_row)
+    
+    keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    total_pages = max(1, (total_users + limit - 1) // limit)
 
-    await callback.message.edit_text(f"👥 **Список пользователей** (Страница {page+1}):", reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.message.edit_text(
+        f"👥 **Список пользователей** (Страница {page+1} из {total_pages}):", 
+        reply_markup=markup, 
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_user_view_"))
 async def cb_admin_user_view(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
-    target_id = int(callback.data.split("_")[3])
+    try:
+        target_id = int(callback.data.split("_")[3])
+    except IndexError:
+        return await callback.answer("Ошибка ID.", show_alert=True)
 
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow("SELECT balance, last_active FROM users WHERE user_id = $1", target_id)
@@ -247,10 +281,12 @@ async def cb_admin_user_view(callback: CallbackQuery):
         total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
         active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
 
+    bal = user['balance'] if user['balance'] is not None else 0.0
+
     text = (
         f"👤 **ДОСЬЕ:** `{target_id}`\n\n"
         f"🕒 Статус: {format_last_seen(user['last_active'])}\n"
-        f"💰 Баланс: **{user['balance']:.2f} ₽**\n\n"
+        f"💰 Баланс: **{bal:.2f} ₽**\n\n"
         f"📥 Всего пополнил: **{total_in:.2f} ₽**\n"
         f"📤 Всего вывел: **{total_out:.2f} USDT**\n"
         f"⏳ Активных заявок на вывод: **{active_w}**"
@@ -284,7 +320,8 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     for o in orders:
         status_emoji = "🟢" if o['status'] == 'paid' else "🟡"
         date_str = o['created_at'].strftime('%d.%m %H:%M')
-        text += f"{status_emoji} #{o['id']} | {o['amount']:.2f} ₽ | {date_str}\n"
+        amt = o['amount'] if o['amount'] is not None else 0.0
+        text += f"{status_emoji} #{o['id']} | {amt:.2f} ₽ | {date_str}\n"
 
     nav_builder = InlineKeyboardBuilder()
     if page > 0: nav_builder.button(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}")
@@ -321,11 +358,10 @@ async def cb_admin_user_wths(callback: CallbackQuery):
         else: emoji = "❌"
         
         date_str = w['created_at'].strftime('%d.%m %H:%M')
-        # Показываем только первые 10 символов адреса для красоты
-        addr_short = f"{w['address'][:6]}...{w['address'][-4:]}"
-        text += f"{emoji} #{w['id']} | {w['amount_usdt']:.2f} USDT\n└ {addr_short} | {date_str}\n"
+        addr_short = f"{w['address'][:6]}...{w['address'][-4:]}" if w['address'] else "Нет адреса"
+        amt = w['amount_usdt'] if w['amount_usdt'] is not None else 0.0
+        text += f"{emoji} #{w['id']} | {amt:.2f} USDT\n└ {addr_short} | {date_str}\n"
         
-        # Если заявка активна, даем кнопку для управления
         if st in ['pending', 'processing']:
             builder.button(text=f"Управлять #{w['id']}", callback_data=f"manage_wth_{w['id']}")
 
@@ -333,14 +369,13 @@ async def cb_admin_user_wths(callback: CallbackQuery):
     if page > 0: nav_builder.button(text="⬅️", callback_data=f"admin_user_wths_{target_id}_{page-1}")
     if offset + limit < total_wths: nav_builder.button(text="➡️", callback_data=f"admin_user_wths_{target_id}_{page+1}")
     
-    builder.adjust(1) # Кнопки управления отдельно
+    builder.adjust(1)
     builder.attach(nav_builder)
     builder.row(InlineKeyboardButton(text="🔙 Назад к профилю", callback_data=f"admin_user_view_{target_id}"))
 
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
 
-# Обработка кнопок управления заявкой прямо из профиля
 @dp.callback_query(F.data.startswith("manage_wth_"))
 async def cb_manage_wth(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
@@ -349,10 +384,10 @@ async def cb_manage_wth(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT user_id, amount_usdt, address, status FROM withdrawals WHERE id = $1", w_id)
         if not row: return await callback.answer("Заявка не найдена.", show_alert=True)
+        
         if row['status'] == 'pending':
             await conn.execute("UPDATE withdrawals SET status = 'processing' WHERE id = $1", w_id)
-            await callback.answer("Взято в работу")
-            row = await conn.fetchrow("SELECT user_id, amount_usdt, address, status FROM withdrawals WHERE id = $1", w_id) # обновляем
+            row = await conn.fetchrow("SELECT user_id, amount_usdt, address, status FROM withdrawals WHERE id = $1", w_id)
         elif row['status'] == 'completed':
             return await callback.answer("Заявка уже выполнена.", show_alert=True)
 
@@ -379,8 +414,7 @@ async def cb_admin_main(callback: CallbackQuery):
     await callback.message.edit_text("👑 **Админ-панель**\nВыберите раздел:", reply_markup=builder.as_markup())
     await callback.answer()
 
-
-# --- ОБРАБОТКА ЗАЯВОК (ГЛОБАЛЬНЫЕ КНОПКИ) ---
+# --- ОБРАБОТКА ЗАЯВОК ---
 @dp.callback_query(F.data.startswith("user_cancel_"))
 async def process_user_cancel(callback: CallbackQuery):
     w_id = int(callback.data.split("_")[2])
