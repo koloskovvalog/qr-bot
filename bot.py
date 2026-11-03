@@ -93,6 +93,13 @@ async def init_db():
         await conn.execute('''CREATE TABLE IF NOT EXISTS withdrawals (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount_usdt REAL, amount_rub REAL, address TEXT, status TEXT DEFAULT 'pending', network TEXT DEFAULT 'BEP20', created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS network TEXT DEFAULT 'BEP20';''')
         
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS game_bets (
+                id BIGSERIAL PRIMARY KEY, user_id BIGINT, bet_usdt REAL, bet_rub REAL,
+                win_usdt REAL DEFAULT 0, multiplier REAL DEFAULT 0, status TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        ''')
+        
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", ADMIN_ID)
     logging.info("БД Supabase готова!")
@@ -140,11 +147,12 @@ async def cmd_crash(message: types.Message, command: CommandObject):
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", user_id)
         if not row or row['balance'] < bet_rub: return await message.answer(f"❌ Недостаточно средств! Нужно: {bet_rub:.2f} ₽")
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", bet_rub, user_id)
+        bet_id = await conn.fetchval("INSERT INTO game_bets (user_id, bet_usdt, bet_rub, status) VALUES ($1, $2, $3, 'active') RETURNING id", user_id, bet_usdt, bet_rub)
 
     r = random.uniform(0.01, 1.0)
     crash_point = max(1.1, 0.90 / r)
 
-    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': current_rate, 'crash_point': crash_point}
+    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': current_rate, 'crash_point': crash_point, 'bet_id': bet_id}
     
     builder = InlineKeyboardBuilder()
     builder.button(text="💰 ЗАБРАТЬ (1.0x)", callback_data=f"crash_cashout_{user_id}")
@@ -163,6 +171,8 @@ async def run_crash_game(chat_id: int, message_id: int, user_id: int):
             
             if current_mult >= game['crash_point']:
                 active_games.pop(user_id)
+                async with db_pool.acquire() as conn:
+                    await conn.execute("UPDATE game_bets SET status = 'lost', multiplier = $1 WHERE id = $2", current_mult, game['bet_id'])
                 await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"💥 **КРАШ!** Множитель лопнул на **{current_mult:.1f}x**.\nВы проиграли {game['bet_usdt']} USDT.", parse_mode="Markdown")
                 break
             
@@ -182,10 +192,14 @@ async def cb_crash_cashout(callback: CallbackQuery):
     if user_id in active_games:
         game = active_games.pop(user_id)
         multiplier = game['multiplier']
-        win_rub = game['bet_usdt'] * multiplier * game['rate']
+        win_usdt = game['bet_usdt'] * multiplier
+        win_rub = win_usdt * game['rate']
+        
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", win_rub, user_id)
-        await callback.message.edit_text(f"✅ **Вы забрали выигрыш!**\nМножитель: {multiplier:.1f}x\nВыигрыш: +{win_rub:.2f} ₽", parse_mode="Markdown")
+            await conn.execute("UPDATE game_bets SET status = 'won', win_usdt = $1, multiplier = $2 WHERE id = $3", win_usdt, multiplier, game['bet_id'])
+            
+        await callback.message.edit_text(f"✅ **Вы забрали выигрыш!**\nМножитель: {multiplier:.1f}x\nВыигрыш: +{win_rub:.2f} ₽ ({win_usdt:.2f} USDT)", parse_mode="Markdown")
         await callback.answer("Выигрыш зачислен!")
     else: await callback.answer("Игра уже завершена.", show_alert=True)
 
@@ -348,7 +362,19 @@ async def cb_admin_stats(callback: CallbackQuery):
         d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'")
         w = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
         p = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled'", ADMIN_FEE_PER_USDT)
-    text = f"👥 Юзеров: **{u}**\n💰 Пополнено: **{d:.2f} ₽**\n💸 Выведено: **{w:.2f} USDT**\n📈 Прибыль с выводов: **{p:.2f} ₽**"
+        
+        # ОБОРОТ ЗА СЕГОДНЯ (Пополнения + Игры)
+        today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND created_at >= CURRENT_DATE")
+        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE created_at >= CURRENT_DATE")
+        
+    text = (f"👥 Юзеров: **{u}**\n"
+            f"💰 Всего пополнено: **{d:.2f} ₽**\n"
+            f"💸 Всего выведено: **{w:.2f} USDT**\n"
+            f"📈 Прибыль с выводов: **{p:.2f} ₽**\n\n"
+            f"📅 **ЗА СЕГОДНЯ:**\n"
+            f"📥 Пополнений: **{today_deposits:.2f} ₽**\n"
+            f"🎰 Оборот игры: **{today_bets:.2f} USDT**")
+            
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="admin_main")]]))
 
 @dp.callback_query(F.data == "admin_main")
@@ -360,21 +386,31 @@ async def cb_admin_main(callback: CallbackQuery):
     builder.button(text="🛡️ Верифицированные (GO6)", callback_data="admin_verified_0")
     await callback.message.edit_text("👑 **Админ-панель:**", reply_markup=builder.as_markup())
 
+# ИЗМЕНЕННЫЙ СПИСОК ПОЛЬЗОВАТЕЛЕЙ (С ОБОРОТОМ ЗА СЕГОДНЯ)
 @dp.callback_query(F.data.startswith("admin_users_"))
 async def cb_admin_users(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     try: page = int(callback.data.split("_")[2])
     except: page = 0
     limit, offset = 5, page * 5
+    
     async with db_pool.acquire() as conn:
-        users = await conn.fetch("SELECT u.user_id, u.username, u.balance, u.last_active FROM users u JOIN allowed_users a ON u.user_id = a.user_id ORDER BY u.last_active DESC LIMIT $1 OFFSET $2", limit, offset)
+        users = await conn.fetch("""
+            SELECT u.user_id, u.username, u.balance, u.last_active,
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
+            FROM users u 
+            JOIN allowed_users a ON u.user_id = a.user_id 
+            ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
+        """, limit, offset)
         total_users = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
     
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
+        dep_today = u['dep_today'] if u['dep_today'] is not None else 0.0
         display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
-        keyboard.append([InlineKeyboardButton(text=f"👤 {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+        # Выводим: Имя | Баланс | Пополнил сегодня
+        keyboard.append([InlineKeyboardButton(text=f"👤 {display_name} | {bal:.0f} ₽ | 📥 {dep_today:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
     
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_users_{page-1}"))
@@ -382,7 +418,7 @@ async def cb_admin_users(callback: CallbackQuery):
     if nav_row: keyboard.append(nav_row)
     keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
     
-    await callback.message.edit_text(f"👥 **Пользователи** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await callback.message.edit_text(f"👥 **Пользователи** (Стр. {page+1}):\n📥 *цифра в конце — пополнения за сегодня*", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("admin_verified_"))
 async def cb_admin_verified(callback: CallbackQuery):
@@ -390,15 +426,23 @@ async def cb_admin_verified(callback: CallbackQuery):
     try: page = int(callback.data.split("_")[2])
     except: page = 0
     limit, offset = 5, page * 5
+    
     async with db_pool.acquire() as conn:
-        users = await conn.fetch("SELECT user_id, username, balance, last_active FROM users WHERE verified_go6 = TRUE ORDER BY last_active DESC LIMIT $1 OFFSET $2", limit, offset)
+        users = await conn.fetch("""
+            SELECT u.user_id, u.username, u.balance, u.last_active,
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
+            FROM users u 
+            WHERE u.verified_go6 = TRUE
+            ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
+        """, limit, offset)
         total_verified = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
         
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
+        dep_today = u['dep_today'] if u['dep_today'] is not None else 0.0
         display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
-        keyboard.append([InlineKeyboardButton(text=f"🛡️ {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+        keyboard.append([InlineKeyboardButton(text=f"🛡️ {display_name} | {bal:.0f} ₽ | 📥 {dep_today:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
         
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_verified_{page-1}"))
@@ -406,7 +450,7 @@ async def cb_admin_verified(callback: CallbackQuery):
     if nav_row: keyboard.append(nav_row)
     keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
     
-    await callback.message.edit_text(f"🛡️ **GO6 Верификация** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await callback.message.edit_text(f"🛡️ **GO6 Верификация** (Стр. {page+1}):\n📥 *цифра в конце — пополнения за сегодня*", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("admin_user_view_"))
 async def cb_admin_user_view(callback: CallbackQuery):
@@ -418,11 +462,29 @@ async def cb_admin_user_view(callback: CallbackQuery):
         total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
         active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
         
+        # СТАТИСТИКА ЗА СЕГОДНЯ
+        today_dep = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND created_at >= CURRENT_DATE", target_id)
+        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE user_id = $1 AND created_at >= CURRENT_DATE", target_id)
+        today_wths = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed' AND created_at >= CURRENT_DATE", target_id)
+        
     bal = user['balance'] if user['balance'] is not None else 0.0
     display_name = f"@{user['username']}" if user['username'] else "Скрыт"
     v_status = "✅ Да" if user['verified_go6'] else "❌ Нет"
-    text = f"👤 **ДОСЬЕ:** `{target_id}`\n\n🔗 Юзернейм: **{display_name}**\n🛡️ Верификация: **{v_status}**\n🕒 Статус: {format_last_seen(user['last_active'])}\n💰 Баланс: **{bal:.2f} ₽**\n\n📥 Пополнил: **{total_in:.2f} ₽**\n📤 Вывел: **{total_out:.2f} USDT**\n⏳ Заявок: **{active_w}**"
     
+    text = (f"👤 **ДОСЬЕ:** `{target_id}`\n\n"
+            f"🔗 Юзернейм: **{display_name}**\n"
+            f"🛡️ Верификация: **{v_status}**\n"
+            f"🕒 Статус: {format_last_seen(user['last_active'])}\n"
+            f"💰 Баланс: **{bal:.2f} ₽**\n\n"
+            f"📅 **ЗА СЕГОДНЯ:**\n"
+            f"📥 Пополнил: **{today_dep:.2f} ₽**\n"
+            f"🎰 Игра (оборот): **{today_bets:.2f} USDT**\n"
+            f"📤 Вывел: **{today_wths:.2f} USDT**\n\n"
+            f"📊 **ЗА ВСЁ ВРЕМЯ:**\n"
+            f"📥 Пополнил: **{total_in:.2f} ₽**\n"
+            f"📤 Вывел: **{total_out:.2f} USDT**\n"
+            f"⏳ Активных заявок: **{active_w}**")
+            
     builder = InlineKeyboardBuilder()
     builder.button(text="📥 История пополнений", callback_data=f"admin_user_orders_{target_id}_0")
     builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
@@ -458,7 +520,6 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     text = f"📥 **Пополнения** `{target_id}`:\n\n"
     if not orders: text += "Нет пополнений."
     
-    # Формируем клавиатуру вручную для надежности
     keyboard = []
     for o in orders:
         emoji = "🟢" if o['status'] == 'paid' else "🟡"
