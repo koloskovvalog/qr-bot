@@ -146,7 +146,6 @@ async def track_activity_middleware(handler, event: types.Message, data):
 
 @dp.message(F.photo)
 async def handle_verification_photo(message: types.Message):
-    # Если пользователь уже одобрен, игнорируем фото
     if await is_user_allowed(message.from_user.id):
         return
 
@@ -164,7 +163,6 @@ async def handle_verification_photo(message: types.Message):
     )
 
     try:
-        # Отправляем фото админу
         await bot.send_photo(
             chat_id=ADMIN_ID,
             photo=message.photo[-1].file_id,
@@ -177,7 +175,6 @@ async def handle_verification_photo(message: types.Message):
         logging.error(f"Ошибка отправки фото админу: {e}")
         await message.answer("❌ Ошибка отправки. Попробуйте позже.")
 
-# Обработка кнопок одобрения/отклонения от админа
 @dp.callback_query(F.data.startswith("approve_access_"))
 async def process_approve_access(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
@@ -187,13 +184,11 @@ async def process_approve_access(callback: CallbackQuery):
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
         await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", target_id)
 
-    # Редактируем сообщение у админа
     await callback.message.edit_caption(
         caption=callback.message.caption + "\n\n✅ **ДОСТУП РАЗРЕШЕН**",
         reply_markup=None
     )
     
-    # Уведомляем пользователя
     try:
         await bot.send_message(target_id, "✅ **Ваша заявка одобрена!**\nТеперь вы можете пользоваться ботом. Напишите /start")
     except Exception as e:
@@ -220,7 +215,6 @@ async def process_reject_access(callback: CallbackQuery):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    # Если пользователь не в белом списке, показываем инструкцию
     if not await is_user_allowed(message.from_user.id):
         await message.answer(
             f"👋 Привет! Для получения доступа к боту выполните следующие шаги:\n\n"
@@ -268,6 +262,41 @@ async def cmd_deny(message: types.Message, command: CommandObject):
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
+# --- РУЧНОЕ НАЧИСЛЕНИЕ (НОВОЕ) ---
+@dp.message(Command("add"))
+async def cmd_add(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args or len(command.args.split()) < 2:
+        return await message.answer("Используйте: `/add [ID] [Сумма]`\nПример: `/add 123456789 500`")
+    
+    try:
+        args = command.args.split()
+        target_id = int(args[0])
+        amount = float(args[1].replace(',', '.'))
+        if amount <= 0: raise ValueError
+    except ValueError:
+        return await message.answer("❌ Ошибка формата. Проверьте ID и сумму.")
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", target_id)
+            if not row:
+                return await message.answer(f"❌ Пользователь `{target_id}` не найден в базе.")
+            
+            # Начисляем баланс
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", amount, target_id)
+            current_bal = row['balance'] if row['balance'] is not None else 0.0
+            new_bal = current_bal + amount
+    
+    await message.answer(f"✅ Успешно начислено **{amount:.2f} ₽** пользователю `{target_id}`.\nНовый баланс: **{new_bal:.2f} ₽**", parse_mode="Markdown")
+    
+    # Уведомляем пользователя
+    try:
+        await bot.send_message(target_id, f"🎁 **Администратор начислил вам {amount:.2f} ₽.**\nТекущий баланс: {new_bal:.2f} ₽", parse_mode="Markdown")
+    except Exception:
+        pass
+
+# --- РУЧНОЕ СПИСАНИЕ ---
 @dp.message(Command("deduct"))
 async def cmd_deduct(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -471,16 +500,23 @@ async def cb_admin_user_view(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="📥 История пополнений", callback_data=f"admin_user_orders_{target_id}_0")
     builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
-    builder.row(InlineKeyboardButton(text="📝 Списать средства", callback_data=f"admin_deduct_info_{target_id}"), InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin_block_{target_id}"))
-    builder.row(InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_0"))
+    builder.row(InlineKeyboardButton(text="➕ Начислить", callback_data=f"admin_add_info_{target_id}"), InlineKeyboardButton(text="📝 Списать", callback_data=f"admin_deduct_info_{target_id}"))
+    builder.row(InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin_block_{target_id}"), InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_0"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_add_info_"))
+async def cb_admin_add_info(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[3])
+    await callback.message.answer(f"Чтобы начислить средства, отправьте:\n`/add {target_id} 500` (где 500 — сумма).", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_deduct_info_"))
 async def cb_admin_deduct_info(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     target_id = int(callback.data.split("_")[3])
-    await callback.message.answer(f"Чтобы списать средства, отправьте:\n`/deduct {target_id} 500`", parse_mode="Markdown")
+    await callback.message.answer(f"Чтобы списать средства, отправьте:\n`/deduct {target_id} 500` (где 500 — сумма).", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_block_"))
