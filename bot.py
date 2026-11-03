@@ -369,16 +369,19 @@ async def cb_admin_users(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("SELECT u.user_id, u.username, u.balance, u.last_active FROM users u JOIN allowed_users a ON u.user_id = a.user_id ORDER BY u.last_active DESC LIMIT $1 OFFSET $2", limit, offset)
         total_users = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
+    
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
         display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
         keyboard.append([InlineKeyboardButton(text=f"👤 {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+    
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_users_{page-1}"))
     if offset + limit < total_users: nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_users_{page+1}"))
     if nav_row: keyboard.append(nav_row)
     keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
+    
     await callback.message.edit_text(f"👥 **Пользователи** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 @dp.callback_query(F.data.startswith("admin_verified_"))
@@ -390,16 +393,19 @@ async def cb_admin_verified(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("SELECT user_id, username, balance, last_active FROM users WHERE verified_go6 = TRUE ORDER BY last_active DESC LIMIT $1 OFFSET $2", limit, offset)
         total_verified = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
+        
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
         display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
         keyboard.append([InlineKeyboardButton(text=f"🛡️ {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+        
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_verified_{page-1}"))
     if offset + limit < total_verified: nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_verified_{page+1}"))
     if nav_row: keyboard.append(nav_row)
     keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
+    
     await callback.message.edit_text(f"🛡️ **GO6 Верификация** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 @dp.callback_query(F.data.startswith("admin_user_view_"))
@@ -411,10 +417,12 @@ async def cb_admin_user_view(callback: CallbackQuery):
         total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid'", target_id)
         total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
         active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
+        
     bal = user['balance'] if user['balance'] is not None else 0.0
     display_name = f"@{user['username']}" if user['username'] else "Скрыт"
     v_status = "✅ Да" if user['verified_go6'] else "❌ Нет"
     text = f"👤 **ДОСЬЕ:** `{target_id}`\n\n🔗 Юзернейм: **{display_name}**\n🛡️ Верификация: **{v_status}**\n🕒 Статус: {format_last_seen(user['last_active'])}\n💰 Баланс: **{bal:.2f} ₽**\n\n📥 Пополнил: **{total_in:.2f} ₽**\n📤 Вывел: **{total_out:.2f} USDT**\n⏳ Заявок: **{active_w}**"
+    
     builder = InlineKeyboardBuilder()
     builder.button(text="📥 История пополнений", callback_data=f"admin_user_orders_{target_id}_0")
     builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
@@ -446,19 +454,24 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         orders = await conn.fetch("SELECT id, amount, status, comment, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
         total = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id)
+        
     text = f"📥 **Пополнения** `{target_id}`:\n\n"
     if not orders: text += "Нет пополнений."
-    builder = InlineKeyboardBuilder()
+    
+    # Формируем клавиатуру вручную для надежности
+    keyboard = []
     for o in orders:
         emoji = "🟢" if o['status'] == 'paid' else "🟡"
         cmt = f"({o['comment']})" if o['comment'] else ""
         text += f"{emoji} #{o['id']} | {o['amount']:.2f} ₽ {cmt}\n"
-    nav = InlineKeyboardBuilder()
-    if page > 0: nav.button(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}")
-    if offset + limit < total: nav.button(text="➡️", callback_data=f"admin_user_orders_{target_id}_{page+1}")
-    builder.attach(nav)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}"))
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}"))
+    if offset + limit < total: nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"admin_user_orders_{target_id}_{page+1}"))
+    if nav_row: keyboard.append(nav_row)
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}")])
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 @dp.callback_query(F.data.startswith("admin_user_wths_"))
 async def cb_admin_user_wths(callback: CallbackQuery):
@@ -469,20 +482,24 @@ async def cb_admin_user_wths(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         wths = await conn.fetch("SELECT id, amount_usdt, status, network, created_at FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
         total = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id)
+        
     text = f"💸 **Выводы** `{target_id}`:\n\n"
     if not wths: text += "Нет заявок."
-    builder = InlineKeyboardBuilder()
+    
+    keyboard = []
     for w in wths:
         emoji = "✅" if w['status'] == 'completed' else "🟡" if w['status'] == 'pending' else "⏳" if w['status'] == 'processing' else "🔴"
         text += f"{emoji} #{w['id']} | {w['amount_usdt']:.2f} USDT ({w['network']})\n"
-        if w['status'] in ['pending', 'processing']: builder.button(text=f"Управлять #{w['id']}", callback_data=f"manage_wth_{w['id']}")
-    nav = InlineKeyboardBuilder()
-    if page > 0: nav.button(text="⬅️", callback_data=f"admin_user_wths_{target_id}_{page-1}")
-    if offset + limit < total: nav.button(text="➡️", callback_data=f"admin_user_wths_{target_id}_{page+1}")
-    builder.adjust(1)
-    builder.attach(nav)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}"))
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        if w['status'] in ['pending', 'processing']: 
+            keyboard.append([InlineKeyboardButton(text=f"Управлять #{w['id']}", callback_data=f"manage_wth_{w['id']}")])
+            
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_user_wths_{target_id}_{page-1}"))
+    if offset + limit < total: nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"admin_user_wths_{target_id}_{page+1}"))
+    if nav_row: keyboard.append(nav_row)
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}")])
+    
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 @dp.callback_query(F.data.startswith("manage_wth_"))
 async def cb_manage_wth(callback: CallbackQuery):
@@ -493,12 +510,12 @@ async def cb_manage_wth(callback: CallbackQuery):
         if row['status'] == 'pending':
             await conn.execute("UPDATE withdrawals SET status = 'processing' WHERE id = $1", w_id)
             row = await conn.fetchrow("SELECT user_id, amount_usdt, address, network, status FROM withdrawals WHERE id = $1", w_id)
+            
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Выполнено", callback_data=f"admin_done_{w_id}")
     builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
     await callback.message.edit_text(f"⚙️ **Заявка #{w_id}**\nID: `{row['user_id']}`\nСеть: {row['network']}\nUSDT: {row['amount_usdt']}\nАдрес: `{row['address']}`", reply_markup=builder.as_markup())
 
-# ==================== ОБРАБОТКА ЗАЯВОК ====================
 @dp.callback_query(F.data.startswith("admin_take_"))
 async def process_admin_take(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
@@ -539,6 +556,7 @@ async def handle_rollypay_webhook(request: web.Request):
         msg = f"{ts}.{raw_body.decode('utf-8')}"
         expected = hmac.new(SIGNING_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected): return web.Response(text="Invalid", status=403)
+        
         data = json.loads(raw_body)
         if data.get("status") == "paid":
             async with db_pool.acquire() as conn:
@@ -558,7 +576,9 @@ async def handle_xrocket_webhook(request: web.Request):
         sig_ts = request.headers.get("Signature-Timestamp")
         signed_string = f"{sig_ts}.{raw_body.decode('utf-8')}"
         expected_sig = hmac.new(XROCKET_WEBHOOK_SECRET.encode(), signed_string.encode(), hashlib.sha256).hexdigest()
+        
         if not hmac.compare_digest(sig, expected_sig): return web.Response(text="Invalid", status=401)
+        
         data = json.loads(raw_body)
         if data.get("type") == "invoice" and data.get("data", {}).get("status") == "paid":
             payload = data.get("data", {}).get("payload")
