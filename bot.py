@@ -82,7 +82,6 @@ async def init_db():
                 last_active TIMESTAMPTZ DEFAULT NOW()
             );
         ''')
-        # Добавляем колонки для username и верификации
         await conn.execute('''
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();
         ''')
@@ -159,6 +158,14 @@ async def handle_verification_photo(message: types.Message):
         return
 
     user = message.from_user
+    
+    # Сохраняем юзернейм сразу при отправке скрина, даже если его еще не одобрили
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2)
+            ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2
+        ''', user.id, user.username)
+
     admin_builder = InlineKeyboardBuilder()
     admin_builder.button(text="✅ Одобрить", callback_data=f"approve_access_{user.id}")
     admin_builder.button(text="❌ Отклонить", callback_data=f"reject_access_{user.id}")
@@ -191,7 +198,6 @@ async def process_approve_access(callback: CallbackQuery):
 
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
-        # Отмечаем, что человек прошел верификацию через GO6
         await conn.execute('''
             INSERT INTO users (user_id, last_active, verified_go6) VALUES ($1, NOW(), TRUE)
             ON CONFLICT (user_id) DO UPDATE SET verified_go6 = TRUE
@@ -494,8 +500,9 @@ async def cb_admin_users(callback: CallbackQuery):
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
-        username = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
-        keyboard.append([InlineKeyboardButton(text=f"👤 {username} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+        # Если юзернейм есть, показываем его, иначе ID
+        display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
+        keyboard.append([InlineKeyboardButton(text=f"👤 {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
     
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_users_{page-1}"))
@@ -526,8 +533,8 @@ async def cb_admin_verified(callback: CallbackQuery):
     keyboard = []
     for u in users:
         bal = u['balance'] if u['balance'] is not None else 0.0
-        username = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
-        keyboard.append([InlineKeyboardButton(text=f"🛡️ {username} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+        display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
+        keyboard.append([InlineKeyboardButton(text=f"🛡️ {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
     
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_verified_{page-1}"))
@@ -552,11 +559,11 @@ async def cb_admin_user_view(callback: CallbackQuery):
         active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
 
     bal = user['balance'] if user['balance'] is not None else 0.0
-    username = f"@{user['username']}" if user['username'] else "Нет"
+    display_name = f"@{user['username']}" if user['username'] else "Скрыт"
     verified_status = "✅ Да (через GO6)" if user['verified_go6'] else "❌ Нет"
     
     text = (f"👤 **ДОСЬЕ:** `{target_id}`\n\n"
-            f"🔗 Username: **{username}**\n"
+            f"🔗 Username: **{display_name}**\n"
             f"🛡️ Верификация: **{verified_status}**\n"
             f"🕒 Статус: {format_last_seen(user['last_active'])}\n"
             f"💰 Баланс: **{bal:.2f} ₽**\n\n"
