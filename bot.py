@@ -83,12 +83,17 @@ async def init_db():
         await conn.execute('''
             ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();
         ''')
+        # Добавили колонку comment в таблицу orders
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL,
                 payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit',
+                comment TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
+        ''')
+        await conn.execute('''
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT;
         ''')
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS allowed_users (user_id BIGINT PRIMARY KEY);
@@ -145,11 +150,8 @@ async def cmd_start(message: types.Message):
         f"Привет! Я бот для пополнения и вывода средств.\n\n"
         f"Текущий курс вывода: **1 USDT = {current_rate:.2f} ₽**\n\n"
         "💰 **/balance** — баланс\n"
-        "📥 **/new [сумма]** — пополнить (в рублях)\n"
-        f"💸 **/withdraw [сумма] [сеть] [адрес]** — вывод\n\n"
-        f"🌐 **Доступные сети:**\n"
-        f"├ `TRC20` — комиссия 3 USDT (от {MIN_TRC20_USDT} USDT)\n"
-        f"└ `BEP20` — комиссия 1%+2 USDT (от {MIN_BEP20_USDT} USDT)"
+        "📥 **/new [сумма] [название]** — пополнить (название необязательно)\n"
+        f"💸 **/withdraw [сумма] [сеть] [адрес]** — вывод"
     )
 
 @dp.message(Command("allow"))
@@ -181,11 +183,9 @@ async def cmd_deny(message: types.Message, command: CommandObject):
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
-# --- РУЧНОЕ СПИСАНИЕ СРЕДСТВ (НОВОЕ) ---
 @dp.message(Command("deduct"))
 async def cmd_deduct(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
-    
     if not command.args or len(command.args.split()) < 2:
         return await message.answer("Используйте: `/deduct [ID] [Сумма]`\nПример: `/deduct 123456789 500`")
     
@@ -201,22 +201,17 @@ async def cmd_deduct(message: types.Message, command: CommandObject):
         async with conn.transaction():
             row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", target_id)
             if not row:
-                return await message.answer(f"❌ Пользователь `{target_id}` не найден в базе.")
+                return await message.answer(f"❌ Пользователь `{target_id}` не найден.")
             
             current_bal = row['balance'] if row['balance'] is not None else 0.0
             if current_bal < amount:
-                return await message.answer(f"❌ Недостаточно средств у пользователя!\nЕго баланс: {current_bal:.2f} ₽\nВы хотите списать: {amount:.2f} ₽")
+                return await message.answer(f"❌ Недостаточно средств!\nЕго баланс: {current_bal:.2f} ₽\nВы хотите списать: {amount:.2f} ₽")
             
-            # Списываем
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount, target_id)
     
-    await message.answer(f"✅ Успешно списано **{amount:.2f} ₽** с пользователя `{target_id}`.", parse_mode="Markdown")
-    
-    # Уведомляем пользователя
-    try:
-        await bot.send_message(target_id, f"⚠️ **Администратор списал с вашего баланса {amount:.2f} ₽.**\nТекущий баланс: {current_bal - amount:.2f} ₽", parse_mode="Markdown")
-    except Exception:
-        pass
+    await message.answer(f"✅ Успешно списано **{amount:.2f} ₽** с `{target_id}`.", parse_mode="Markdown")
+    try: await bot.send_message(target_id, f"⚠️ **Администратор списал с вашего баланса {amount:.2f} ₽.**", parse_mode="Markdown")
+    except: pass
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
@@ -225,40 +220,52 @@ async def cmd_balance(message: types.Message):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
         bal = row['balance'] if row and row['balance'] is not None else 0.0
-    
-    text = f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT по курсу {current_rate:.2f})"
-    if message.from_user.id == ADMIN_ID:
-        text += "\n\n👑 *Это ваш административный счет.*"
-        
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT)", parse_mode="Markdown")
 
+# --- ПОПОЛНЕНИЕ С КОММЕНТАРИЕМ ---
 @dp.message(Command("deposit"))
 @dp.message(Command("new"))
 async def cmd_deposit_new(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
-    if not command.args: return await message.answer("Укажите сумму: `/deposit 500`")
+    if not command.args: return await message.answer("Укажите сумму: `/new 500 [Название]`")
+    
+    parts = command.args.split(maxsplit=1)
     try:
-        amount = float(command.args.replace(',', '.'))
+        amount = float(parts[0].replace(',', '.'))
         if amount <= 0: raise ValueError
-    except ValueError: return await message.answer("Ошибка! Неверная сумма.")
+    except ValueError: 
+        return await message.answer("Ошибка! Неверная сумма.")
+    
+    comment = parts[1].strip() if len(parts) > 1 else None
 
     user_id = message.from_user.id
     order_id_str = f"deposit_{user_id}_{int(datetime.now().timestamp())}"
+    
+    # Формируем описание для RollyPay
+    desc_text = f"Пополнение на {amount:.2f} ₽"
+    if comment:
+        desc_text += f" | {comment}"
+
     try:
         payment = rolly_client.payments.create(
             amount=str(amount), order_id=order_id_str, terminal_id=TERMINAL_ID,
-            description=f"Пополнение на {amount:.2f} ₽", customer_id=str(user_id),
+            description=desc_text, customer_id=str(user_id),
             redirect_url=f"https://t.me/{(await bot.get_me()).username}"
         )
         async with db_pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO orders (user_id, amount, payment_id, status, order_type) VALUES ($1, $2, $3, $4, $5)",
-                user_id, amount, payment['payment_id'], "pending", "deposit"
+                "INSERT INTO orders (user_id, amount, payment_id, status, order_type, comment) VALUES ($1, $2, $3, $4, $5, $6)",
+                user_id, amount, payment['payment_id'], "pending", "deposit", comment
             )
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
-        await message.answer(f"**Счет: {amount:.2f} ₽**\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
+        
+        msg_text = f"**Счет: {amount:.2f} ₽**"
+        if comment: msg_text = f"**Счет: {comment}**\nСумма: {amount:.2f} ₽"
+            
+        await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
     except Exception as e:
+        logging.error(f"Ошибка: {e}")
         await message.answer("Ошибка создания платежа.")
 
 # --- ВЫВОД СРЕДСТВ ---
@@ -279,9 +286,9 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
             return await message.answer("❌ Неверная сеть. Доступно только `BEP20` или `TRC20`.")
         
         if network == 'TRC20' and amount_usdt < MIN_TRC20_USDT:
-            return await message.answer(f"❌ Минимальная сумма для сети **TRC20** — {MIN_TRC20_USDT} USDT.", parse_mode="Markdown")
+            return await message.answer(f"❌ Минимальная сумма для **TRC20** — {MIN_TRC20_USDT} USDT.", parse_mode="Markdown")
         if network == 'BEP20' and amount_usdt < MIN_BEP20_USDT:
-            return await message.answer(f"❌ Минимальная сумма для сети **BEP20** — {MIN_BEP20_USDT} USDT.", parse_mode="Markdown")
+            return await message.answer(f"❌ Минимальная сумма для **BEP20** — {MIN_BEP20_USDT} USDT.", parse_mode="Markdown")
         
         if network == 'BEP20' and (not address.startswith("0x") or len(address) < 40):
             return await message.answer("❌ Неверный адрес для сети BEP20.")
@@ -306,11 +313,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
             
             if bal < total_rub_to_deduct: 
                 return await message.answer(
-                    f"❌ Недостаточно средств!\n"
-                    f"К выводу: {amount_usdt} USDT\n"
-                    f"Комиссия сети: {network_fee_usdt:.2f} USDT\n"
-                    f"Итого спишется: {total_usdt_to_deduct:.2f} USDT ({total_rub_to_deduct:.2f} ₽)\n"
-                    f"У вас: {bal:.2f} ₽"
+                    f"❌ Недостаточно средств!\nК выводу: {amount_usdt} USDT\nКомиссия сети: {network_fee_usdt:.2f} USDT\nИтого спишется: {total_rub_to_deduct:.2f} ₽\nУ вас: {bal:.2f} ₽"
                 )
 
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub_to_deduct, user_id)
@@ -325,11 +328,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     builder.button(text="❌ Отменить заявку", callback_data=f"user_cancel_{w_id}")
     
     await message.answer(
-        f"✅ **Заявка #{w_id} создана!**\n\n"
-        f"Сеть: **{network}**\n"
-        f"К получению: **{amount_usdt:.2f} USDT**\n"
-        f"Комиссия сети: **{network_fee_usdt:.2f} USDT**\n"
-        f"Списано: **{total_rub_to_deduct:.2f} ₽**", 
+        f"✅ **Заявка #{w_id} создана!**\n\nСеть: **{network}**\nК получению: **{amount_usdt:.2f} USDT**\nКомиссия сети: **{network_fee_usdt:.2f} USDT**\nСписано: **{total_rub_to_deduct:.2f} ₽**", 
         reply_markup=builder.as_markup(), parse_mode="Markdown"
     )
 
@@ -338,12 +337,7 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     admin_builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
     
     admin_msg = (
-        f"💸 **ЗАЯВКА #{w_id}**\n"
-        f"👤 ID: `{user_id}`\n"
-        f"🌐 Сеть: **{network}**\n"
-        f"💵 К отправке: {amount_usdt:.2f} USDT\n"
-        f"🏦 Адрес: `{address}`\n"
-        f"📈 *Ваша прибыль: +{admin_profit_rub:.2f} ₽*"
+        f"💸 **ЗАЯВКА #{w_id}**\n👤 ID: `{user_id}`\n🌐 Сеть: **{network}**\n💵 К отправке: {amount_usdt:.2f} USDT\n🏦 Адрес: `{address}`\n📈 *Ваша прибыль: +{admin_profit_rub:.2f} ₽*"
     )
     await bot.send_message(ADMIN_ID, admin_msg, reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
 
@@ -460,22 +454,16 @@ async def cb_admin_user_view(callback: CallbackQuery):
 async def cb_admin_deduct_info(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     target_id = int(callback.data.split("_")[3])
-    await callback.message.answer(
-        f"Чтобы списать средства с пользователя `{target_id}`, отправьте сообщение:\n"
-        f"`/deduct {target_id} 500` (где 500 — сумма в рублях).",
-        parse_mode="Markdown"
-    )
+    await callback.message.answer(f"Чтобы списать средства, отправьте:\n`/deduct {target_id} 500` (где 500 — сумма).", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_block_"))
 async def cb_admin_block(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     target_id = int(callback.data.split("_")[2])
-
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
-    
-    await callback.message.edit_text(f"🚫 Пользователь `{target_id}` успешно заблокирован.\nБаланс и история сохранены.", parse_mode="Markdown")
+    await callback.message.edit_text(f"🚫 Пользователь `{target_id}` успешно заблокирован.", parse_mode="Markdown")
     await callback.answer("Пользователь заблокирован!")
 
 @dp.callback_query(F.data.startswith("admin_user_orders_"))
@@ -486,7 +474,8 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     limit, offset = 5, page * 5
 
     async with db_pool.acquire() as conn:
-        orders = await conn.fetch("SELECT id, amount, status, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
+        # Добавили comment в запрос
+        orders = await conn.fetch("SELECT id, amount, status, comment, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
         total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id)
 
     text = f"📥 **Пополнения пользователя** `{target_id}`:\n\n"
@@ -497,7 +486,8 @@ async def cb_admin_user_orders(callback: CallbackQuery):
         status_emoji = "🟢" if o['status'] == 'paid' else "🟡"
         date_str = o['created_at'].strftime('%d.%m %H:%M')
         amt = o['amount'] if o['amount'] is not None else 0.0
-        text += f"{status_emoji} #{o['id']} | {amt:.2f} ₽ | {date_str}\n"
+        cmt = f"({o['comment']})" if o['comment'] else ""
+        text += f"{status_emoji} #{o['id']} | {amt:.2f} ₽ {cmt} | {date_str}\n"
 
     nav_builder = InlineKeyboardBuilder()
     if page > 0: nav_builder.button(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}")
@@ -569,12 +559,7 @@ async def cb_manage_wth(callback: CallbackQuery):
     net = row['network'] if row['network'] else 'BEP20'
 
     await callback.message.edit_text(
-        f"⚙️ **Управление заявкой #{w_id}**\n\n"
-        f"👤 ID: `{row['user_id']}`\n"
-        f"🌐 Сеть: **{net}**\n"
-        f"💵 К отправке: {row['amount_usdt']:.2f} USDT\n"
-        f"🏦 Адрес: `{row['address']}`\n\n"
-        f"Статус: **В работе**",
+        f"⚙️ **Управление заявкой #{w_id}**\n\n👤 ID: `{row['user_id']}`\n🌐 Сеть: **{net}**\n💵 К отправке: {row['amount_usdt']:.2f} USDT\n🏦 Адрес: `{row['address']}`\n\nСтатус: **В работе**",
         reply_markup=builder.as_markup(), parse_mode="Markdown"
     )
     await callback.answer()
@@ -664,16 +649,32 @@ async def handle_rollypay_webhook(request: web.Request):
             payment_id = data.get("payment_id")
             async with db_pool.acquire() as conn:
                 async with conn.transaction():
-                    row = await conn.fetchrow("SELECT id, user_id, amount FROM orders WHERE payment_id = $1 AND status = 'pending'", payment_id)
+                    # Достаем comment из базы
+                    row = await conn.fetchrow("SELECT id, user_id, amount, comment FROM orders WHERE payment_id = $1 AND status = 'pending'", payment_id)
                     if row:
-                        db_id, user_id, amount = row['id'], row['user_id'], row['amount']
+                        db_id, user_id, amount, comment = row['id'], row['user_id'], row['amount'], row['comment']
                         await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", db_id)
                         await conn.execute("""
                             INSERT INTO users (user_id, balance) VALUES ($1, $2)
                             ON CONFLICT (user_id) DO UPDATE SET balance = users.balance + EXCLUDED.balance
                         """, user_id, amount)
-                        try: await bot.send_message(user_id, f"🟢 **Баланс пополнен!**\n+{amount:.2f} ₽", parse_mode="Markdown")
+                        
+                        # Формируем уведомление пользователю
+                        user_msg = f"🟢 **Баланс пополнен!**\n+{amount:.2f} ₽"
+                        if comment:
+                            user_msg = f"**{comment}** {user_msg}"
+                            
+                        try: await bot.send_message(user_id, user_msg, parse_mode="Markdown")
                         except: pass
+                        
+                        # Уведомление админу
+                        admin_msg = f"🔔 **Новое пополнение!**\n👤 ID: `{user_id}`\n💵 Сумма: {amount:.2f} ₽\n"
+                        if comment: admin_msg += f"📝 Название: {comment}\n"
+                        admin_msg += f"🧾 Заказ: #{db_id}"
+                        
+                        try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
+                        except: pass
+                        
         return web.Response(text="OK", status=200)
     except Exception as e:
         logging.error(f"Ошибка вебхука: {e}")
