@@ -23,7 +23,7 @@ TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
-# --- XROCKET PAY API (ВАШИ КЛЮЧИ) ---
+# --- XROCKET PAY API ---
 XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
 XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
 rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
@@ -43,16 +43,13 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 
-# --- ХРАНИЛИЩЕ АКТИВНЫХ ИГР ---
 active_games = {}
 
-# --- ФУНКЦИЯ РАСЧЕТА КОМИССИИ СЕТИ ---
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
     if network == 'TRC20': return 3.0
     elif network == 'BEP20': return (amount_usdt * 0.01) + 2.0
     return 0.0
 
-# --- ДИНАМИЧЕСКИЙ КУРС ---
 _cached_rate = 0.0
 _last_rate_update = 0
 
@@ -74,50 +71,31 @@ async def get_usdt_rate():
                         _last_rate_update = time.time()
                         return _cached_rate
     except Exception as e:
-        logging.error(f"Ошибка получения курса с Rapira: {e}")
+        logging.error(f"Ошибка курса: {e}")
     return _cached_rate if _cached_rate > 0 else 95.0
 
-# --- БАЗА ДАННЫХ ---
 db_pool: asyncpg.Pool = None
 
 async def init_db():
     global db_pool
-    db_pool = await asyncpg.create_pool(
-        DATABASE_URL, min_size=1, max_size=5, ssl="require", statement_cache_size=0 
-    )
+    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, ssl="require", statement_cache_size=0)
     async with db_pool.acquire() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY, balance REAL DEFAULT 0,
-                last_active TIMESTAMPTZ DEFAULT NOW()
-            );
-        ''')
+        await conn.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, balance REAL DEFAULT 0, last_active TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_go6 BOOLEAN DEFAULT FALSE;''')
         
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS orders (
-                id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL,
-                payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit',
-                comment TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-        ''')
+        await conn.execute('''CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL, payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit', comment TEXT, created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT;''')
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS allowed_users (user_id BIGINT PRIMARY KEY);''')
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS withdrawals (
-                id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount_usdt REAL,
-                amount_rub REAL, address TEXT, status TEXT DEFAULT 'pending',
-                network TEXT DEFAULT 'BEP20', created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-        ''')
+        
+        await conn.execute('''CREATE TABLE IF NOT EXISTS withdrawals (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount_usdt REAL, amount_rub REAL, address TEXT, status TEXT DEFAULT 'pending', network TEXT DEFAULT 'BEP20', created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS network TEXT DEFAULT 'BEP20';''')
         
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", ADMIN_ID)
-    logging.info("Подключение к Supabase успешно!")
+    logging.info("БД Supabase готова!")
 
 async def is_user_allowed(user_id: int) -> bool:
     async with db_pool.acquire() as conn:
@@ -127,8 +105,7 @@ async def is_user_allowed(user_id: int) -> bool:
 def format_last_seen(last_active: datetime):
     if not last_active: return "Неизвестно"
     if last_active.tzinfo is None: last_active = last_active.replace(tzinfo=timezone.utc)
-    diff = datetime.now(timezone.utc) - last_active
-    seconds = diff.total_seconds()
+    seconds = (datetime.now(timezone.utc) - last_active).total_seconds()
     if seconds < 60: return "🟢 Только что (В сети)"
     elif seconds < 3600: return f"🟡 {int(seconds // 60)} мин. назад"
     elif seconds < 86400: return f"🟠 {int(seconds // 3600)} ч. назад"
@@ -137,15 +114,14 @@ def format_last_seen(last_active: datetime):
 @dp.message.middleware()
 async def track_activity_middleware(handler, event: types.Message, data):
     if event.from_user:
-        username = event.from_user.username
         async with db_pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2)
                 ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2
-            ''', event.from_user.id, username)
+            ''', event.from_user.id, event.from_user.username)
     return await handler(event, data)
 
-# --- ИГРА "КРАШ" ---
+# ==================== ИГРА КРАШ ====================
 @dp.message(Command("crash"))
 async def cmd_crash(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
@@ -162,13 +138,11 @@ async def cmd_crash(message: types.Message, command: CommandObject):
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", user_id)
-        if not row or row['balance'] < bet_rub:
-            return await message.answer(f"❌ Недостаточно средств! Нужно: {bet_rub:.2f} ₽")
+        if not row or row['balance'] < bet_rub: return await message.answer(f"❌ Недостаточно средств! Нужно: {bet_rub:.2f} ₽")
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", bet_rub, user_id)
 
     r = random.uniform(0.01, 1.0)
-    crash_point = max(1.0, 0.90 / r)
-    if crash_point < 1.1: crash_point = 1.1
+    crash_point = max(1.1, 0.90 / r)
 
     active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': current_rate, 'crash_point': crash_point}
     
@@ -180,7 +154,6 @@ async def cmd_crash(message: types.Message, command: CommandObject):
 async def run_crash_game(chat_id: int, message_id: int, user_id: int):
     if user_id not in active_games: return
     game = active_games[user_id]
-    crash_point = game['crash_point']
     try:
         while True:
             await asyncio.sleep(1.0)
@@ -188,7 +161,7 @@ async def run_crash_game(chat_id: int, message_id: int, user_id: int):
             game['multiplier'] += 0.1
             current_mult = game['multiplier']
             
-            if current_mult >= crash_point:
+            if current_mult >= game['crash_point']:
                 active_games.pop(user_id)
                 await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"💥 **КРАШ!** Множитель лопнул на **{current_mult:.1f}x**.\nВы проиграли {game['bet_usdt']} USDT.", parse_mode="Markdown")
                 break
@@ -216,7 +189,7 @@ async def cb_crash_cashout(callback: CallbackQuery):
         await callback.answer("Выигрыш зачислен!")
     else: await callback.answer("Игра уже завершена.", show_alert=True)
 
-# --- ПОПОЛНЕНИЕ ЧЕРЕЗ XROCKET ---
+# ==================== ПОПОЛНЕНИЕ ====================
 @dp.message(Command("usdt"))
 async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
@@ -227,75 +200,13 @@ async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
     except: return await message.answer("Ошибка! Минимальная сумма 1 USDT.")
 
     try:
-        invoice = await rocket_client.create_invoice(
-            currency="USDT",
-            amount=amount_usdt,
-            description="Пополнение баланса в боте",
-            payload=str(message.from_user.id),
-            expired_in=3600
-        )
-        
+        invoice = await rocket_client.create_invoice(currency="USDT", amount=amount_usdt, description="Пополнение", payload=str(message.from_user.id), expired_in=3600)
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Оплатить в xRocket", url=invoice.link)
-        
-        await message.answer(
-            f"💵 **Счет на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.",
-            reply_markup=builder.as_markup()
-        )
+        await message.answer(f"💵 **Счет на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup())
     except Exception as e:
         logging.error(f"xRocket Error: {e}")
-        await message.answer("❌ Ошибка создания счета. Попробуйте позже.")
-
-# --- ОБРАБОТКА ВЕРИФИКАЦИИ GO6 ---
-@dp.message(F.photo)
-async def handle_verification_photo(message: types.Message):
-    if await is_user_allowed(message.from_user.id): return
-    user = message.from_user
-    async with db_pool.acquire() as conn:
-        await conn.execute('''INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2) ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2''', user.id, user.username)
-    admin_builder = InlineKeyboardBuilder()
-    admin_builder.button(text="✅ Одобрить", callback_data=f"approve_access_{user.id}")
-    admin_builder.button(text="❌ Отклонить", callback_data=f"reject_access_{user.id}")
-    try:
-        await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=f"🔔 **ЗАЯВКА**\n👤 {user.full_name}\n🔗 @{user.username}\n🆔 `{user.id}`", reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
-        await message.answer("⏳ Ожидайте проверки.")
-    except: pass
-
-@dp.callback_query(F.data.startswith("approve_access_"))
-async def process_approve_access(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    target_id = int(callback.data.split("_")[2])
-    async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
-        await conn.execute("UPDATE users SET verified_go6 = TRUE WHERE user_id = $1", target_id)
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ **ОДОБРЕНО**", reply_markup=None)
-    try: await bot.send_message(target_id, "✅ Доступ одобрен! Напишите /start")
-    except: pass
-
-@dp.callback_query(F.data.startswith("reject_access_"))
-async def process_reject_access(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    target_id = int(callback.data.split("_")[2])
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ **ОТКЛОНЕНО**", reply_markup=None)
-    try: await bot.send_message(target_id, "❌ В доступе отказано.")
-    except: pass
-
-# --- КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ---
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    if not await is_user_allowed(message.from_user.id):
-        return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
-    current_rate = await get_usdt_rate()
-    await message.answer(f"Привет! Курс: **1 USDT = {current_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть")
-
-@dp.message(Command("balance"))
-async def cmd_balance(message: types.Message):
-    if not await is_user_allowed(message.from_user.id): return
-    current_rate = await get_usdt_rate()
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
-        bal = row['balance'] if row and row['balance'] is not None else 0.0
-    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT)", parse_mode="Markdown")
+        await message.answer("❌ Ошибка создания счета.")
 
 @dp.message(Command("new"))
 async def cmd_new(message: types.Message, command: CommandObject):
@@ -348,13 +259,65 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
     await bot.send_message(ADMIN_ID, f"💸 **ЗАЯВКА #{w_id}**\nID: `{message.from_user.id}`\nСеть: {network}\nUSDT: {amount_usdt}\nАдрес: `{address}`\nПрибыль: +{profit_rub} ₽", reply_markup=builder.as_markup())
 
-# --- АДМИН ПАНЕЛЬ ---
+# ==================== ВЕРИФИКАЦИЯ ====================
+@dp.message(F.photo)
+async def handle_verification_photo(message: types.Message):
+    if await is_user_allowed(message.from_user.id): return
+    user = message.from_user
+    async with db_pool.acquire() as conn:
+        await conn.execute('''INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2) ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2''', user.id, user.username)
+    admin_builder = InlineKeyboardBuilder()
+    admin_builder.button(text="✅ Одобрить", callback_data=f"approve_access_{user.id}")
+    admin_builder.button(text="❌ Отклонить", callback_data=f"reject_access_{user.id}")
+    try:
+        await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=f"🔔 **ЗАЯВКА**\n👤 {user.full_name}\n🔗 @{user.username}\n🆔 `{user.id}`", reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
+        await message.answer("⏳ Ожидайте проверки.")
+    except: pass
+
+@dp.callback_query(F.data.startswith("approve_access_"))
+async def process_approve_access(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
+        await conn.execute("UPDATE users SET verified_go6 = TRUE WHERE user_id = $1", target_id)
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ **ОДОБРЕНО**", reply_markup=None)
+    try: await bot.send_message(target_id, "✅ Доступ одобрен! Напишите /start")
+    except: pass
+
+@dp.callback_query(F.data.startswith("reject_access_"))
+async def process_reject_access(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[2])
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ **ОТКЛОНЕНО**", reply_markup=None)
+    try: await bot.send_message(target_id, "❌ В доступе отказано.")
+    except: pass
+
+# ==================== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ====================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    if not await is_user_allowed(message.from_user.id):
+        return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
+    current_rate = await get_usdt_rate()
+    await message.answer(f"Привет! Курс: **1 USDT = {current_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть")
+
+@dp.message(Command("balance"))
+async def cmd_balance(message: types.Message):
+    if not await is_user_allowed(message.from_user.id): return
+    current_rate = await get_usdt_rate()
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
+        bal = row['balance'] if row and row['balance'] is not None else 0.0
+    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT)", parse_mode="Markdown")
+
+# ==================== АДМИН-ПАНЕЛЬ ====================
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     builder = InlineKeyboardBuilder()
     builder.button(text="📈 Статистика", callback_data="admin_stats")
-    builder.button(text="👥 Пользователи", callback_data="admin_users_0")
+    builder.button(text="👥 Все пользователи", callback_data="admin_users_0")
+    builder.button(text="🛡️ Верифицированные (GO6)", callback_data="admin_verified_0")
     await message.answer("👑 **Админ-панель:**", reply_markup=builder.as_markup())
 
 @dp.message(Command("add"))
@@ -393,16 +356,186 @@ async def cb_admin_main(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     builder = InlineKeyboardBuilder()
     builder.button(text="📈 Статистика", callback_data="admin_stats")
-    builder.button(text="👥 Пользователи", callback_data="admin_users_0")
+    builder.button(text="👥 Все пользователи", callback_data="admin_users_0")
+    builder.button(text="🛡️ Верифицированные (GO6)", callback_data="admin_verified_0")
     await callback.message.edit_text("👑 **Админ-панель:**", reply_markup=builder.as_markup())
 
-# --- ВЕБХУКИ ---
+@dp.callback_query(F.data.startswith("admin_users_"))
+async def cb_admin_users(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    try: page = int(callback.data.split("_")[2])
+    except: page = 0
+    limit, offset = 5, page * 5
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT u.user_id, u.username, u.balance, u.last_active FROM users u JOIN allowed_users a ON u.user_id = a.user_id ORDER BY u.last_active DESC LIMIT $1 OFFSET $2", limit, offset)
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
+    keyboard = []
+    for u in users:
+        bal = u['balance'] if u['balance'] is not None else 0.0
+        display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
+        keyboard.append([InlineKeyboardButton(text=f"👤 {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_users_{page-1}"))
+    if offset + limit < total_users: nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_users_{page+1}"))
+    if nav_row: keyboard.append(nav_row)
+    keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
+    await callback.message.edit_text(f"👥 **Пользователи** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+@dp.callback_query(F.data.startswith("admin_verified_"))
+async def cb_admin_verified(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    try: page = int(callback.data.split("_")[2])
+    except: page = 0
+    limit, offset = 5, page * 5
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id, username, balance, last_active FROM users WHERE verified_go6 = TRUE ORDER BY last_active DESC LIMIT $1 OFFSET $2", limit, offset)
+        total_verified = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
+    keyboard = []
+    for u in users:
+        bal = u['balance'] if u['balance'] is not None else 0.0
+        display_name = f"@{u['username']}" if u['username'] else f"ID:{u['user_id']}"
+        keyboard.append([InlineKeyboardButton(text=f"🛡️ {display_name} | {bal:.0f} ₽", callback_data=f"admin_user_view_{u['user_id']}")])
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_verified_{page-1}"))
+    if offset + limit < total_verified: nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_verified_{page+1}"))
+    if nav_row: keyboard.append(nav_row)
+    keyboard.append([InlineKeyboardButton(text="🔙 В меню", callback_data="admin_main")])
+    await callback.message.edit_text(f"🛡️ **GO6 Верификация** (Стр. {page+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+@dp.callback_query(F.data.startswith("admin_user_view_"))
+async def cb_admin_user_view(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[3])
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT username, balance, last_active, verified_go6 FROM users WHERE user_id = $1", target_id)
+        total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid'", target_id)
+        total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
+        active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
+    bal = user['balance'] if user['balance'] is not None else 0.0
+    display_name = f"@{user['username']}" if user['username'] else "Скрыт"
+    v_status = "✅ Да" if user['verified_go6'] else "❌ Нет"
+    text = f"👤 **ДОСЬЕ:** `{target_id}`\n\n🔗 Юзернейм: **{display_name}**\n🛡️ Верификация: **{v_status}**\n🕒 Статус: {format_last_seen(user['last_active'])}\n💰 Баланс: **{bal:.2f} ₽**\n\n📥 Пополнил: **{total_in:.2f} ₽**\n📤 Вывел: **{total_out:.2f} USDT**\n⏳ Заявок: **{active_w}**"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📥 История пополнений", callback_data=f"admin_user_orders_{target_id}_0")
+    builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
+    builder.row(InlineKeyboardButton(text="📝 Списать", callback_data=f"admin_deduct_info_{target_id}"), InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin_block_{target_id}"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users_0"))
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("admin_deduct_info_"))
+async def cb_admin_deduct_info(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[3])
+    await callback.message.answer(f"Чтобы списать, отправьте:\n`/deduct {target_id} 500`", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_block_"))
+async def cb_admin_block(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
+    await callback.message.edit_text(f"🚫 Пользователь `{target_id}` заблокирован.", parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("admin_user_orders_"))
+async def cb_admin_user_orders(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    parts = callback.data.split("_")
+    target_id, page = int(parts[3]), int(parts[4])
+    limit, offset = 5, page * 5
+    async with db_pool.acquire() as conn:
+        orders = await conn.fetch("SELECT id, amount, status, comment, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
+        total = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id)
+    text = f"📥 **Пополнения** `{target_id}`:\n\n"
+    if not orders: text += "Нет пополнений."
+    builder = InlineKeyboardBuilder()
+    for o in orders:
+        emoji = "🟢" if o['status'] == 'paid' else "🟡"
+        cmt = f"({o['comment']})" if o['comment'] else ""
+        text += f"{emoji} #{o['id']} | {o['amount']:.2f} ₽ {cmt}\n"
+    nav = InlineKeyboardBuilder()
+    if page > 0: nav.button(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}")
+    if offset + limit < total: nav.button(text="➡️", callback_data=f"admin_user_orders_{target_id}_{page+1}")
+    builder.attach(nav)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}"))
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("admin_user_wths_"))
+async def cb_admin_user_wths(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    parts = callback.data.split("_")
+    target_id, page = int(parts[3]), int(parts[4])
+    limit, offset = 5, page * 5
+    async with db_pool.acquire() as conn:
+        wths = await conn.fetch("SELECT id, amount_usdt, status, network, created_at FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
+        total = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id)
+    text = f"💸 **Выводы** `{target_id}`:\n\n"
+    if not wths: text += "Нет заявок."
+    builder = InlineKeyboardBuilder()
+    for w in wths:
+        emoji = "✅" if w['status'] == 'completed' else "🟡" if w['status'] == 'pending' else "⏳" if w['status'] == 'processing' else "🔴"
+        text += f"{emoji} #{w['id']} | {w['amount_usdt']:.2f} USDT ({w['network']})\n"
+        if w['status'] in ['pending', 'processing']: builder.button(text=f"Управлять #{w['id']}", callback_data=f"manage_wth_{w['id']}")
+    nav = InlineKeyboardBuilder()
+    if page > 0: nav.button(text="⬅️", callback_data=f"admin_user_wths_{target_id}_{page-1}")
+    if offset + limit < total: nav.button(text="➡️", callback_data=f"admin_user_wths_{target_id}_{page+1}")
+    builder.adjust(1)
+    builder.attach(nav)
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_user_view_{target_id}"))
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("manage_wth_"))
+async def cb_manage_wth(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    w_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT user_id, amount_usdt, address, network, status FROM withdrawals WHERE id = $1", w_id)
+        if row['status'] == 'pending':
+            await conn.execute("UPDATE withdrawals SET status = 'processing' WHERE id = $1", w_id)
+            row = await conn.fetchrow("SELECT user_id, amount_usdt, address, network, status FROM withdrawals WHERE id = $1", w_id)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнено", callback_data=f"admin_done_{w_id}")
+    builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
+    await callback.message.edit_text(f"⚙️ **Заявка #{w_id}**\nID: `{row['user_id']}`\nСеть: {row['network']}\nUSDT: {row['amount_usdt']}\nАдрес: `{row['address']}`", reply_markup=builder.as_markup())
+
+# ==================== ОБРАБОТКА ЗАЯВОК ====================
+@dp.callback_query(F.data.startswith("admin_take_"))
+async def process_admin_take(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    w_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE withdrawals SET status = 'processing' WHERE id = $1", w_id)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Выполнено", callback_data=f"admin_done_{w_id}")
+    builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
+    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("admin_reject_"))
+async def process_admin_reject(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    w_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT user_id, amount_rub, amount_usdt FROM withdrawals WHERE id = $1", w_id)
+            await conn.execute("UPDATE withdrawals SET status = 'rejected' WHERE id = $1", w_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", row['amount_rub'], row['user_id'])
+            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", row['amount_usdt'] * ADMIN_FEE_PER_USDT, ADMIN_ID)
+    await callback.message.edit_text(f"🔴 Заявка #{w_id} отклонена. Деньги возвращены.")
+
+@dp.callback_query(F.data.startswith("admin_done_"))
+async def process_admin_done(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    w_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE withdrawals SET status = 'completed' WHERE id = $1", w_id)
+    await callback.message.edit_text(f"✅ Заявка #{w_id} успешно выполнена.")
+
+# ==================== ВЕБХУКИ ====================
 async def handle_rollypay_webhook(request: web.Request):
     try:
         raw_body = await request.read()
         sig = request.headers.get("X-Signature")
         ts = request.headers.get("X-Timestamp")
-        if not sig or not ts: return web.Response(text="Missing", status=400)
         msg = f"{ts}.{raw_body.decode('utf-8')}"
         expected = hmac.new(SIGNING_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected): return web.Response(text="Invalid", status=403)
@@ -422,45 +555,25 @@ async def handle_xrocket_webhook(request: web.Request):
     try:
         raw_body = await request.read()
         sig = request.headers.get("Signature")
-        sig_ver = request.headers.get("Signature-Version")
         sig_ts = request.headers.get("Signature-Timestamp")
-        
-        if not sig or not sig_ver or not sig_ts:
-            return web.Response(text="Missing signature headers", status=400)
-        if sig_ver != "v1":
-            return web.Response(text="Unsupported signature version", status=400)
-
         signed_string = f"{sig_ts}.{raw_body.decode('utf-8')}"
         expected_sig = hmac.new(XROCKET_WEBHOOK_SECRET.encode(), signed_string.encode(), hashlib.sha256).hexdigest()
-        
-        if not hmac.compare_digest(sig, expected_sig):
-            return web.Response(text="Invalid signature", status=401)
-
+        if not hmac.compare_digest(sig, expected_sig): return web.Response(text="Invalid", status=401)
         data = json.loads(raw_body)
-        if data.get("type") == "invoice":
-            invoice_data = data.get("data", {})
-            status = invoice_data.get("status")
-            if status == "paid":
-                payload = invoice_data.get("payload")
-                amount_usdt = float(invoice_data.get("amount", 0))
-                
-                if payload:
-                    user_id = int(payload)
-                    rate = await get_usdt_rate()
-                    amount_rub = amount_usdt * rate
-                    
-                    async with db_pool.acquire() as conn:
-                        await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", amount_rub, user_id)
-                    
-                    try:
-                        await bot.send_message(user_id, f"🟢 **Баланс пополнен на {amount_usdt} USDT!**\n+{amount_rub:.2f} ₽", parse_mode="Markdown")
-                    except: pass
+        if data.get("type") == "invoice" and data.get("data", {}).get("status") == "paid":
+            payload = data.get("data", {}).get("payload")
+            amount_usdt = float(data.get("data", {}).get("amount", 0))
+            if payload:
+                user_id = int(payload)
+                rate = await get_usdt_rate()
+                amount_rub = amount_usdt * rate
+                async with db_pool.acquire() as conn:
+                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", amount_rub, user_id)
+                try: await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT (+{amount_rub:.2f} ₽)")
+                except: pass
         return web.Response(text="OK", status=200)
-    except Exception as e:
-        logging.error(f"xRocket webhook error: {e}")
-        return web.Response(text="Error", status=500)
+    except: return web.Response(text="Error", status=500)
 
-# --- ЗАПУСК ---
 async def main():
     await init_db()
     app = web.Application()
