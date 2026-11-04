@@ -250,18 +250,41 @@ async def cmd_new(message: types.Message, command: CommandObject):
     global rolly_client
     if not await is_user_allowed(message.from_user.id): return
     if not command.args: return await message.answer("Укажите сумму: `/new 500`")
+    
     parts = command.args.split(maxsplit=1)
     try: amount = float(parts[0].replace(',', '.'))
     except: return await message.answer("Ошибка! Неверная сумма.")
+    
     comment = parts[1] if len(parts) > 1 else None
+    
+    # Формируем описание с комментарием
+    desc_text = f"Пополнение"
+    if comment: 
+        desc_text += f" | {comment}"
+
     try:
-        payment = rolly_client.payments.create(amount=str(amount), order_id=f"dep_{message.from_user.id}_{int(time.time())}", terminal_id=TERMINAL_ID, description=f"Пополнение", customer_id=str(message.from_user.id), redirect_url="https://t.me")
+        payment = rolly_client.payments.create(
+            amount=str(amount), 
+            order_id=f"dep_{message.from_user.id}_{int(time.time())}", 
+            terminal_id=TERMINAL_ID, 
+            description=desc_text, # Передаем в RollyPay
+            customer_id=str(message.from_user.id), 
+            redirect_url="https://t.me"
+        )
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO orders (user_id, amount, payment_id, status, comment) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount, payment['payment_id'], "pending", comment)
+        
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
-        await message.answer(f"**Счет: {amount:.2f} ₽**\n🟡 Ожидает оплату...", reply_markup=builder.as_markup())
-    except Exception as e: await message.answer("Ошибка создания платежа.")
+        
+        # Показываем комментарий в сообщении
+        msg_text = f"**Счет: {amount:.2f} ₽**"
+        if comment: 
+            msg_text += f"\n📝 Название: {comment}"
+            
+        await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup())
+    except Exception as e: 
+        await message.answer("Ошибка создания платежа.")
 
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
@@ -658,10 +681,13 @@ async def handle_rollypay_webhook(request: web.Request):
         data = json.loads(raw_body)
         if data.get("status") == "paid":
             async with db_pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT user_id, amount FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
+                # Запрашиваем comment из базы
+                row = await conn.fetchrow("SELECT user_id, amount, comment FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
                 if row:
                     user_id = row['user_id']
                     amount = row['amount']
+                    comment = row['comment']
+                    
                     fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)
                     net_amount = amount - fee
                     
@@ -671,9 +697,11 @@ async def handle_rollypay_webhook(request: web.Request):
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
+                    # Уведомление клиенту
                     try: await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
                     except: pass
 
+                    # Уведомление админу (С КОММЕНТАРИЕМ)
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
@@ -681,8 +709,11 @@ async def handle_rollypay_webhook(request: web.Request):
                         f"🔔 **Новое пополнение (Карта/СБП)!**\n"
                         f"👤 Клиент: {username}\n"
                         f"💵 Пополнил: {amount:.2f} ₽\n"
-                        f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
                     )
+                    if comment: 
+                        admin_msg += f"📝 Название: {comment}\n"
+                    admin_msg += f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
+                    
                     try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
                     except: pass
         return web.Response(text="OK", status=200)
