@@ -304,7 +304,6 @@ async def cmd_new(message: types.Message, command: CommandObject):
         if comment: 
             msg_text += f"\n📝 Название: {comment}"
             
-        # ДОБАВЛЕН parse_mode="Markdown" чтобы звездочки работали
         sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
         
         async with db_pool.acquire() as conn:
@@ -437,29 +436,34 @@ async def cb_admin_stats(callback: CallbackQuery):
     deduct_rate = await get_deduct_rate()
     
     async with db_pool.acquire() as conn:
-        u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
-        v = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
-        d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND order_type = 'deposit'")
-        w = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
-        p = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled'", ADMIN_FEE_PER_USDT)
-        user_balances = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE user_id != $1", ADMIN_ID)
+        u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") or 0
+        v = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE") or 0
+        d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'") or 0.0
+        w = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'") or 0.0
+        p = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled'", ADMIN_FEE_PER_USDT) or 0.0
+        user_balances = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE user_id != $1", ADMIN_ID) or 0.0
         
-        today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE")
-        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE created_at >= CURRENT_DATE")
+        today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND created_at >= CURRENT_DATE") or 0.0
+        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE created_at >= CURRENT_DATE") or 0.0
+        active_w = await conn.fetchval('SELECT COUNT(*) FROM withdrawals WHERE status = \'pending\' OR status = \'processing\'') or 0
+        
+        admin_balance = await conn.fetchval("SELECT balance FROM users WHERE user_id = $1", ADMIN_ID) or 0.0
+        deposit_profit = await conn.fetchval("SELECT COALESCE(SUM(amount * $1), 0) FROM orders WHERE status = 'paid'", DEPOSIT_FEE_PERCENT / 100.0) or 0.0
         
     text = (f"📊 **ОБЩАЯ СТАТИСТИКА**\n\n"
             f"👥 Всего пользователей: **{u}**\n"
             f"🛡️ Прошли GO6: **{v}**\n"
             f"💰 Пополнено: **{d:.2f} ₽**\n"
             f"💸 Выведено: **{w:.2f} USDT**\n"
-            f"⏳ Активных заявок: **{await conn.fetchval('SELECT COUNT(*) FROM withdrawals WHERE status = \'pending\' OR status = \'processing\'')}**\n\n"
+            f"⏳ Активных заявок: **{active_w}**\n\n"
             f"💼 Баланс юзеров: **{user_balances:.2f} ₽**\n\n"
             f"📅 **ЗА СЕГОДНЯ:**\n"
             f"📥 Пополнений: **{today_deposits:.2f} ₽**\n"
             f"🎰 Оборот игры: **{today_bets:.2f} USDT**\n\n"
             f"👑 **ВАШ ДОХОД:**\n"
-            f"📈 Прибыль (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
-            f"💳 Ваш баланс: **{await conn.fetchval('SELECT balance FROM users WHERE user_id = $1', ADMIN_ID):.2f} ₽**\n\n"
+            f"📥 С пополнений (5%): **{deposit_profit:.2f} ₽**\n"
+            f"📈 С выводов (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
+            f"💳 Ваш баланс: **{admin_balance:.2f} ₽**\n\n"
             f"💱 **Курс для клиента: {display_rate:.2f} ₽**\n"
             f"💸 **Курс списания: {deduct_rate:.2f} ₽**")
             
@@ -484,12 +488,12 @@ async def cb_admin_users(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("""
             SELECT u.user_id, u.username, u.balance, u.last_active,
-                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE) as dep_today
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
             FROM users u 
             JOIN allowed_users a ON u.user_id = a.user_id 
             ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
         """, limit, offset)
-        total_users = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") or 0
     
     keyboard = []
     for u in users:
@@ -516,12 +520,12 @@ async def cb_admin_verified(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("""
             SELECT u.user_id, u.username, u.balance, u.last_active,
-                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE) as dep_today
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
             FROM users u 
             WHERE u.verified_go6 = TRUE
             ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
         """, limit, offset)
-        total_verified = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
+        total_verified = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE") or 0
         
     keyboard = []
     for u in users:
@@ -547,13 +551,13 @@ async def cb_admin_user_view(callback: CallbackQuery):
         user = await conn.fetchrow("SELECT username, balance, last_active, verified_go6 FROM users WHERE user_id = $1", target_id)
         if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
         
-        total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND order_type = 'deposit'", target_id)
-        total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
-        active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
+        total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid'", target_id) or 0.0
+        total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id) or 0.0
+        active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id) or 0
         
-        today_dep = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE", target_id)
-        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE user_id = $1 AND created_at >= CURRENT_DATE", target_id)
-        today_wths = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed' AND created_at >= CURRENT_DATE", target_id)
+        today_dep = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND created_at >= CURRENT_DATE", target_id) or 0.0
+        today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE user_id = $1 AND created_at >= CURRENT_DATE", target_id) or 0.0
+        today_wths = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed' AND created_at >= CURRENT_DATE", target_id) or 0.0
         
     bal = user['balance'] if user['balance'] is not None else 0.0
     display_name = f"@{user['username']}" if user['username'] else "Скрыт"
@@ -603,7 +607,7 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     limit, offset = 5, page * 5
     async with db_pool.acquire() as conn:
         orders = await conn.fetch("SELECT id, amount, status, comment, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
-        total = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id)
+        total = await conn.fetchval("SELECT COUNT(*) FROM orders WHERE user_id = $1", target_id) or 0
         
     text = f"📥 **Пополнения** `{target_id}`:\n\n"
     if not orders: text += "Нет пополнений."
@@ -630,7 +634,7 @@ async def cb_admin_user_wths(callback: CallbackQuery):
     limit, offset = 5, page * 5
     async with db_pool.acquire() as conn:
         wths = await conn.fetch("SELECT id, amount_usdt, status, network, created_at FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", target_id, limit, offset)
-        total = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id)
+        total = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1", target_id) or 0
         
     text = f"💸 **Выводы** `{target_id}`:\n\n"
     if not wths: text += "Нет заявок."
@@ -730,31 +734,32 @@ async def handle_rollypay_webhook(request: web.Request):
                     if comment: reply_text += f"Название {comment}\n"
                     reply_text += "Оплата произведена"
                     
-                    # Делаем ОТВЕТ (цитату) на сообщение с чеком
                     if msg_id:
                         try:
                             await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id, allow_sending_without_reply=True)
                         except Exception as e:
                             logging.error(f"Failed to reply: {e}")
-                            await bot.send_message(user_id, reply_text)
+                            try: await bot.send_message(user_id, reply_text)
+                            except: pass
                     else:
-                        await bot.send_message(user_id, reply_text)
+                        try: await bot.send_message(user_id, reply_text)
+                        except: pass
 
-                    # Уведомление админу
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
                     admin_msg = (
-                        f"🔔 **Оплачен Чек #{check_id}!**\n"
+                        f"🔔 Оплачен Чек #{check_id}!\n"
                         f"👤 Клиент: {username}\n"
                         f"💵 Сумма: {amount:.2f} ₽\n"
                     )
                     if comment: 
                         admin_msg += f"📝 Название: {comment}\n"
-                    admin_msg += f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
+                    admin_msg += f"💰 Ваш процент (5%): {fee:.2f} ₽"
                     
-                    try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
-                    except: pass
+                    try: await bot.send_message(ADMIN_ID, admin_msg)
+                    except Exception as e:
+                        logging.error(f"Admin msg error: {e}")
         return web.Response(text="OK", status=200)
     except Exception as e: 
         logging.error(f"Webhook Error: {e}")
@@ -803,21 +808,26 @@ async def handle_xrocket_webhook(request: web.Request):
                 
                 if msg_id:
                     try: await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id, allow_sending_without_reply=True)
-                    except: await bot.send_message(user_id, reply_text)
+                    except Exception as e:
+                        logging.error(f"Failed to reply: {e}")
+                        try: await bot.send_message(user_id, reply_text)
+                        except: pass
                 else:
-                    await bot.send_message(user_id, reply_text)
+                    try: await bot.send_message(user_id, reply_text)
+                    except: pass
 
                 user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                 username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                 
                 admin_msg = (
-                    f"🔔 **Оплачен Чек #{check_id} (xRocket)!**\n"
+                    f"🔔 Оплачен Чек #{check_id} (xRocket)!\n"
                     f"👤 Клиент: {username}\n"
                     f"💵 Сумма: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
-                    f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
+                    f"💰 Ваш процент (5%): {fee:.2f} ₽"
                 )
-                try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
-                except: pass
+                try: await bot.send_message(ADMIN_ID, admin_msg)
+                except Exception as e:
+                    logging.error(f"Admin msg error: {e}")
         return web.Response(text="OK", status=200)
     except Exception as e: 
         logging.error(f"xRocket Webhook Error: {e}")
