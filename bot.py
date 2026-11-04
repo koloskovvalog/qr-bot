@@ -34,13 +34,9 @@ GO6_REF_LINK = "https://t.me/Go6online_bot?start=verify_XE732NNY"
 
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
-
-# --- НАЦЕНКИ НА КУРС (СКРЫТЫЕ) ---
 MARKUP_DISPLAY = 1.66
 MARKUP_DEDUCT = 4.66
-
-# --- ПРОЦЕНТ С ПОПОЛНЕНИЙ ---
-DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам на баланс
+DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам
 
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
@@ -115,9 +111,10 @@ async def init_db():
             );
         ''')
         
+        # ЖЕСТКО ДОБАВЛЯЕМ АДМИНА, ЧТОБЫ НАЧИСЛЕНИЕ ПРОЦЕНТОВ РАБОТАЛО
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
-        await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", ADMIN_ID)
-    logging.info("БД Supabase готова!")
+        await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
+    logging.info("БД Supabase готова! Админ добавлен в базу.")
 
 async def is_user_allowed(user_id: int) -> bool:
     async with db_pool.acquire() as conn:
@@ -669,15 +666,15 @@ async def handle_rollypay_webhook(request: web.Request):
                     await conn.execute("UPDATE orders SET status = 'paid' WHERE payment_id = $1", data.get("payment_id"))
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     
+                    # ЖЕСТКОЕ НАЧИСЛЕНИЕ АДМИНУ
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
-                    # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ ПОЛНУЮ СУММУ)
-                    try: 
-                        await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
+                    # УВЕДОМЛЕНИЕ КЛИЕНТУ
+                    try: await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
                     except: pass
 
-                    # УВЕДОМЛЕНИЕ АДМИНУ (С ЮЗЕРНЕЙМОМ И ПРОЦЕНТОМ)
+                    # УВЕДОМЛЕНИЕ АДМИНУ
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
@@ -690,7 +687,9 @@ async def handle_rollypay_webhook(request: web.Request):
                     try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
                     except: pass
         return web.Response(text="OK", status=200)
-    except: return web.Response(text="Error", status=500)
+    except Exception as e: 
+        logging.error(f"Webhook Error: {e}")
+        return web.Response(text="Error", status=500)
 
 async def handle_xrocket_webhook(request: web.Request):
     try:
@@ -720,8 +719,7 @@ async def handle_xrocket_webhook(request: web.Request):
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                         
                 # УВЕДОМЛЕНИЕ КЛИЕНТУ
-                try: 
-                    await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
+                try: await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
                 except: pass
 
                 # УВЕДОМЛЕНИЕ АДМИНУ
@@ -737,7 +735,9 @@ async def handle_xrocket_webhook(request: web.Request):
                 try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
                 except: pass
         return web.Response(text="OK", status=200)
-    except: return web.Response(text="Error", status=500)
+    except Exception as e: 
+        logging.error(f"xRocket Webhook Error: {e}")
+        return web.Response(text="Error", status=500)
 
 async def main():
     await init_db()
