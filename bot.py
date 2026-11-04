@@ -96,9 +96,8 @@ async def init_db():
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_go6 BOOLEAN DEFAULT FALSE;''')
         
-        await conn.execute('''CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL, payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit', comment TEXT, created_at TIMESTAMPTZ DEFAULT NOW());''')
+        await conn.execute('''CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL, payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit', comment TEXT, message_id BIGINT, created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT;''')
-        # НОВАЯ КОЛОНКА ДЛЯ ID СООБЩЕНИЯ
         await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS message_id BIGINT;''')
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS allowed_users (user_id BIGINT PRIMARY KEY);''')
@@ -257,9 +256,8 @@ async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Оплатить в xRocket", url=invoice.link)
         
-        sent_msg = await message.answer(f"💵 **Чек #{check_id} на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup())
+        sent_msg = await message.answer(f"💵 **Чек #{check_id} на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup(), parse_mode="Markdown")
         
-        # Сохраняем ID сообщения и payment_id
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", invoice.invoice_id, sent_msg.message_id, check_id)
 
@@ -306,9 +304,9 @@ async def cmd_new(message: types.Message, command: CommandObject):
         if comment: 
             msg_text += f"\n📝 Название: {comment}"
             
-        sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup())
+        # ДОБАВЛЕН parse_mode="Markdown" чтобы звездочки работали
+        sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
         
-        # Сохраняем ID сообщения и payment_id
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", payment['payment_id'], sent_msg.message_id, check_id)
             
@@ -728,15 +726,16 @@ async def handle_rollypay_webhook(request: web.Request):
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
-                    # Отправляем ответ на сообщение с чеком
                     reply_text = f"Счёт {amount:.2f} ₽\n"
                     if comment: reply_text += f"Название {comment}\n"
                     reply_text += "Оплата произведена"
                     
+                    # Делаем ОТВЕТ (цитату) на сообщение с чеком
                     if msg_id:
                         try:
-                            await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id)
-                        except:
+                            await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id, allow_sending_without_reply=True)
+                        except Exception as e:
+                            logging.error(f"Failed to reply: {e}")
                             await bot.send_message(user_id, reply_text)
                     else:
                         await bot.send_message(user_id, reply_text)
@@ -801,8 +800,9 @@ async def handle_xrocket_webhook(request: web.Request):
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                         
                 reply_text = f"Счёт {amount_usdt} USDT\nОплата произведена"
+                
                 if msg_id:
-                    try: await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id)
+                    try: await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id, allow_sending_without_reply=True)
                     except: await bot.send_message(user_id, reply_text)
                 else:
                     await bot.send_message(user_id, reply_text)
