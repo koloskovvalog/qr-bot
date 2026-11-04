@@ -36,11 +36,11 @@ MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
 
 # --- НАЦЕНКИ НА КУРС (СКРЫТЫЕ) ---
-MARKUP_DISPLAY = 1.66  # Наценка для отображения клиенту
-MARKUP_DEDUCT = 4.66   # Наценка для реального списания
+MARKUP_DISPLAY = 1.66
+MARKUP_DEDUCT = 4.66
 
 # --- ПРОЦЕНТ С ПОПОЛНЕНИЙ ---
-DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам на баланс (скрыто от клиента)
+DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам на баланс
 
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
@@ -663,19 +663,31 @@ async def handle_rollypay_webhook(request: web.Request):
                 if row:
                     user_id = row['user_id']
                     amount = row['amount']
-                    fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)  # Считаем ваш 5%
-                    net_amount = amount - fee  # Клиенту зачисляем 95%
+                    fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)
+                    net_amount = amount - fee
                     
                     await conn.execute("UPDATE orders SET status = 'paid' WHERE payment_id = $1", data.get("payment_id"))
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     
-                    # Переводим 5% вам
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
-                    # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ ПОЛНУЮ СУММУ, КАК ПРОСИЛИ)
+                    # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ ПОЛНУЮ СУММУ)
                     try: 
                         await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
+                    except: pass
+
+                    # УВЕДОМЛЕНИЕ АДМИНУ (С ЮЗЕРНЕЙМОМ И ПРОЦЕНТОМ)
+                    user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
+                    username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
+                    
+                    admin_msg = (
+                        f"🔔 **Новое пополнение (Карта/СБП)!**\n"
+                        f"👤 Клиент: {username}\n"
+                        f"💵 Пополнил: {amount:.2f} ₽\n"
+                        f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
+                    )
+                    try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
                     except: pass
         return web.Response(text="OK", status=200)
     except: return web.Response(text="Error", status=500)
@@ -699,7 +711,7 @@ async def handle_xrocket_webhook(request: web.Request):
                 display_rate = await get_display_rate()
                 total_rub = amount_usdt * display_rate
                 
-                fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)  # Считаем ваш 5%
+                fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)
                 net_amount = total_rub - fee
                 
                 async with db_pool.acquire() as conn:
@@ -707,9 +719,22 @@ async def handle_xrocket_webhook(request: web.Request):
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                         
-                # УВЕДОМЛЕНИЕ КЛИЕНТУ (ПИШЕМ СУММУ В USDT)
+                # УВЕДОМЛЕНИЕ КЛИЕНТУ
                 try: 
                     await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
+                except: pass
+
+                # УВЕДОМЛЕНИЕ АДМИНУ
+                user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
+                username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
+                
+                admin_msg = (
+                    f"🔔 **Новое пополнение (xRocket)!**\n"
+                    f"👤 Клиент: {username}\n"
+                    f"💵 Пополнил: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
+                    f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
+                )
+                try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
                 except: pass
         return web.Response(text="OK", status=200)
     except: return web.Response(text="Error", status=500)
