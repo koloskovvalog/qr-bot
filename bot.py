@@ -44,7 +44,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ КЛИЕНТОВ
 rolly_client = None
 rocket_client = None
 active_games = {}
@@ -99,6 +98,8 @@ async def init_db():
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL, payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit', comment TEXT, created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT;''')
+        # НОВАЯ КОЛОНКА ДЛЯ ID СООБЩЕНИЯ
+        await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS message_id BIGINT;''')
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS allowed_users (user_id BIGINT PRIMARY KEY);''')
         
@@ -114,7 +115,7 @@ async def init_db():
         
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
-    logging.info("БД Supabase готова! Админ добавлен в базу.")
+    logging.info("БД Supabase готова!")
 
 async def is_user_allowed(user_id: int) -> bool:
     async with db_pool.acquire() as conn:
@@ -237,10 +238,31 @@ async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
     except: return await message.answer("Ошибка! Минимальная сумма 1 USDT.")
 
     try:
-        invoice = await rocket_client.create_invoice(currency="USDT", amount=amount_usdt, description="Пополнение", payload=str(message.from_user.id), expired_in=3600)
+        async with db_pool.acquire() as conn:
+            check_id = await conn.fetchval(
+                "INSERT INTO orders (user_id, amount, status, order_type) VALUES ($1, $2, 'pending', 'crypto') RETURNING id",
+                message.from_user.id, amount_usdt
+            )
+            
+        payload_str = f"{message.from_user.id}_{check_id}"
+
+        invoice = await rocket_client.create_invoice(
+            currency="USDT", 
+            amount=amount_usdt, 
+            description=f"Чек #{check_id}", 
+            payload=payload_str, 
+            expired_in=3600
+        )
+        
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Оплатить в xRocket", url=invoice.link)
-        await message.answer(f"💵 **Счет на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup())
+        
+        sent_msg = await message.answer(f"💵 **Чек #{check_id} на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup())
+        
+        # Сохраняем ID сообщения и payment_id
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", invoice.invoice_id, sent_msg.message_id, check_id)
+
     except Exception as e:
         logging.error(f"xRocket Error: {e}")
         await message.answer("❌ Ошибка создания счета.")
@@ -256,34 +278,42 @@ async def cmd_new(message: types.Message, command: CommandObject):
     except: return await message.answer("Ошибка! Неверная сумма.")
     
     comment = parts[1] if len(parts) > 1 else None
-    
-    # Формируем описание с комментарием
-    desc_text = f"Пополнение"
-    if comment: 
-        desc_text += f" | {comment}"
 
     try:
+        async with db_pool.acquire() as conn:
+            check_id = await conn.fetchval(
+                "INSERT INTO orders (user_id, amount, status, comment) VALUES ($1, $2, 'pending', $3) RETURNING id",
+                message.from_user.id, amount, comment
+            )
+            
+        desc_text = f"Чек #{check_id}"
+        if comment: 
+            desc_text += f" | {comment}"
+
         payment = rolly_client.payments.create(
             amount=str(amount), 
-            order_id=f"dep_{message.from_user.id}_{int(time.time())}", 
+            order_id=f"dep_{message.from_user.id}_{check_id}", 
             terminal_id=TERMINAL_ID, 
-            description=desc_text, # Передаем в RollyPay
+            description=desc_text,
             customer_id=str(message.from_user.id), 
             redirect_url="https://t.me"
         )
-        async with db_pool.acquire() as conn:
-            await conn.execute("INSERT INTO orders (user_id, amount, payment_id, status, comment) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount, payment['payment_id'], "pending", comment)
         
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
         
-        # Показываем комментарий в сообщении
         msg_text = f"**Счет: {amount:.2f} ₽**"
         if comment: 
             msg_text += f"\n📝 Название: {comment}"
             
-        await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup())
+        sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup())
+        
+        # Сохраняем ID сообщения и payment_id
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", payment['payment_id'], sent_msg.message_id, check_id)
+            
     except Exception as e: 
+        logging.error(f"RollyPay Error: {e}")
         await message.answer("Ошибка создания платежа.")
 
 @dp.message(Command("withdraw"))
@@ -411,12 +441,12 @@ async def cb_admin_stats(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users")
         v = await conn.fetchval("SELECT COUNT(*) FROM users WHERE verified_go6 = TRUE")
-        d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid'")
+        d = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND order_type = 'deposit'")
         w = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE status = 'completed'")
         p = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt * $1), 0) FROM withdrawals WHERE status != 'cancelled'", ADMIN_FEE_PER_USDT)
         user_balances = await conn.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users WHERE user_id != $1", ADMIN_ID)
         
-        today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND created_at >= CURRENT_DATE")
+        today_deposits = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE")
         today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE created_at >= CURRENT_DATE")
         
     text = (f"📊 **ОБЩАЯ СТАТИСТИКА**\n\n"
@@ -456,7 +486,7 @@ async def cb_admin_users(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("""
             SELECT u.user_id, u.username, u.balance, u.last_active,
-                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE) as dep_today
             FROM users u 
             JOIN allowed_users a ON u.user_id = a.user_id 
             ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
@@ -488,7 +518,7 @@ async def cb_admin_verified(callback: CallbackQuery):
     async with db_pool.acquire() as conn:
         users = await conn.fetch("""
             SELECT u.user_id, u.username, u.balance, u.last_active,
-                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND created_at >= CURRENT_DATE) as dep_today
+                   (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = u.user_id AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE) as dep_today
             FROM users u 
             WHERE u.verified_go6 = TRUE
             ORDER BY u.last_active DESC LIMIT $1 OFFSET $2
@@ -519,11 +549,11 @@ async def cb_admin_user_view(callback: CallbackQuery):
         user = await conn.fetchrow("SELECT username, balance, last_active, verified_go6 FROM users WHERE user_id = $1", target_id)
         if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
         
-        total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid'", target_id)
+        total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND order_type = 'deposit'", target_id)
         total_out = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed'", target_id)
         active_w = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing')", target_id)
         
-        today_dep = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND created_at >= CURRENT_DATE", target_id)
+        today_dep = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid' AND order_type = 'deposit' AND created_at >= CURRENT_DATE", target_id)
         today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE user_id = $1 AND created_at >= CURRENT_DATE", target_id)
         today_wths = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed' AND created_at >= CURRENT_DATE", target_id)
         
@@ -584,7 +614,7 @@ async def cb_admin_user_orders(callback: CallbackQuery):
     for o in orders:
         emoji = "🟢" if o['status'] == 'paid' else "🟡"
         cmt = f"({o['comment']})" if o['comment'] else ""
-        text += f"{emoji} #{o['id']} | {o['amount']:.2f} ₽ {cmt}\n"
+        text += f"{emoji} Чек #{o['id']} | {o['amount']:.2f} ₽ {cmt}\n"
         
     nav_row = []
     if page > 0: nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_user_orders_{target_id}_{page-1}"))
@@ -681,34 +711,44 @@ async def handle_rollypay_webhook(request: web.Request):
         data = json.loads(raw_body)
         if data.get("status") == "paid":
             async with db_pool.acquire() as conn:
-                # Запрашиваем comment из базы
-                row = await conn.fetchrow("SELECT user_id, amount, comment FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
+                row = await conn.fetchrow("SELECT id, user_id, amount, comment, message_id FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
                 if row:
+                    check_id = row['id']
                     user_id = row['user_id']
                     amount = row['amount']
                     comment = row['comment']
+                    msg_id = row['message_id']
                     
                     fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)
                     net_amount = amount - fee
                     
-                    await conn.execute("UPDATE orders SET status = 'paid' WHERE payment_id = $1", data.get("payment_id"))
+                    await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", check_id)
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
-                    # Уведомление клиенту
-                    try: await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
-                    except: pass
+                    # Отправляем ответ на сообщение с чеком
+                    reply_text = f"Счёт {amount:.2f} ₽\n"
+                    if comment: reply_text += f"Название {comment}\n"
+                    reply_text += "Оплата произведена"
+                    
+                    if msg_id:
+                        try:
+                            await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id)
+                        except:
+                            await bot.send_message(user_id, reply_text)
+                    else:
+                        await bot.send_message(user_id, reply_text)
 
-                    # Уведомление админу (С КОММЕНТАРИЕМ)
+                    # Уведомление админу
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
                     admin_msg = (
-                        f"🔔 **Новое пополнение (Карта/СБП)!**\n"
+                        f"🔔 **Оплачен Чек #{check_id}!**\n"
                         f"👤 Клиент: {username}\n"
-                        f"💵 Пополнил: {amount:.2f} ₽\n"
+                        f"💵 Сумма: {amount:.2f} ₽\n"
                     )
                     if comment: 
                         admin_msg += f"📝 Название: {comment}\n"
@@ -736,28 +776,44 @@ async def handle_xrocket_webhook(request: web.Request):
             payload = data.get("data", {}).get("payload")
             amount_usdt = float(data.get("data", {}).get("amount", 0))
             if payload:
-                user_id = int(payload)
+                try:
+                    user_id_str, check_id_str = payload.split("_")
+                    user_id = int(user_id_str)
+                    check_id = int(check_id_str)
+                except:
+                    user_id = int(payload)
+                    check_id = 0
+                
                 display_rate = await get_display_rate()
                 total_rub = amount_usdt * display_rate
                 
                 fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)
                 net_amount = total_rub - fee
                 
+                msg_id = None
                 async with db_pool.acquire() as conn:
+                    if check_id > 0:
+                        await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", check_id)
+                        msg_id = await conn.fetchval("SELECT message_id FROM orders WHERE id = $1", check_id)
+                        
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                         
-                try: await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
-                except: pass
+                reply_text = f"Счёт {amount_usdt} USDT\nОплата произведена"
+                if msg_id:
+                    try: await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id)
+                    except: await bot.send_message(user_id, reply_text)
+                else:
+                    await bot.send_message(user_id, reply_text)
 
                 user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                 username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                 
                 admin_msg = (
-                    f"🔔 **Новое пополнение (xRocket)!**\n"
+                    f"🔔 **Оплачен Чек #{check_id} (xRocket)!**\n"
                     f"👤 Клиент: {username}\n"
-                    f"💵 Пополнил: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
+                    f"💵 Сумма: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
                     f"💰 Ваш процент (5%): **{fee:.2f} ₽**"
                 )
                 try: await bot.send_message(ADMIN_ID, admin_msg, parse_mode="Markdown")
@@ -771,7 +827,6 @@ async def main():
     global rolly_client, rocket_client
     await init_db()
     
-    # ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ ВНУТРИ ЦИКЛА СОБЫТИЙ
     rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
     
