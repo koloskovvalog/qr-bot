@@ -26,7 +26,6 @@ WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 # --- XROCKET PAY API ---
 XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
 XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
-rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
 
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
@@ -36,7 +35,7 @@ MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
 MARKUP_DISPLAY = 1.66
 MARKUP_DEDUCT = 4.66
-DEPOSIT_FEE_PERCENT = 5.0  # 5% идет вам
+DEPOSIT_FEE_PERCENT = 5.0
 
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
@@ -44,8 +43,10 @@ ADMIN_ID = 7653934214
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
 
+# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ КЛИЕНТОВ
+rolly_client = None
+rocket_client = None
 active_games = {}
 
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
@@ -111,7 +112,6 @@ async def init_db():
             );
         ''')
         
-        # ЖЕСТКО ДОБАВЛЯЕМ АДМИНА, ЧТОБЫ НАЧИСЛЕНИЕ ПРОЦЕНТОВ РАБОТАЛО
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
     logging.info("БД Supabase готова! Админ добавлен в базу.")
@@ -228,6 +228,7 @@ async def cb_crash_cashout(callback: CallbackQuery):
 # ==================== ПОПОЛНЕНИЕ ====================
 @dp.message(Command("usdt"))
 async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
+    global rocket_client
     if not await is_user_allowed(message.from_user.id): return
     if not command.args: return await message.answer("Укажите сумму в USDT: `/usdt 10`")
     try:
@@ -246,6 +247,7 @@ async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
 
 @dp.message(Command("new"))
 async def cmd_new(message: types.Message, command: CommandObject):
+    global rolly_client
     if not await is_user_allowed(message.from_user.id): return
     if not command.args: return await message.answer("Укажите сумму: `/new 500`")
     parts = command.args.split(maxsplit=1)
@@ -666,15 +668,12 @@ async def handle_rollypay_webhook(request: web.Request):
                     await conn.execute("UPDATE orders SET status = 'paid' WHERE payment_id = $1", data.get("payment_id"))
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     
-                    # ЖЕСТКОЕ НАЧИСЛЕНИЕ АДМИНУ
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
-                    # УВЕДОМЛЕНИЕ КЛИЕНТУ
                     try: await bot.send_message(user_id, f"🟢 Пополнено на {amount:.2f} ₽")
                     except: pass
 
-                    # УВЕДОМЛЕНИЕ АДМИНУ
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
@@ -718,11 +717,9 @@ async def handle_xrocket_webhook(request: web.Request):
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                         
-                # УВЕДОМЛЕНИЕ КЛИЕНТУ
                 try: await bot.send_message(user_id, f"🟢 Пополнено на {amount_usdt} USDT")
                 except: pass
 
-                # УВЕДОМЛЕНИЕ АДМИНУ
                 user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                 username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                 
@@ -740,7 +737,13 @@ async def handle_xrocket_webhook(request: web.Request):
         return web.Response(text="Error", status=500)
 
 async def main():
+    global rolly_client, rocket_client
     await init_db()
+    
+    # ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ ВНУТРИ ЦИКЛА СОБЫТИЙ
+    rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
+    rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
+    
     app = web.Application()
     app.router.add_post("/rollypay-webhook", handle_rollypay_webhook)
     app.router.add_post("/xrocket-webhook", handle_xrocket_webhook)
