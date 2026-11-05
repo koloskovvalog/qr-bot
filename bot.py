@@ -33,10 +33,8 @@ GO6_REF_LINK = "https://t.me/Go6online_bot?start=verify_XE732NNY"
 
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
-MARKUP_DISPLAY = 1.66
-MARKUP_DEDUCT = 4.66
 
-# --- ГЛОБАЛЬНАЯ КОМИССИЯ (0% по умолчанию) ---
+# ГЛОБАЛЬНАЯ КОМИССИЯ С ПОПОЛНЕНИЙ
 DEPOSIT_FEE_PERCENT = 0.0 
 
 ADMIN_FEE_PER_USDT = 1.0
@@ -79,13 +77,18 @@ async def fetch_base_rate():
         logging.error(f"Ошибка курса: {e}")
     return _base_rate if _base_rate > 0 else 85.0
 
-async def get_display_rate():
-    base = await fetch_base_rate()
-    return base + MARKUP_DISPLAY
+# Получаем актуальную наценку из БД
+async def get_current_markup():
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'markup'")
+        if row:
+            return float(row['value'])
+        return 2.0 # По умолчанию 2 рубля
 
-async def get_deduct_rate():
+async def get_final_rate():
     base = await fetch_base_rate()
-    return base + MARKUP_DEDUCT
+    markup = await get_current_markup()
+    return base + markup
 
 db_pool: asyncpg.Pool = None
 
@@ -97,7 +100,7 @@ async def init_db():
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMPTZ DEFAULT NOW();''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;''')
         await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_go6 BOOLEAN DEFAULT FALSE;''')
-        await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_fee REAL DEFAULT NULL;''') # НОВАЯ КОЛОНКА
+        await conn.execute('''ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_fee REAL DEFAULT NULL;''')
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS orders (id BIGSERIAL PRIMARY KEY, user_id BIGINT, amount REAL, payment_id TEXT UNIQUE, status TEXT, order_type TEXT DEFAULT 'deposit', comment TEXT, message_id BIGINT, created_at TIMESTAMPTZ DEFAULT NOW());''')
         await conn.execute('''ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT;''')
@@ -117,6 +120,7 @@ async def init_db():
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);''')
         await conn.execute("INSERT INTO settings (key, value) VALUES ('bot_status', 'active') ON CONFLICT (key) DO NOTHING;")
+        await conn.execute("INSERT INTO settings (key, value) VALUES ('markup', '2.0') ON CONFLICT (key) DO NOTHING;")
         
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
@@ -184,7 +188,7 @@ async def errors_handler(update: types.Update, exception: Exception):
         except: pass
     return True
 
-# ==================== УПРАВЛЕНИЕ БОТОМ ====================
+# ==================== УПРАВЛЕНИЕ БОТОМ И НАЦЕНКОЙ ====================
 @dp.message(Command("stop_bot"))
 async def cmd_stop_bot(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -199,7 +203,20 @@ async def cmd_start_bot(message: types.Message):
         await conn.execute("UPDATE settings SET value = 'active' WHERE key = 'bot_status'")
     await message.answer("▶️ **Бот снова включен.** Пользователи могут пользоваться ботом.")
 
-# ==================== УПРАВЛЕНИЕ КОМИССИЕЙ ====================
+@dp.message(Command("setmarkup"))
+async def cmd_setmarkup(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args:
+        return await message.answer("Используйте: `/setmarkup [сумма в рублях]`\nПример: `/setmarkup 2` или `/setmarkup 1.5`")
+    
+    try:
+        markup = float(command.args.replace(',', '.'))
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE settings SET value = $1 WHERE key = 'markup'", str(markup))
+        await message.answer(f"✅ Наценка к курсу Рапиры установлена: **+{markup} ₽**", parse_mode="Markdown")
+    except ValueError:
+        await message.answer("❌ Ошибка! Введите число (например, 2 или 2.5).")
+
 @dp.message(Command("setfee"))
 async def cmd_setfee(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -212,12 +229,10 @@ async def cmd_setfee(message: types.Message, command: CommandObject):
         percent = float(args[1].replace(',', '.'))
         
         async with db_pool.acquire() as conn:
-            # Проверяем, есть ли такой юзер
             user = await conn.fetchrow("SELECT 1 FROM users WHERE user_id = $1", target_id)
             if not user:
                 return await message.answer("❌ Пользователь не найден в базе.")
             
-            # Ставим кастомную комиссию
             await conn.execute("UPDATE users SET custom_fee = $1 WHERE user_id = $2", percent, target_id)
             
         await message.answer(f"✅ Для пользователя `{target_id}` установлена комиссия **{percent}%**.\n(При 0% используется глобальная: {DEPOSIT_FEE_PERCENT}%)", parse_mode="Markdown")
@@ -268,8 +283,8 @@ async def cmd_crash(message: types.Message, command: CommandObject):
         if bet_usdt <= 0: raise ValueError
     except: return await message.answer("Ошибка! Неверная сумма.")
 
-    deduct_rate = await get_deduct_rate()
-    bet_rub = bet_usdt * deduct_rate
+    rate = await get_final_rate()
+    bet_rub = bet_usdt * rate
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", user_id)
@@ -280,7 +295,7 @@ async def cmd_crash(message: types.Message, command: CommandObject):
     r = random.uniform(0.01, 1.0)
     crash_point = max(1.1, 0.90 / r)
 
-    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': deduct_rate, 'crash_point': crash_point, 'bet_id': bet_id}
+    active_games[user_id] = {'multiplier': 1.0, 'bet_usdt': bet_usdt, 'rate': rate, 'crash_point': crash_point, 'bet_id': bet_id}
     
     builder = InlineKeyboardBuilder()
     builder.button(text="💰 ЗАБРАТЬ (1.0x)", callback_data=f"crash_cashout_{user_id}")
@@ -435,8 +450,8 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
 
     fee = calculate_network_fee(network, amount_usdt)
     total_usdt = amount_usdt + fee
-    deduct_rate = await get_deduct_rate()
-    total_rub = total_usdt * deduct_rate
+    rate = await get_final_rate()
+    total_rub = total_usdt * rate
     profit_rub = amount_usdt * ADMIN_FEE_PER_USDT
 
     async with db_pool.acquire() as conn:
@@ -514,17 +529,17 @@ async def process_reject_access(callback: CallbackQuery):
 async def cmd_start(message: types.Message):
     if not await is_user_allowed(message.from_user.id):
         return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
-    display_rate = await get_display_rate()
-    await message.answer(f"Привет! Текущий курс: **1 USDT = {display_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть", parse_mode="Markdown")
+    rate = await get_final_rate()
+    await message.answer(f"Привет! Текущий курс: **1 USDT = {rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть", parse_mode="Markdown")
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
     if not await is_user_allowed(message.from_user.id): return
-    display_rate = await get_display_rate()
+    rate = await get_final_rate()
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
         bal = row['balance'] if row and row['balance'] is not None else 0.0
-    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / display_rate:.2f} USDT)", parse_mode="Markdown")
+    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / rate:.2f} USDT)", parse_mode="Markdown")
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
 @dp.message(Command("admin"))
@@ -560,8 +575,8 @@ async def cmd_deduct(message: types.Message, command: CommandObject):
 async def cb_admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     
-    display_rate = await get_display_rate()
-    deduct_rate = await get_deduct_rate()
+    rate = await get_final_rate()
+    markup = await get_current_markup()
     
     async with db_pool.acquire() as conn:
         u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") or 0
@@ -590,8 +605,8 @@ async def cb_admin_stats(callback: CallbackQuery):
             f"👑 **ВАШ ДОХОД:**\n"
             f"📈 С выводов (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
             f"💳 Ваш баланс: **{admin_balance:.2f} ₽**\n\n"
-            f"💱 **Курс для клиента: {display_rate:.2f} ₽**\n"
-            f"💸 **Курс списания: {deduct_rate:.2f} ₽**")
+            f"💱 **Наценка к Рапире: +{markup} ₽**\n"
+            f"💰 **Итоговый курс: {rate:.2f} ₽**")
             
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="admin_main")]]))
 
@@ -855,7 +870,6 @@ async def handle_rollypay_webhook(request: web.Request):
                     comment = row['comment']
                     msg_id = row['message_id']
                     
-                    # Проверяем индивидуальную комиссию
                     user_row = await conn.fetchrow("SELECT username, custom_fee FROM users WHERE user_id = $1", user_id)
                     custom_fee = user_row['custom_fee'] if user_row else None
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
@@ -933,10 +947,9 @@ async def handle_xrocket_webhook(request: web.Request):
                     if check_id > 0 and row is None:
                         return web.Response(text="OK", status=200)
                         
-                    display_rate = await get_display_rate()
-                    total_rub = amount_usdt * display_rate
+                    rate = await get_final_rate()
+                    total_rub = amount_usdt * rate
                     
-                    # Проверяем индивидуальную комиссию
                     user_row = await conn.fetchrow("SELECT username, custom_fee FROM users WHERE user_id = $1", user_id)
                     custom_fee = user_row['custom_fee'] if user_row else None
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
