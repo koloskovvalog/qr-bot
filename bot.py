@@ -112,6 +112,10 @@ async def init_db():
             );
         ''')
         
+        # ТАБЛИЦА НАСТРОЕК (ДЛЯ РЕЖИМА ТЕХРАБОТ)
+        await conn.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);''')
+        await conn.execute("INSERT INTO settings (key, value) VALUES ('bot_status', 'active') ON CONFLICT (key) DO NOTHING;")
+        
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
     logging.info("БД Supabase готова!")
@@ -120,6 +124,11 @@ async def is_user_allowed(user_id: int) -> bool:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT 1 FROM allowed_users WHERE user_id = $1", user_id)
         return row is not None
+
+async def get_bot_status() -> str:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'bot_status'")
+        return row['value'] if row else 'active'
 
 def format_last_seen(last_active: datetime):
     if not last_active: return "Неизвестно"
@@ -130,6 +139,7 @@ def format_last_seen(last_active: datetime):
     elif seconds < 86400: return f"🟠 {int(seconds // 3600)} ч. назад"
     else: return f"🔴 {int(seconds // 86400)} дн. назад"
 
+# ==================== MIDDLEWARE ====================
 @dp.message.middleware()
 async def track_activity_middleware(handler, event: types.Message, data):
     if event.from_user:
@@ -138,6 +148,24 @@ async def track_activity_middleware(handler, event: types.Message, data):
                 INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2)
                 ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2
             ''', event.from_user.id, event.from_user.username)
+    return await handler(event, data)
+
+# МИДЛВАРЬ ДЛЯ РЕЖИМА ТЕХРАБОТ
+@dp.message.middleware()
+@dp.callback_query.middleware()
+async def maintenance_middleware(handler, event, data):
+    # Если пишет админ, пропускаем
+    if event.from_user and event.from_user.id == ADMIN_ID:
+        return await handler(event, data)
+    
+    status = await get_bot_status()
+    if status == 'stopped':
+        if isinstance(event, types.Message):
+            await event.answer("🛠 **Бот временно на техническом обслуживании.**\n\nПожалуйста, зайдите позже. Приносим извинения за неудобства!", parse_mode="Markdown")
+        elif isinstance(event, types.CallbackQuery):
+            await event.answer("🛠 Бот на техобслуживании. Зайдите позже.", show_alert=True)
+        return # Прерываем обработку
+    
     return await handler(event, data)
 
 @dp.errors()
@@ -149,6 +177,21 @@ async def errors_handler(update: types.Update, exception: Exception):
             await update.callback_query.answer("Ошибка сервера")
         except: pass
     return True
+
+# ==================== УПРАВЛЕНИЕ БОТОМ (ДЛЯ АДМИНА) ====================
+@dp.message(Command("stop_bot"))
+async def cmd_stop_bot(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE settings SET value = 'stopped' WHERE key = 'bot_status'")
+    await message.answer("⏸ **Бот остановлен.** Пользователи видят сообщение о техобслуживании.")
+
+@dp.message(Command("start_bot"))
+async def cmd_start_bot(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE settings SET value = 'active' WHERE key = 'bot_status'")
+    await message.answer("▶️ **Бот снова включен.** Пользователи могут пользоваться ботом.")
 
 # ==================== РУЧНОЕ ДОБАВЛЕНИЕ В БЕЛЫЙ СПИСОК ====================
 @dp.message(Command("allow"))
@@ -345,7 +388,6 @@ async def cmd_new(message: types.Message, command: CommandObject):
         logging.error(f"RollyPay Error: {e}")
         await message.answer("Ошибка создания платежа.")
 
-# ==================== ВЫВОД (С ЛИМИТОМ 50%) ====================
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
