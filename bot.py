@@ -34,9 +34,6 @@ GO6_REF_LINK = "https://t.me/Go6online_bot?start=verify_XE732NNY"
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
 
-# ГЛОБАЛЬНАЯ КОМИССИЯ С ПОПОЛНЕНИЙ
-DEPOSIT_FEE_PERCENT = 0.0 
-
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
 
@@ -77,13 +74,19 @@ async def fetch_base_rate():
         logging.error(f"Ошибка курса: {e}")
     return _base_rate if _base_rate > 0 else 85.0
 
-# Получаем актуальную наценку из БД
 async def get_current_markup():
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'markup'")
         if row:
             return float(row['value'])
-        return 2.0 # По умолчанию 2 рубля
+        return 2.0
+
+async def get_global_fee():
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'global_fee'")
+        if row:
+            return float(row['value'])
+        return 0.0
 
 async def get_final_rate():
     base = await fetch_base_rate()
@@ -121,6 +124,7 @@ async def init_db():
         await conn.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);''')
         await conn.execute("INSERT INTO settings (key, value) VALUES ('bot_status', 'active') ON CONFLICT (key) DO NOTHING;")
         await conn.execute("INSERT INTO settings (key, value) VALUES ('markup', '2.0') ON CONFLICT (key) DO NOTHING;")
+        await conn.execute("INSERT INTO settings (key, value) VALUES ('global_fee', '0.0') ON CONFLICT (key) DO NOTHING;")
         
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
@@ -188,7 +192,7 @@ async def errors_handler(update: types.Update, exception: Exception):
         except: pass
     return True
 
-# ==================== УПРАВЛЕНИЕ БОТОМ И НАЦЕНКОЙ ====================
+# ==================== УПРАВЛЕНИЕ БОТОМ И НАСТРОЙКАМИ ====================
 @dp.message(Command("stop_bot"))
 async def cmd_stop_bot(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -220,24 +224,36 @@ async def cmd_setmarkup(message: types.Message, command: CommandObject):
 @dp.message(Command("setfee"))
 async def cmd_setfee(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
-    if not command.args or len(command.args.split()) < 2:
-        return await message.answer("Используйте: `/setfee [ID] [процент]`\nПример: `/setfee 123456789 5` (или 0 чтобы убрать)")
+    if not command.args:
+        return await message.answer("Используйте:\n`/setfee [процент]` (общая для всех)\n`/setfee [ID] [процент]` (для конкретного юзера)")
     
     try:
         args = command.args.split()
-        target_id = int(args[0])
-        percent = float(args[1].replace(',', '.'))
         
-        async with db_pool.acquire() as conn:
-            user = await conn.fetchrow("SELECT 1 FROM users WHERE user_id = $1", target_id)
-            if not user:
-                return await message.answer("❌ Пользователь не найден в базе.")
+        # Если передано одно число (например, /setfee 5) - ставим общую комиссию
+        if len(args) == 1:
+            percent = float(args[0].replace(',', '.'))
+            async with db_pool.acquire() as conn:
+                await conn.execute("UPDATE settings SET value = $1 WHERE key = 'global_fee'", str(percent))
+            await message.answer(f"✅ **Общая комиссия для всех** установлена: **{percent}%**", parse_mode="Markdown")
             
-            await conn.execute("UPDATE users SET custom_fee = $1 WHERE user_id = $2", percent, target_id)
+        # Если передано два значения (например, /setfee 123456789 5) - ставим индивидуальную
+        elif len(args) == 2:
+            target_id = int(args[0])
+            percent = float(args[1].replace(',', '.'))
             
-        await message.answer(f"✅ Для пользователя `{target_id}` установлена комиссия **{percent}%**.\n(При 0% используется глобальная: {DEPOSIT_FEE_PERCENT}%)", parse_mode="Markdown")
+            async with db_pool.acquire() as conn:
+                user = await conn.fetchrow("SELECT 1 FROM users WHERE user_id = $1", target_id)
+                if not user:
+                    return await message.answer("❌ Пользователь не найден в базе.")
+                
+                await conn.execute("UPDATE users SET custom_fee = $1 WHERE user_id = $2", percent, target_id)
+                
+            await message.answer(f"✅ Для пользователя `{target_id}` установлена **индивидуальная** комиссия: **{percent}%**", parse_mode="Markdown")
+        else:
+            await message.answer("❌ Неверный формат.")
     except ValueError:
-        await message.answer("❌ Ошибка! Проверьте правильность ввода ID и процента.")
+        await message.answer("❌ Ошибка! Проверьте правильность ввода.")
 
 # ==================== БЕЛЫЙ СПИСОК ====================
 @dp.message(Command("allow"))
@@ -577,6 +593,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     
     rate = await get_final_rate()
     markup = await get_current_markup()
+    global_fee = await get_global_fee()
     
     async with db_pool.acquire() as conn:
         u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") or 0
@@ -606,7 +623,8 @@ async def cb_admin_stats(callback: CallbackQuery):
             f"📈 С выводов (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
             f"💳 Ваш баланс: **{admin_balance:.2f} ₽**\n\n"
             f"💱 **Наценка к Рапире: +{markup} ₽**\n"
-            f"💰 **Итоговый курс: {rate:.2f} ₽**")
+            f"💰 **Итоговый курс: {rate:.2f} ₽**\n"
+            f"📥 **Общая комиссия: {global_fee}%**")
             
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="admin_main")]]))
 
@@ -700,16 +718,17 @@ async def cb_admin_user_view(callback: CallbackQuery):
         today_bets = await conn.fetchval("SELECT COALESCE(SUM(bet_usdt), 0) FROM game_bets WHERE user_id = $1 AND created_at >= CURRENT_DATE", target_id) or 0.0
         today_wths = await conn.fetchval("SELECT COALESCE(SUM(amount_usdt), 0) FROM withdrawals WHERE user_id = $1 AND status = 'completed' AND created_at >= CURRENT_DATE", target_id) or 0.0
         
+    global_fee = await get_global_fee()
     bal = user['balance'] if user['balance'] is not None else 0.0
     display_name = f"@{user['username']}" if user['username'] else "Скрыт"
     v_status = "✅ Да" if user['verified_go6'] else "❌ Нет"
     c_fee = user['custom_fee']
-    fee_text = f"{c_fee}%" if c_fee is not None else f"Глобальная ({DEPOSIT_FEE_PERCENT}%)"
+    fee_text = f"{c_fee}%" if c_fee is not None else f"Глобальная ({global_fee}%)"
     
     text = (f"👤 **ДОСЬЕ:** `{target_id}`\n\n"
             f"🔗 Юзернейм: **{display_name}**\n"
             f"🛡️ Верификация: **{v_status}**\n"
-            f"📊 Индивид. комиссия: **{fee_text}**\n"
+            f"📊 Комиссия: **{fee_text}**\n"
             f"🕒 Статус: {format_last_seen(user['last_active'])}\n"
             f"💰 Баланс: **{bal:.2f} ₽**\n\n"
             f"📅 **ЗА СЕГОДНЯ:**\n"
@@ -874,7 +893,8 @@ async def handle_rollypay_webhook(request: web.Request):
                     custom_fee = user_row['custom_fee'] if user_row else None
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
-                    actual_fee_percent = custom_fee if custom_fee is not None else DEPOSIT_FEE_PERCENT
+                    global_fee = await get_global_fee()
+                    actual_fee_percent = custom_fee if custom_fee is not None else global_fee
                     
                     fee = amount * (actual_fee_percent / 100.0)
                     net_amount = amount - fee
@@ -954,7 +974,8 @@ async def handle_xrocket_webhook(request: web.Request):
                     custom_fee = user_row['custom_fee'] if user_row else None
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
-                    actual_fee_percent = custom_fee if custom_fee is not None else DEPOSIT_FEE_PERCENT
+                    global_fee = await get_global_fee()
+                    actual_fee_percent = custom_fee if custom_fee is not None else global_fee
                     
                     fee = total_rub * (actual_fee_percent / 100.0)
                     net_amount = total_rub - fee
