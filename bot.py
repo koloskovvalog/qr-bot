@@ -24,7 +24,7 @@ SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
 # --- XROCKET PAY API ---
-XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
+XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTg2NWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
 XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
 
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
@@ -149,6 +149,38 @@ async def errors_handler(update: types.Update, exception: Exception):
             await update.callback_query.answer("Ошибка сервера")
         except: pass
     return True
+
+# ==================== РУЧНОЕ ДОБАВЛЕНИЕ В БЕЛЫЙ СПИСОК ====================
+@dp.message(Command("allow"))
+async def cmd_allow(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args: 
+        return await message.answer("Укажите ID: `/allow 123456789`")
+    
+    try:
+        new_user_id = int(command.args.strip())
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", new_user_id)
+            await conn.execute("INSERT INTO users (user_id, last_active) VALUES ($1, NOW()) ON CONFLICT DO NOTHING", new_user_id)
+        await message.answer(f"✅ Пользователь `{new_user_id}` добавлен в белый список.")
+    except ValueError: 
+        await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка базы: {e}")
+
+@dp.message(Command("deny"))
+async def cmd_deny(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args: 
+        return await message.answer("Укажите ID: `/deny 123456789`")
+    
+    try:
+        target_id = int(command.args.strip())
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
+        await message.answer(f"🚫 Пользователь `{target_id}` заблокирован (удален из белого списка).")
+    except ValueError: 
+        await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
 # ==================== ИГРА КРАШ ====================
 @dp.message(Command("crash"))
