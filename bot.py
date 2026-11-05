@@ -35,7 +35,9 @@ MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
 MARKUP_DISPLAY = 1.66
 MARKUP_DEDUCT = 4.66
-DEPOSIT_FEE_PERCENT = 5.0
+
+# --- ИЗМЕНЕНО НА 6 ПРОЦЕНТОВ ---
+DEPOSIT_FEE_PERCENT = 6.0 
 
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
@@ -112,7 +114,6 @@ async def init_db():
             );
         ''')
         
-        # ТАБЛИЦА НАСТРОЕК (ДЛЯ РЕЖИМА ТЕХРАБОТ)
         await conn.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);''')
         await conn.execute("INSERT INTO settings (key, value) VALUES ('bot_status', 'active') ON CONFLICT (key) DO NOTHING;")
         
@@ -150,11 +151,15 @@ async def track_activity_middleware(handler, event: types.Message, data):
             ''', event.from_user.id, event.from_user.username)
     return await handler(event, data)
 
-# МИДЛВАРЬ ДЛЯ РЕЖИМА ТЕХРАБОТ
+@dp.message.middleware()
+async def ignore_forwarded_middleware(handler, event: types.Message, data):
+    if event.forward_origin:
+        return
+    return await handler(event, data)
+
 @dp.message.middleware()
 @dp.callback_query.middleware()
 async def maintenance_middleware(handler, event, data):
-    # Если пишет админ, пропускаем
     if event.from_user and event.from_user.id == ADMIN_ID:
         return await handler(event, data)
     
@@ -164,7 +169,7 @@ async def maintenance_middleware(handler, event, data):
             await event.answer("🛠 **Бот временно на техническом обслуживании.**\n\nПожалуйста, зайдите позже. Приносим извинения за неудобства!", parse_mode="Markdown")
         elif isinstance(event, types.CallbackQuery):
             await event.answer("🛠 Бот на техобслуживании. Зайдите позже.", show_alert=True)
-        return # Прерываем обработку
+        return
     
     return await handler(event, data)
 
@@ -178,7 +183,7 @@ async def errors_handler(update: types.Update, exception: Exception):
         except: pass
     return True
 
-# ==================== УПРАВЛЕНИЕ БОТОМ (ДЛЯ АДМИНА) ====================
+# ==================== УПРАВЛЕНИЕ БОТОМ ====================
 @dp.message(Command("stop_bot"))
 async def cmd_stop_bot(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -193,7 +198,7 @@ async def cmd_start_bot(message: types.Message):
         await conn.execute("UPDATE settings SET value = 'active' WHERE key = 'bot_status'")
     await message.answer("▶️ **Бот снова включен.** Пользователи могут пользоваться ботом.")
 
-# ==================== РУЧНОЕ ДОБАВЛЕНИЕ В БЕЛЫЙ СПИСОК ====================
+# ==================== БЕЛЫЙ СПИСОК ====================
 @dp.message(Command("allow"))
 async def cmd_allow(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -221,7 +226,7 @@ async def cmd_deny(message: types.Message, command: CommandObject):
         target_id = int(command.args.strip())
         async with db_pool.acquire() as conn:
             await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", target_id)
-        await message.answer(f"🚫 Пользователь `{target_id}` заблокирован (удален из белого списка).")
+        await message.answer(f"🚫 Пользователь `{target_id}` заблокирован.")
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
@@ -415,7 +420,6 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
         if current_bal < total_rub: 
             return await message.answer("❌ Недостаточно средств.")
             
-        # === ПРОВЕРКА ЛИМИТА 50% В СУТКИ ===
         today_wths = await conn.fetchval(
             "SELECT COALESCE(SUM(amount_rub), 0) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing', 'completed') AND created_at >= CURRENT_DATE",
             message.from_user.id
@@ -433,7 +437,6 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
                 f"Сейчас пытаетесь вывести: **{total_rub:.2f} ₽**",
                 parse_mode="Markdown"
             )
-        # ====================================
 
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub, message.from_user.id)
         await conn.execute("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount_usdt, total_rub, address, network)
@@ -560,7 +563,7 @@ async def cb_admin_stats(callback: CallbackQuery):
             f"📥 Пополнений: **{today_deposits:.2f} ₽**\n"
             f"🎰 Оборот игры: **{today_bets:.2f} USDT**\n\n"
             f"👑 **ВАШ ДОХОД:**\n"
-            f"📥 С пополнений (5%): **{deposit_profit:.2f} ₽**\n"
+            f"📥 С пополнений ({DEPOSIT_FEE_PERCENT:.0f}%): **{deposit_profit:.2f} ₽**\n"
             f"📈 С выводов (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
             f"💳 Ваш баланс: **{admin_balance:.2f} ₽**\n\n"
             f"💱 **Курс для клиента: {display_rate:.2f} ₽**\n"
@@ -854,7 +857,7 @@ async def handle_rollypay_webhook(request: web.Request):
                     )
                     if comment: 
                         admin_msg += f"📝 Название: {comment}\n"
-                    admin_msg += f"💰 Ваш процент (5%): {fee:.2f} ₽"
+                    admin_msg += f"💰 Ваш процент ({DEPOSIT_FEE_PERCENT:.0f}%): {fee:.2f} ₽"
                     
                     try: await bot.send_message(ADMIN_ID, admin_msg)
                     except Exception as e:
@@ -922,7 +925,7 @@ async def handle_xrocket_webhook(request: web.Request):
                     f"🔔 Оплачен Чек #{check_id} (xRocket)!\n"
                     f"👤 Клиент: {username}\n"
                     f"💵 Сумма: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
-                    f"💰 Ваш процент (5%): {fee:.2f} ₽"
+                    f"💰 Ваш процент ({DEPOSIT_FEE_PERCENT:.0f}%): {fee:.2f} ₽"
                 )
                 try: await bot.send_message(ADMIN_ID, admin_msg)
                 except Exception as e:
