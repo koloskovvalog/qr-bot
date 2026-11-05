@@ -24,7 +24,7 @@ SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
 
 # --- XROCKET PAY API ---
-XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTg2NWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
+XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
 XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
 
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
@@ -345,6 +345,7 @@ async def cmd_new(message: types.Message, command: CommandObject):
         logging.error(f"RollyPay Error: {e}")
         await message.answer("Ошибка создания платежа.")
 
+# ==================== ВЫВОД (С ЛИМИТОМ 50%) ====================
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
@@ -367,7 +368,31 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
-        if not row or row['balance'] < total_rub: return await message.answer("❌ Недостаточно средств.")
+        current_bal = row['balance'] if row and row['balance'] is not None else 0.0
+        
+        if current_bal < total_rub: 
+            return await message.answer("❌ Недостаточно средств.")
+            
+        # === ПРОВЕРКА ЛИМИТА 50% В СУТКИ ===
+        today_wths = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount_rub), 0) FROM withdrawals WHERE user_id = $1 AND status IN ('pending', 'processing', 'completed') AND created_at >= CURRENT_DATE",
+            message.from_user.id
+        )
+        
+        max_limit_today = current_bal / 2.0
+        
+        if today_wths + total_rub > max_limit_today:
+            return await message.answer(
+                f"❌ **Превышен дневной лимит на вывод!**\n\n"
+                f"Правило: не более 50% от текущего баланса в сутки.\n"
+                f"Ваш баланс: **{current_bal:.2f} ₽**\n"
+                f"Лимит на сегодня: **{max_limit_today:.2f} ₽**\n"
+                f"Вы уже вывели сегодня: **{today_wths:.2f} ₽**\n"
+                f"Сейчас пытаетесь вывести: **{total_rub:.2f} ₽**",
+                parse_mode="Markdown"
+            )
+        # ====================================
+
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub, message.from_user.id)
         await conn.execute("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount_usdt, total_rub, address, network)
         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", profit_rub, ADMIN_ID)
