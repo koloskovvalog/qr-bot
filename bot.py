@@ -35,8 +35,6 @@ MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
 MARKUP_DISPLAY = 1.66
 MARKUP_DEDUCT = 4.66
-
-# --- ИЗМЕНЕНО НА 6 ПРОЦЕНТОВ ---
 DEPOSIT_FEE_PERCENT = 6.0 
 
 ADMIN_FEE_PER_USDT = 1.0
@@ -151,10 +149,11 @@ async def track_activity_middleware(handler, event: types.Message, data):
             ''', event.from_user.id, event.from_user.username)
     return await handler(event, data)
 
+# ЖЕСТКАЯ ЗАЩИТА ОТ ПЕРЕСЛАННЫХ СООБЩЕНИЙ
 @dp.message.middleware()
 async def ignore_forwarded_middleware(handler, event: types.Message, data):
-    if event.forward_origin:
-        return
+    if event.forward_origin: # Если есть плашка "Переслано" — бот молчит
+        return 
     return await handler(event, data)
 
 @dp.message.middleware()
@@ -489,7 +488,8 @@ async def cmd_start(message: types.Message):
     if not await is_user_allowed(message.from_user.id):
         return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
     display_rate = await get_display_rate()
-    await message.answer(f"Привет! Текущий курс: **1 USDT = {display_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть")
+    # ИСПРАВЛЕНО: добавлен parse_mode="Markdown"
+    await message.answer(f"Привет! Текущий курс: **1 USDT = {display_rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть", parse_mode="Markdown")
 
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
@@ -508,7 +508,8 @@ async def cmd_admin(message: types.Message):
     builder.button(text="📈 Статистика", callback_data="admin_stats")
     builder.button(text="👥 Все пользователи", callback_data="admin_users_0")
     builder.button(text="🛡️ Верифицированные (GO6)", callback_data="admin_verified_0")
-    await message.answer("👑 **Админ-панель:**", reply_markup=builder.as_markup())
+    # ИСПРАВЛЕНО: добавлен parse_mode="Markdown"
+    await message.answer("👑 **Админ-панель:**", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message, command: CommandObject):
@@ -578,7 +579,7 @@ async def cb_admin_main(callback: CallbackQuery):
     builder.button(text="📈 Статистика", callback_data="admin_stats")
     builder.button(text="👥 Все пользователи", callback_data="admin_users_0")
     builder.button(text="🛡️ Верифицированные (GO6)", callback_data="admin_verified_0")
-    await callback.message.edit_text("👑 **Админ-панель:**", reply_markup=builder.as_markup())
+    await callback.message.edit_text("👑 **Админ-панель:**", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("admin_users_"))
 async def cb_admin_users(callback: CallbackQuery):
@@ -684,7 +685,7 @@ async def cb_admin_user_view(callback: CallbackQuery):
     builder.button(text="💸 История выводов", callback_data=f"admin_user_wths_{target_id}_0")
     builder.row(InlineKeyboardButton(text="📝 Списать", callback_data=f"admin_deduct_info_{target_id}"), InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin_block_{target_id}"))
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_users_0"))
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("admin_deduct_info_"))
 async def cb_admin_deduct_info(callback: CallbackQuery):
@@ -769,7 +770,7 @@ async def cb_manage_wth(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Выполнено", callback_data=f"admin_done_{w_id}")
     builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
-    await callback.message.edit_text(f"⚙️ **Заявка #{w_id}**\nID: `{row['user_id']}`\nСеть: {row['network']}\nUSDT: {row['amount_usdt']}\nАдрес: `{row['address']}`", reply_markup=builder.as_markup())
+    await callback.message.edit_text(f"⚙️ **Заявка #{w_id}**\nID: `{row['user_id']}`\nСеть: {row['network']}\nUSDT: {row['amount_usdt']}\nАдрес: `{row['address']}`", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("admin_take_"))
 async def process_admin_take(callback: CallbackQuery):
@@ -814,9 +815,15 @@ async def handle_rollypay_webhook(request: web.Request):
         
         data = json.loads(raw_body)
         if data.get("status") == "paid":
+            payment_id = data.get("payment_id")
             async with db_pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT id, user_id, amount, comment, message_id FROM orders WHERE payment_id = $1 AND status = 'pending'", data.get("payment_id"))
-                if row:
+                # АТОМАРНАЯ ПРОВЕРКА: Меняем статус только если он 'pending' и сразу возвращаем данные
+                row = await conn.fetchrow(
+                    "UPDATE orders SET status = 'paid' WHERE payment_id = $1 AND status = 'pending' RETURNING id, user_id, amount, comment, message_id",
+                    payment_id
+                )
+                
+                if row: # Если row не None, значит мы только что изменили статус и это первый вебхук
                     check_id = row['id']
                     user_id = row['user_id']
                     amount = row['amount']
@@ -826,9 +833,7 @@ async def handle_rollypay_webhook(request: web.Request):
                     fee = amount * (DEPOSIT_FEE_PERCENT / 100.0)
                     net_amount = amount - fee
                     
-                    await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", check_id)
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
-                    
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
                     
@@ -890,18 +895,24 @@ async def handle_xrocket_webhook(request: web.Request):
                     user_id = int(payload)
                     check_id = 0
                 
-                display_rate = await get_display_rate()
-                total_rub = amount_usdt * display_rate
-                
-                fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)
-                net_amount = total_rub - fee
-                
-                msg_id = None
                 async with db_pool.acquire() as conn:
+                    row = None
                     if check_id > 0:
-                        await conn.execute("UPDATE orders SET status = 'paid' WHERE id = $1", check_id)
-                        msg_id = await conn.fetchval("SELECT message_id FROM orders WHERE id = $1", check_id)
+                        # АТОМАРНАЯ ПРОВЕРКА ДЛЯ XROCKET
+                        row = await conn.fetchrow("UPDATE orders SET status = 'paid' WHERE id = $1 AND status = 'pending' RETURNING message_id", check_id)
+                    
+                    # Если заказ уже был оплачен, прерываем
+                    if check_id > 0 and row is None:
+                        return web.Response(text="OK", status=200)
                         
+                    display_rate = await get_display_rate()
+                    total_rub = amount_usdt * display_rate
+                    
+                    fee = total_rub * (DEPOSIT_FEE_PERCENT / 100.0)
+                    net_amount = total_rub - fee
+                    
+                    msg_id = row['message_id'] if row else None
+                    
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     if fee > 0:
                         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
