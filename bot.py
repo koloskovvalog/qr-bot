@@ -21,8 +21,7 @@ BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
 # --- COINSO НАСТРОЙКИ ---
 COINSO_PROJECT_ID = 510249038
 COINSO_SECRET_KEY = "79b0c859ec27a097a9663fa2193f8ea6"
-# ИСПРАВЛЕННЫЙ URL (без api. в начале)
-COINSO_API_URL = "https://coinso.io/api/payment/create" 
+COINSO_API_URL = "https://api.coinso.io/payment/create" 
 
 # --- XROCKET PAY API ---
 XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
@@ -38,6 +37,7 @@ MIN_BEP20_USDT = 50.0
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
 
+# ID ВАШЕГО ЧАТА (замените на свой, если еще не сделали)
 CHAT_ID = -1001234567890 
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,7 @@ dp = Dispatcher()
 
 rocket_client = None
 active_games = {}
+db_pool: asyncpg.Pool = None
 
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
     if network == 'TRC20': return 3.0
@@ -94,8 +95,6 @@ async def get_final_rate():
     base = await fetch_base_rate()
     markup = await get_current_markup()
     return base + markup
-
-db_pool: asyncpg.Pool = None
 
 async def init_db():
     global db_pool
@@ -447,15 +446,9 @@ async def cmd_new(message: types.Message, command: CommandObject):
         }
 
         async with ClientSession() as session:
-            # Таймаут 40 секунд, как рекомендуют в Coinso
-            async with session.post(COINSO_API_URL, json=payload, headers=headers, timeout=40) as resp:
-                # Пытаемся прочитать JSON, даже если статус не 200
-                try:
-                    resp_data = await resp.json()
-                except Exception:
-                    text_err = await resp.text()
-                    raise Exception(f"Coinso вернул не JSON: {resp.status} - {text_err[:100]}")
-
+            async with session.post(COINSO_API_URL, json=payload, headers=headers) as resp:
+                resp_data = await resp.json()
+                
                 if resp.status == 200 and resp_data.get("success"):
                     payment_url = resp_data.get("payment_url")
                     invoice_id = resp_data.get("invoice_id")
@@ -475,15 +468,12 @@ async def cmd_new(message: types.Message, command: CommandObject):
                     async with db_pool.acquire() as conn:
                         await conn.execute("UPDATE orders SET message_id = $1 WHERE id = $2", sent_msg.message_id, check_id)
                 else:
-                    # Выводим точную ошибку от Coinso
-                    logging.error(f"Coinso API Error: {resp_data}")
-                    error_msg = resp_data.get('message') or resp_data.get('error_description') or str(resp_data)
-                    await message.answer(f"❌ Ошибка Coinso: {error_msg}")
+                    logging.error(f"Coinso Error: {resp_data}")
+                    await message.answer(f"❌ Ошибка создания счета: {resp_data.get('message', 'Неизвестная ошибка')}")
                     
     except Exception as e: 
         logging.error(f"Coinso Request Error: {e}")
-        # Выводим техническую ошибку прямо в Телеграм для отладки
-        await message.answer(f"⚠️ Ошибка сети/запроса:\n`{e}`", parse_mode="Markdown")
+        await message.answer("Ошибка создания платежа. Попробуйте позже.")
 
 # ==================== ВЕРИФИКАЦИЯ ====================
 @dp.message(F.photo)
@@ -583,9 +573,10 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
             )
 
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub, message.from_user.id)
-        await conn.execute("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount_usdt, total_rub, address, network)
+        
+        w_id = await conn.fetchval("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5) RETURNING id", message.from_user.id, amount_usdt, total_rub, address, network)
+        
         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", profit_rub, ADMIN_ID)
-        w_id = (await conn.fetchrow("SELECT lastval()"))[0]
 
     await message.answer(f"✅ **Заявка #{w_id}**\nСеть: {network}\nК получению: {amount_usdt:.2f} USDT\nСписано: {total_rub:.2f} ₽")
     builder = InlineKeyboardBuilder()
@@ -982,6 +973,11 @@ async def handle_coinso_webhook(request: web.Request):
         logging.error(f"Coinso Webhook Error: {e}")
         return web.Response(text="Error", status=500)
 
+# ==================== ЗАПУСК ====================
+async def handle_root(request):
+    # Этот обработчик нужен, чтобы Render видел, что порт открыт и сервер жив
+    return web.Response(text="Bot is running successfully!")
+
 async def main():
     global rocket_client
     await init_db()
@@ -989,13 +985,29 @@ async def main():
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
     
     app = web.Application()
+    app.router.add_get("/", handle_root) # Health Check для Render
     app.router.add_post("/coinso-webhook", handle_coinso_webhook)
+    
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
+    
+    # <-- ИСПОЛЬЗУЕМ СИСТЕМНУЮ ПЕРЕМЕННУЮ PORT (Render выдает её сам)
+    port = int(os.getenv("PORT", 10000))
+    
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info(f"Бот запущен на порту {WEBHOOK_PORT}")
-    await dp.start_polling(bot)
+    logging.info(f"Веб-сервер запущен на 0.0.0.0:{port}")
+    
+    try:
+        logging.info("Бот запущен в режиме Polling")
+        await dp.start_polling(bot)
+    finally:
+        logging.info("Завершение работы бота...")
+        await bot.session.close()
+        await runner.cleanup()
+        if db_pool:
+            await db_pool.close()
+        logging.info("Бот успешно остановлен.")
 
 if __name__ == "__main__":
     asyncio.run(main())
