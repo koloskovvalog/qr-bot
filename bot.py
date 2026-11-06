@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ChatMemberUpdated
 from aiohttp import web, ClientSession
 from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
@@ -36,6 +36,9 @@ MIN_BEP20_USDT = 50.0
 
 ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
+
+# ID ВАШЕГО ЧАТА (замените на свой, если еще не сделали)
+CHAT_ID = -1001234567890 
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -192,6 +195,24 @@ async def errors_handler(update: types.Update, exception: Exception):
         except: pass
     return True
 
+# ==================== ОТСЛЕЖИВАНИЕ ВЫХОДА ИЗ ЧАТА ====================
+@dp.chat_member()
+async def on_chat_member_updated(event: ChatMemberUpdated):
+    if event.chat.id != CHAT_ID:
+        return
+        
+    user_id = event.new_chat_member.user.id
+    
+    if event.new_chat_member.status in ("left", "kicked"):
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT 1 FROM allowed_users WHERE user_id = $1", user_id)
+            if user:
+                await conn.execute("DELETE FROM allowed_users WHERE user_id = $1", user_id)
+                try:
+                    await bot.send_message(ADMIN_ID, f"⚠️ Пользователь `{user_id}` вышел/удален из чата.\nДоступ к боту автоматически закрыт.", parse_mode="Markdown")
+                except:
+                    pass
+
 # ==================== УПРАВЛЕНИЕ БОТОМ И НАСТРОЙКАМИ ====================
 @dp.message(Command("stop_bot"))
 async def cmd_stop_bot(message: types.Message):
@@ -230,14 +251,12 @@ async def cmd_setfee(message: types.Message, command: CommandObject):
     try:
         args = command.args.split()
         
-        # Если передано одно число (например, /setfee 5) - ставим общую комиссию
         if len(args) == 1:
             percent = float(args[0].replace(',', '.'))
             async with db_pool.acquire() as conn:
                 await conn.execute("UPDATE settings SET value = $1 WHERE key = 'global_fee'", str(percent))
             await message.answer(f"✅ **Общая комиссия для всех** установлена: **{percent}%**", parse_mode="Markdown")
             
-        # Если передано два значения (например, /setfee 123456789 5) - ставим индивидуальную
         elif len(args) == 2:
             target_id = int(args[0])
             percent = float(args[1].replace(',', '.'))
@@ -286,6 +305,37 @@ async def cmd_deny(message: types.Message, command: CommandObject):
         await message.answer(f"🚫 Пользователь `{target_id}` заблокирован.")
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
+
+# ==================== РУЧНОЕ СПИСАНИЕ (С УВЕДОМЛЕНИЕМ) ====================
+@dp.message(Command("deduct"))
+async def cmd_deduct(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args or len(command.args.split()) < 2:
+        return await message.answer("Используйте: `/deduct [ID] [Сумма]`")
+    
+    try:
+        target_id, amount = int(command.args.split()[0]), float(command.args.split()[1])
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount, target_id)
+        await message.answer(f"✅ Списано **{amount:.2f} ₽** (с уведомлением).", parse_mode="Markdown")
+        try: 
+            await bot.send_message(target_id, f"⚠️ **Администратор списал с вашего баланса {amount:.2f} ₽.**", parse_mode="Markdown")
+        except: pass
+    except: pass
+
+# ==================== РУЧНОЕ СПИСАНИЕ (БЕЗ УВЕДОМЛЕНИЯ) ====================
+@dp.message(Command("quiet_deduct"))
+async def cmd_quiet_deduct(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args or len(command.args.split()) < 2:
+        return await message.answer("Используйте: `/quiet_deduct [ID] [Сумма]`")
+    
+    try:
+        target_id, amount = int(command.args.split()[0]), float(command.args.split()[1])
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount, target_id)
+        await message.answer(f"✅ Списано **{amount:.2f} ₽** (без уведомления).", parse_mode="Markdown")
+    except: pass
 
 # ==================== ИГРА КРАШ ====================
 @dp.message(Command("crash"))
@@ -577,16 +627,6 @@ async def cmd_add(message: types.Message, command: CommandObject):
         await message.answer(f"✅ Начислено {amount} ₽.")
     except: pass
 
-@dp.message(Command("deduct"))
-async def cmd_deduct(message: types.Message, command: CommandObject):
-    if message.from_user.id != ADMIN_ID: return
-    try:
-        target_id, amount = int(command.args.split()[0]), float(command.args.split()[1])
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", amount, target_id)
-        await message.answer(f"✅ Списано {amount} ₽.")
-    except: pass
-
 @dp.callback_query(F.data == "admin_stats")
 async def cb_admin_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
@@ -751,7 +791,12 @@ async def cb_admin_user_view(callback: CallbackQuery):
 async def cb_admin_deduct_info(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     target_id = int(callback.data.split("_")[3])
-    await callback.message.answer(f"Чтобы списать, отправьте:\n`/deduct {target_id} 500`", parse_mode="Markdown")
+    text = (
+        f"Чтобы списать средства, используйте одну из команд:\n\n"
+        f"🔔 **С уведомлением:**\n`/deduct {target_id} 500`\n\n"
+        f"🔕 **Без уведомления:**\n`/quiet_deduct {target_id} 500`"
+    )
+    await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_block_"))
