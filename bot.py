@@ -18,7 +18,7 @@ import random
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
 
-# --- COINSO НАСТРОЙКИ (ВАШИ КЛЮЧИ) ---
+# --- COINSO НАСТРОЙКИ ---
 COINSO_PROJECT_ID = 510249038
 COINSO_SECRET_KEY = "79b0c859ec27a097a9663fa2193f8ea6"
 COINSO_API_URL = "https://api.coinso.io/payment/create" 
@@ -476,45 +476,58 @@ async def cmd_new(message: types.Message, command: CommandObject):
         logging.error(f"Coinso Request Error: {e}")
         await message.answer("Ошибка создания платежа. Попробуйте позже.")
 
-@dp.message(Command("usdt"))
-async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
-    global rocket_client
+# ==================== ВЕРИФИКАЦИЯ ====================
+@dp.message(F.photo)
+async def handle_verification_photo(message: types.Message):
+    if await is_user_allowed(message.from_user.id): return
+    user = message.from_user
+    async with db_pool.acquire() as conn:
+        await conn.execute('''INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2) ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2''', user.id, user.username)
+    admin_builder = InlineKeyboardBuilder()
+    admin_builder.button(text="✅ Одобрить", callback_data=f"approve_access_{user.id}")
+    admin_builder.button(text="❌ Отклонить", callback_data=f"reject_access_{user.id}")
+    try:
+        await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=f"🔔 **ЗАЯВКА**\n👤 {user.full_name}\n🔗 @{user.username}\n🆔 `{user.id}`", reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
+        await message.answer("⏳ Ожидайте проверки.")
+    except: pass
+
+@dp.callback_query(F.data.startswith("approve_access_"))
+async def process_approve_access(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[2])
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
+        await conn.execute("UPDATE users SET verified_go6 = TRUE WHERE user_id = $1", target_id)
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ **ОДОБРЕНО**", reply_markup=None)
+    try: await bot.send_message(target_id, "✅ Доступ одобрен! Напишите /start")
+    except: pass
+
+@dp.callback_query(F.data.startswith("reject_access_"))
+async def process_reject_access(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    target_id = int(callback.data.split("_")[2])
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ **ОТКЛОНЕНО**", reply_markup=None)
+    try: await bot.send_message(target_id, "❌ В доступе отказано.")
+    except: pass
+
+# ==================== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ====================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    if not await is_user_allowed(message.from_user.id):
+        return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
+    rate = await get_final_rate()
+    await message.answer(f"Привет! Текущий курс: **1 USDT = {rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть", parse_mode="Markdown")
+
+@dp.message(Command("balance"))
+async def cmd_balance(message: types.Message):
     if not await is_user_allowed(message.from_user.id): return
-    if not command.args: return await message.answer("Укажите сумму в USDT: `/usdt 10`")
-    try:
-        amount_usdt = float(command.args.replace(',', '.'))
-        if amount_usdt < 1: raise ValueError
-    except: return await message.answer("Ошибка! Минимальная сумма 1 USDT.")
+    rate = await get_final_rate()
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
+        bal = row['balance'] if row and row['balance'] is not None else 0.0
+    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / rate:.2f} USDT)", parse_mode="Markdown")
 
-    try:
-        async with db_pool.acquire() as conn:
-            check_id = await conn.fetchval(
-                "INSERT INTO orders (user_id, amount, status, order_type) VALUES ($1, $2, 'pending', 'crypto') RETURNING id",
-                message.from_user.id, amount_usdt
-            )
-            
-        payload_str = f"{message.from_user.id}_{check_id}"
-
-        invoice = await rocket_client.create_invoice(
-            currency="USDT", 
-            amount=amount_usdt, 
-            description=f"Чек #{check_id}", 
-            payload=payload_str, 
-            expired_in=3600
-        )
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text="💳 Оплатить в xRocket", url=invoice.link)
-        
-        sent_msg = await message.answer(f"💵 **Чек #{check_id} на {amount_usdt} USDT**\n\nНажмите на кнопку ниже, чтобы оплатить через @xRocket.", reply_markup=builder.as_markup(), parse_mode="Markdown")
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", invoice.invoice_id, sent_msg.message_id, check_id)
-
-    except Exception as e:
-        logging.error(f"xRocket Error: {e}")
-        await message.answer("❌ Ошибка создания счета.")
-
+# ==================== ВЫВОД СРЕДСТВ ====================
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
     if not await is_user_allowed(message.from_user.id): return
@@ -570,57 +583,6 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
     builder.button(text="🟢 В работу", callback_data=f"admin_take_{w_id}")
     builder.button(text="🔴 Отклонить", callback_data=f"admin_reject_{w_id}")
     await bot.send_message(ADMIN_ID, f"💸 **ЗАЯВКА #{w_id}**\nID: `{message.from_user.id}`\nСеть: {network}\nUSDT: {amount_usdt}\nАдрес: `{address}`\nПрибыль: +{profit_rub} ₽", reply_markup=builder.as_markup())
-
-# ==================== ВЕРИФИКАЦИЯ ====================
-@dp.message(F.photo)
-async def handle_verification_photo(message: types.Message):
-    if await is_user_allowed(message.from_user.id): return
-    user = message.from_user
-    async with db_pool.acquire() as conn:
-        await conn.execute('''INSERT INTO users (user_id, last_active, username) VALUES ($1, NOW(), $2) ON CONFLICT (user_id) DO UPDATE SET last_active = NOW(), username = $2''', user.id, user.username)
-    admin_builder = InlineKeyboardBuilder()
-    admin_builder.button(text="✅ Одобрить", callback_data=f"approve_access_{user.id}")
-    admin_builder.button(text="❌ Отклонить", callback_data=f"reject_access_{user.id}")
-    try:
-        await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=f"🔔 **ЗАЯВКА**\n👤 {user.full_name}\n🔗 @{user.username}\n🆔 `{user.id}`", reply_markup=admin_builder.as_markup(), parse_mode="Markdown")
-        await message.answer("⏳ Ожидайте проверки.")
-    except: pass
-
-@dp.callback_query(F.data.startswith("approve_access_"))
-async def process_approve_access(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    target_id = int(callback.data.split("_")[2])
-    async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
-        await conn.execute("UPDATE users SET verified_go6 = TRUE WHERE user_id = $1", target_id)
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n✅ **ОДОБРЕНО**", reply_markup=None)
-    try: await bot.send_message(target_id, "✅ Доступ одобрен! Напишите /start")
-    except: pass
-
-@dp.callback_query(F.data.startswith("reject_access_"))
-async def process_reject_access(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
-    target_id = int(callback.data.split("_")[2])
-    await callback.message.edit_caption(caption=callback.message.caption + "\n\n❌ **ОТКЛОНЕНО**", reply_markup=None)
-    try: await bot.send_message(target_id, "❌ В доступе отказано.")
-    except: pass
-
-# ==================== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ====================
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    if not await is_user_allowed(message.from_user.id):
-        return await message.answer(f"👋 Для доступа:\n1️⃣ Регистрация на GO6: {GO6_REF_LINK}\n2️⃣ Укажите ментора.\n3️⃣ Отправьте скрин сюда.")
-    rate = await get_final_rate()
-    await message.answer(f"Привет! Текущий курс: **1 USDT = {rate:.2f} ₽**\n\n💰 /balance — баланс\n📥 /new [сумма] — пополнить (Рубли)\n💵 /usdt [сумма] — пополнить USDT (xRocket)\n💸 /withdraw — вывод\n🎮 /crash [сумма_USDT] — играть", parse_mode="Markdown")
-
-@dp.message(Command("balance"))
-async def cmd_balance(message: types.Message):
-    if not await is_user_allowed(message.from_user.id): return
-    rate = await get_final_rate()
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
-        bal = row['balance'] if row and row['balance'] is not None else 0.0
-    await message.answer(f"💰 **Баланс:** {bal:.2f} ₽\n({bal / rate:.2f} USDT)", parse_mode="Markdown")
 
 # ==================== АДМИН-ПАНЕЛЬ ====================
 @dp.message(Command("admin"))
@@ -1011,84 +973,6 @@ async def handle_coinso_webhook(request: web.Request):
         logging.error(f"Coinso Webhook Error: {e}")
         return web.Response(text="Error", status=500)
 
-async def handle_xrocket_webhook(request: web.Request):
-    try:
-        raw_body = await request.read()
-        sig = request.headers.get("Signature")
-        sig_ts = request.headers.get("Signature-Timestamp")
-        signed_string = f"{sig_ts}.{raw_body.decode('utf-8')}"
-        expected_sig = hmac.new(XROCKET_WEBHOOK_SECRET.encode(), signed_string.encode(), hashlib.sha256).hexdigest()
-        
-        if not hmac.compare_digest(sig, expected_sig): return web.Response(text="Invalid", status=401)
-        
-        data = json.loads(raw_body)
-        if data.get("type") == "invoice" and data.get("data", {}).get("status") == "paid":
-            payload = data.get("data", {}).get("payload")
-            amount_usdt = float(data.get("data", {}).get("amount", 0))
-            if payload:
-                try:
-                    user_id_str, check_id_str = payload.split("_")
-                    user_id = int(user_id_str)
-                    check_id = int(check_id_str)
-                except:
-                    user_id = int(payload)
-                    check_id = 0
-                
-                async with db_pool.acquire() as conn:
-                    row = None
-                    if check_id > 0:
-                        row = await conn.fetchrow("UPDATE orders SET status = 'paid' WHERE id = $1 AND status = 'pending' RETURNING message_id", check_id)
-                    
-                    if check_id > 0 and row is None:
-                        return web.Response(text="OK", status=200)
-                        
-                    rate = await get_final_rate()
-                    total_rub = amount_usdt * rate
-                    
-                    user_row = await conn.fetchrow("SELECT username, custom_fee FROM users WHERE user_id = $1", user_id)
-                    custom_fee = user_row['custom_fee'] if user_row else None
-                    username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
-                    
-                    global_fee = await get_global_fee()
-                    actual_fee_percent = custom_fee if custom_fee is not None else global_fee
-                    
-                    fee = total_rub * (actual_fee_percent / 100.0)
-                    net_amount = total_rub - fee
-                    
-                    msg_id = row['message_id'] if row else None
-                    
-                    await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
-                    if fee > 0:
-                        await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee, ADMIN_ID)
-                        
-                reply_text = f"Счёт {amount_usdt} USDT\nОплата произведена"
-                
-                if msg_id:
-                    try: await bot.send_message(user_id, reply_text, reply_to_message_id=msg_id, allow_sending_without_reply=True)
-                    except Exception as e:
-                        logging.error(f"Failed to reply: {e}")
-                        try: await bot.send_message(user_id, reply_text)
-                        except: pass
-                else:
-                    try: await bot.send_message(user_id, reply_text)
-                    except: pass
-
-                admin_msg = (
-                    f"🔔 Оплачен Чек #{check_id} (xRocket)!\n"
-                    f"👤 Клиент: {username}\n"
-                    f"💵 Сумма: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
-                )
-                if fee > 0:
-                    admin_msg += f"💰 Ваш процент ({actual_fee_percent}%): {fee:.2f} ₽"
-                    
-                try: await bot.send_message(ADMIN_ID, admin_msg)
-                except Exception as e:
-                    logging.error(f"Admin msg error: {e}")
-        return web.Response(text="OK", status=200)
-    except Exception as e: 
-        logging.error(f"xRocket Webhook Error: {e}")
-        return web.Response(text="Error", status=500)
-
 async def main():
     global rocket_client
     await init_db()
@@ -1097,7 +981,6 @@ async def main():
     
     app = web.Application()
     app.router.add_post("/coinso-webhook", handle_coinso_webhook)
-    app.router.add_post("/xrocket-webhook", handle_xrocket_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
