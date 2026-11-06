@@ -40,6 +40,10 @@ ADMIN_ID = 7653934214
 # ID ВАШЕГО ЧАТА (замените на свой, если еще не сделали)
 CHAT_ID = -1001234567890 
 
+# Render автоматически передает порт в системную переменную PORT.
+# Если ее нет (локальный запуск), используется 10000.
+WEBHOOK_PORT = int(os.getenv("PORT", 10000)) 
+
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -574,9 +578,11 @@ async def cmd_withdraw(message: types.Message, command: CommandObject):
             )
 
         await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id = $2", total_rub, message.from_user.id)
-        await conn.execute("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5)", message.from_user.id, amount_usdt, total_rub, address, network)
+        
+        # Использование RETURNING id для надежности
+        w_id = await conn.fetchval("INSERT INTO withdrawals (user_id, amount_usdt, amount_rub, address, network) VALUES ($1, $2, $3, $4, $5) RETURNING id", message.from_user.id, amount_usdt, total_rub, address, network)
+        
         await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", profit_rub, ADMIN_ID)
-        w_id = (await conn.fetchrow("SELECT lastval()"))[0]
 
     await message.answer(f"✅ **Заявка #{w_id}**\nСеть: {network}\nК получению: {amount_usdt:.2f} USDT\nСписано: {total_rub:.2f} ₽")
     builder = InlineKeyboardBuilder()
@@ -983,10 +989,23 @@ async def main():
     app.router.add_post("/coinso-webhook", handle_coinso_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
+    
+    # Слушаем порт, который выдает Render
     site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
     await site.start()
-    logging.info(f"Бот запущен на порту {WEBHOOK_PORT}")
-    await dp.start_polling(bot)
+    logging.info(f"Вебхук сервер запущен на порту {WEBHOOK_PORT}")
+    
+    try:
+        logging.info("Бот запущен в режиме Polling")
+        await dp.start_polling(bot)
+    finally:
+        # Корректное закрытие соединений при выключении
+        logging.info("Завершение работы бота...")
+        await bot.session.close()
+        await runner.cleanup()
+        if db_pool:
+            await db_pool.close()
+        logging.info("Бот успешно остановлен.")
 
 if __name__ == "__main__":
     asyncio.run(main())
