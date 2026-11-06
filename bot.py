@@ -7,7 +7,6 @@ from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ChatMemberUpdated
 from aiohttp import web, ClientSession
-from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 import os
 import hmac
@@ -18,10 +17,11 @@ import random
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
-ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
-TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
-SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
-WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
+
+# --- COINSO НАСТРОЙКИ (ВАШИ КЛЮЧИ) ---
+COINSO_PROJECT_ID = 510249038
+COINSO_SECRET_KEY = "79b0c859ec27a097a9663fa2193f8ea6"
+COINSO_API_URL = "https://api.coinso.io/payment/create" 
 
 # --- XROCKET PAY API ---
 XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
@@ -44,7 +44,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-rolly_client = None
 rocket_client = None
 active_games = {}
 
@@ -306,7 +305,7 @@ async def cmd_deny(message: types.Message, command: CommandObject):
     except ValueError: 
         await message.answer("❌ Ошибка! ID должен состоять только из цифр.")
 
-# ==================== РУЧНОЕ СПИСАНИЕ (С УВЕДОМЛЕНИЕМ) ====================
+# ==================== РУЧНОЕ СПИСАНИЕ ====================
 @dp.message(Command("deduct"))
 async def cmd_deduct(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -323,7 +322,6 @@ async def cmd_deduct(message: types.Message, command: CommandObject):
         except: pass
     except: pass
 
-# ==================== РУЧНОЕ СПИСАНИЕ (БЕЗ УВЕДОМЛЕНИЯ) ====================
 @dp.message(Command("quiet_deduct"))
 async def cmd_quiet_deduct(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
@@ -412,7 +410,72 @@ async def cb_crash_cashout(callback: CallbackQuery):
         await callback.answer("Выигрыш зачислен!")
     else: await callback.answer("Игра уже завершена.", show_alert=True)
 
-# ==================== ПОПОЛНЕНИЕ ====================
+# ==================== ПОПОЛНЕНИЕ ЧЕРЕЗ COINSO ====================
+@dp.message(Command("new"))
+async def cmd_new(message: types.Message, command: CommandObject):
+    if not await is_user_allowed(message.from_user.id): return
+    if not command.args: return await message.answer("Укажите сумму: `/new 500`")
+    
+    parts = command.args.split(maxsplit=1)
+    try: amount = float(parts[0].replace(',', '.'))
+    except: return await message.answer("Ошибка! Неверная сумма.")
+    
+    comment = parts[1] if len(parts) > 1 else None
+
+    try:
+        async with db_pool.acquire() as conn:
+            check_id = await conn.fetchval(
+                "INSERT INTO orders (user_id, amount, status, comment) VALUES ($1, $2, 'pending', $3) RETURNING id",
+                message.from_user.id, amount, comment
+            )
+            
+        desc_text = f"Чек #{check_id}"
+        if comment: 
+            desc_text += f" | {comment}"
+
+        headers = {
+            "Authorization": f"Bearer {COINSO_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "project_id": COINSO_PROJECT_ID,
+            "amount": amount,
+            "description": desc_text,
+            "custom": str(check_id), 
+            "client_telegram_id": str(message.from_user.id),
+            "success_url": "https://t.me/QR1Checkbot"
+        }
+
+        async with ClientSession() as session:
+            async with session.post(COINSO_API_URL, json=payload, headers=headers) as resp:
+                resp_data = await resp.json()
+                
+                if resp.status == 200 and resp_data.get("success"):
+                    payment_url = resp_data.get("payment_url")
+                    invoice_id = resp_data.get("invoice_id")
+                    
+                    async with db_pool.acquire() as conn:
+                        await conn.execute("UPDATE orders SET payment_id = $1 WHERE id = $2", invoice_id, check_id)
+                        
+                    builder = InlineKeyboardBuilder()
+                    builder.button(text="💳 Перейти к оплате", url=payment_url)
+                    
+                    msg_text = f"**Счет: {amount:.2f} ₽**"
+                    if comment: 
+                        msg_text += f"\n📝 Название: {comment}"
+                        
+                    sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
+                    
+                    async with db_pool.acquire() as conn:
+                        await conn.execute("UPDATE orders SET message_id = $1 WHERE id = $2", sent_msg.message_id, check_id)
+                else:
+                    logging.error(f"Coinso Error: {resp_data}")
+                    await message.answer(f"❌ Ошибка создания счета: {resp_data.get('message', 'Неизвестная ошибка')}")
+                    
+    except Exception as e: 
+        logging.error(f"Coinso Request Error: {e}")
+        await message.answer("Ошибка создания платежа. Попробуйте позже.")
+
 @dp.message(Command("usdt"))
 async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
     global rocket_client
@@ -451,54 +514,6 @@ async def cmd_deposit_crypto(message: types.Message, command: CommandObject):
     except Exception as e:
         logging.error(f"xRocket Error: {e}")
         await message.answer("❌ Ошибка создания счета.")
-
-@dp.message(Command("new"))
-async def cmd_new(message: types.Message, command: CommandObject):
-    global rolly_client
-    if not await is_user_allowed(message.from_user.id): return
-    if not command.args: return await message.answer("Укажите сумму: `/new 500`")
-    
-    parts = command.args.split(maxsplit=1)
-    try: amount = float(parts[0].replace(',', '.'))
-    except: return await message.answer("Ошибка! Неверная сумма.")
-    
-    comment = parts[1] if len(parts) > 1 else None
-
-    try:
-        async with db_pool.acquire() as conn:
-            check_id = await conn.fetchval(
-                "INSERT INTO orders (user_id, amount, status, comment) VALUES ($1, $2, 'pending', $3) RETURNING id",
-                message.from_user.id, amount, comment
-            )
-            
-        desc_text = f"Чек #{check_id}"
-        if comment: 
-            desc_text += f" | {comment}"
-
-        payment = rolly_client.payments.create(
-            amount=str(amount), 
-            order_id=f"dep_{message.from_user.id}_{check_id}", 
-            terminal_id=TERMINAL_ID, 
-            description=desc_text,
-            customer_id=str(message.from_user.id), 
-            redirect_url="https://t.me"
-        )
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text="💳 Перейти к оплате", url=payment['pay_url'])
-        
-        msg_text = f"**Счет: {amount:.2f} ₽**"
-        if comment: 
-            msg_text += f"\n📝 Название: {comment}"
-            
-        sent_msg = await message.answer(f"{msg_text}\n🟡 Ожидает оплату...", reply_markup=builder.as_markup(), parse_mode="Markdown")
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE orders SET payment_id = $1, message_id = $2 WHERE id = $3", payment['payment_id'], sent_msg.message_id, check_id)
-            
-    except Exception as e: 
-        logging.error(f"RollyPay Error: {e}")
-        await message.answer("Ошибка создания платежа.")
 
 @dp.message(Command("withdraw"))
 async def cmd_withdraw(message: types.Message, command: CommandObject):
@@ -909,28 +924,42 @@ async def process_admin_done(callback: CallbackQuery):
     await callback.message.edit_text(f"✅ Заявка #{w_id} успешно выполнена.")
 
 # ==================== ВЕБХУКИ ====================
-async def handle_rollypay_webhook(request: web.Request):
+async def handle_coinso_webhook(request: web.Request):
     try:
         raw_body = await request.read()
-        sig = request.headers.get("X-Signature")
-        ts = request.headers.get("X-Timestamp")
-        msg = f"{ts}.{raw_body.decode('utf-8')}"
-        expected = hmac.new(SIGNING_SECRET.encode(), msg.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected): return web.Response(text="Invalid", status=403)
+        signature = request.headers.get("X-Signature")
         
+        if not signature:
+            return web.Response(text="Missing signature", status=400)
+
+        expected_signature = hmac.new(
+            COINSO_SECRET_KEY.encode('utf-8'),
+            raw_body,
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_signature):
+            logging.warning("Неверная подпись вебхука Coinso!")
+            return web.Response(text="Invalid signature", status=403)
+
         data = json.loads(raw_body)
-        if data.get("status") == "paid":
-            payment_id = data.get("payment_id")
+        
+        if data.get("event") == "payment.success":
+            if data.get("test_mode"):
+                logging.info("Тестовый платеж Coinso получен и проигнорирован.")
+                return web.Response(text="OK", status=200)
+
+            check_id = int(data.get("custom")) 
+            amount = float(data.get("amount"))
+            
             async with db_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "UPDATE orders SET status = 'paid' WHERE payment_id = $1 AND status = 'pending' RETURNING id, user_id, amount, comment, message_id",
-                    payment_id
+                    "UPDATE orders SET status = 'paid' WHERE id = $1 AND status = 'pending' RETURNING user_id, comment, message_id",
+                    check_id
                 )
                 
                 if row:
-                    check_id = row['id']
                     user_id = row['user_id']
-                    amount = row['amount']
                     comment = row['comment']
                     msg_id = row['message_id']
                     
@@ -964,7 +993,7 @@ async def handle_rollypay_webhook(request: web.Request):
                         except: pass
 
                     admin_msg = (
-                        f"🔔 Оплачен Чек #{check_id}!\n"
+                        f"🔔 Оплачен Чек #{check_id} (Coinso)!\n"
                         f"👤 Клиент: {username}\n"
                         f"💵 Сумма: {amount:.2f} ₽\n"
                     )
@@ -976,9 +1005,10 @@ async def handle_rollypay_webhook(request: web.Request):
                     try: await bot.send_message(ADMIN_ID, admin_msg)
                     except Exception as e:
                         logging.error(f"Admin msg error: {e}")
+                        
         return web.Response(text="OK", status=200)
     except Exception as e: 
-        logging.error(f"Webhook Error: {e}")
+        logging.error(f"Coinso Webhook Error: {e}")
         return web.Response(text="Error", status=500)
 
 async def handle_xrocket_webhook(request: web.Request):
@@ -1060,14 +1090,13 @@ async def handle_xrocket_webhook(request: web.Request):
         return web.Response(text="Error", status=500)
 
 async def main():
-    global rolly_client, rocket_client
+    global rocket_client
     await init_db()
     
-    rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
     
     app = web.Application()
-    app.router.add_post("/rollypay-webhook", handle_rollypay_webhook)
+    app.router.add_post("/coinso-webhook", handle_coinso_webhook)
     app.router.add_post("/xrocket-webhook", handle_xrocket_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
