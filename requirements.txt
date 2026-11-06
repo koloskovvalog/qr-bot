@@ -1,4 +1,5 @@
 aiogram
 asyncpg
+rollypay
 aiohttp
 aiorocket2
