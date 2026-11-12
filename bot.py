@@ -38,9 +38,8 @@ ADMIN_FEE_PER_USDT = 1.0
 ADMIN_ID = 7653934214
 
 # --- КОМИССИИ ПРИ ПОПОЛНЕНИИ ---
-# 9% уходит "платёжной системе" (списывается), 4% идёт тебе в баланс. Итого 13% с суммы пополнения.
-PAYMENT_SYSTEM_FEE_PERCENT = 9.0
-ADMIN_DEPOSIT_FEE_PERCENT = 4.0
+PAYMENT_SYSTEM_FEE_PERCENT = 9.0     # 9% — комиссия ПС (фикс в коде)
+DEFAULT_ADMIN_DEPOSIT_FEE_PERCENT = 4.0  # 4% — твой процент по умолчанию (меняется через /setfee)
 
 # ID ВАШЕГО ЧАТА (замените на свой, если еще не сделали)
 CHAT_ID = -1001234567890 
@@ -89,12 +88,13 @@ async def get_current_markup():
             return float(row['value'])
         return 2.0
 
-async def get_global_fee():
+async def get_admin_deposit_fee() -> float:
+    """Твой процент с пополнений (по умолчанию 4%)."""
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'global_fee'")
+        row = await conn.fetchrow("SELECT value FROM settings WHERE key = 'admin_deposit_fee'")
         if row:
             return float(row['value'])
-        return 0.0
+        return DEFAULT_ADMIN_DEPOSIT_FEE_PERCENT
 
 async def get_final_rate():
     base = await fetch_base_rate()
@@ -133,6 +133,7 @@ async def init_db():
         await conn.execute("INSERT INTO settings (key, value) VALUES ('bot_status', 'active') ON CONFLICT (key) DO NOTHING;")
         await conn.execute("INSERT INTO settings (key, value) VALUES ('markup', '2.0') ON CONFLICT (key) DO NOTHING;")
         await conn.execute("INSERT INTO settings (key, value) VALUES ('global_fee', '0.0') ON CONFLICT (key) DO NOTHING;")
+        await conn.execute(f"INSERT INTO settings (key, value) VALUES ('admin_deposit_fee', '{DEFAULT_ADMIN_DEPOSIT_FEE_PERCENT}') ON CONFLICT (key) DO NOTHING;")
         
         await conn.execute("INSERT INTO allowed_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", ADMIN_ID)
         await conn.execute("INSERT INTO users (user_id, last_active, balance) VALUES ($1, NOW(), 0) ON CONFLICT (user_id) DO NOTHING", ADMIN_ID)
@@ -250,14 +251,44 @@ async def cmd_setmarkup(message: types.Message, command: CommandObject):
 @dp.message(Command("setfee"))
 async def cmd_setfee(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer(
-        f"ℹ️ Комиссия при пополнении фиксирована:\n"
-        f"• ПС: **{PAYMENT_SYSTEM_FEE_PERCENT}%**\n"
-        f"• Тебе: **{ADMIN_DEPOSIT_FEE_PERCENT}%**\n"
-        f"• Юзеру зачисляется: **{100 - PAYMENT_SYSTEM_FEE_PERCENT - ADMIN_DEPOSIT_FEE_PERCENT}%**\n\n"
-        f"Менять можно только в коде бота.",
-        parse_mode="Markdown"
-    )
+    
+    if not command.args:
+        current_admin_fee = await get_admin_deposit_fee()
+        user_gets = 100 - PAYMENT_SYSTEM_FEE_PERCENT - current_admin_fee
+        return await message.answer(
+            f"⚙️ **Текущие проценты с пополнения:**\n"
+            f"🏦 ПС: **{PAYMENT_SYSTEM_FEE_PERCENT}%** (фикс)\n"
+            f"👑 Тебе: **{current_admin_fee}%**\n"
+            f"👤 Юзеру: **{user_gets}%**\n\n"
+            f"Чтобы изменить свой процент, используй:\n"
+            f"`/setfee 5` — установить 5%\n"
+            f"`/setfee 3.5` — установить 3.5%",
+            parse_mode="Markdown"
+        )
+    
+    try:
+        percent = float(command.args.replace(',', '.'))
+        max_allowed = 100 - PAYMENT_SYSTEM_FEE_PERCENT
+        
+        if percent < 0:
+            return await message.answer("❌ Процент не может быть отрицательным.")
+        if percent >= max_allowed:
+            return await message.answer(f"❌ Слишком много! Максимум: {max_allowed - 0.01:.2f}%\n(т.к. ПС забирает {PAYMENT_SYSTEM_FEE_PERCENT}%)")
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE settings SET value = $1 WHERE key = 'admin_deposit_fee'", str(percent))
+        
+        user_gets = 100 - PAYMENT_SYSTEM_FEE_PERCENT - percent
+        await message.answer(
+            f"✅ **Твой процент обновлён:**\n"
+            f"👑 Тебе: **{percent}%**\n"
+            f"🏦 ПС: **{PAYMENT_SYSTEM_FEE_PERCENT}%**\n"
+            f"👤 Юзеру: **{user_gets}%**\n\n"
+            f"_Применяется к следующим пополнениям._",
+            parse_mode="Markdown"
+        )
+    except ValueError:
+        await message.answer("❌ Ошибка! Введите число (например, 4 или 3.5).")
 
 # ==================== БЕЛЫЙ СПИСОК ====================
 @dp.message(Command("allow"))
@@ -618,6 +649,7 @@ async def cb_admin_stats(callback: CallbackQuery):
     
     rate = await get_final_rate()
     markup = await get_current_markup()
+    admin_fee_percent = await get_admin_deposit_fee()
     
     async with db_pool.acquire() as conn:
         u = await conn.fetchval("SELECT COUNT(*) FROM allowed_users") or 0
@@ -645,11 +677,11 @@ async def cb_admin_stats(callback: CallbackQuery):
             f"🎰 Оборот игры: **{today_bets:.2f} USDT**\n\n"
             f"👑 **ВАШ ДОХОД:**\n"
             f"📈 С выводов (+{ADMIN_FEE_PER_USDT}₽/USDT): **{p:.2f} ₽**\n"
-            f"📥 С пополнений ({ADMIN_DEPOSIT_FEE_PERCENT}%): **{d * ADMIN_DEPOSIT_FEE_PERCENT / 100:.2f} ₽**\n"
+            f"📥 С пополнений ({admin_fee_percent}%): **{d * admin_fee_percent / 100:.2f} ₽**\n"
             f"💳 Ваш баланс: **{admin_balance:.2f} ₽**\n\n"
             f"💱 **Наценка к Рапире: +{markup} ₽**\n"
             f"💰 **Итоговый курс: {rate:.2f} ₽**\n"
-            f"📥 **Комиссия ПС: {PAYMENT_SYSTEM_FEE_PERCENT}%**")
+            f"📥 **Комиссия ПС: {PAYMENT_SYSTEM_FEE_PERCENT}% | Тебе: {admin_fee_percent}%**")
             
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="admin_main")]]))
 
@@ -732,7 +764,7 @@ async def cb_admin_user_view(callback: CallbackQuery):
     target_id = int(callback.data.split("_")[3])
     
     async with db_pool.acquire() as conn:
-        user = await conn.fetchrow("SELECT username, balance, last_active, verified_go6, custom_fee FROM users WHERE user_id = $1", target_id)
+        user = await conn.fetchrow("SELECT username, balance, last_active, verified_go6 FROM users WHERE user_id = $1", target_id)
         if not user: return await callback.answer("Пользователь не найден.", show_alert=True)
         
         total_in = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM orders WHERE user_id = $1 AND status = 'paid'", target_id) or 0.0
@@ -918,15 +950,16 @@ async def handle_rollypay_webhook(request: web.Request):
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
-                    # === КОМИССИИ: 9% ПС + 4% админу = 13% (юзеру 87%) ===
+                    # === КОМИССИИ (ПС фикс + твой процент из БД) ===
+                    admin_fee_percent = await get_admin_deposit_fee()
                     fee_ps = amount * (PAYMENT_SYSTEM_FEE_PERCENT / 100.0)
-                    fee_admin = amount * (ADMIN_DEPOSIT_FEE_PERCENT / 100.0)
+                    fee_admin = amount * (admin_fee_percent / 100.0)
                     net_amount = amount - fee_ps - fee_admin
                     
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee_admin, ADMIN_ID)
                     
-                    # Пользователю — только "Оплата произведена" без сумм
+                    # Пользователю — только "Оплата произведена"
                     reply_text = "Оплата произведена"
                     
                     if msg_id:
@@ -940,7 +973,7 @@ async def handle_rollypay_webhook(request: web.Request):
                         try: await bot.send_message(user_id, reply_text)
                         except: pass
 
-                    # Админу — полная разбивка
+                    # Админу — разбивка
                     admin_msg = (
                         f"🔔 Оплачен Чек #{check_id}!\n"
                         f"👤 Клиент: {username}\n"
@@ -951,7 +984,7 @@ async def handle_rollypay_webhook(request: web.Request):
                     admin_msg += (
                         f"\n💼 **Разбивка:**\n"
                         f"🏦 ПС ({PAYMENT_SYSTEM_FEE_PERCENT}%): {fee_ps:.2f} ₽\n"
-                        f"👑 Тебе ({ADMIN_DEPOSIT_FEE_PERCENT}%): {fee_admin:.2f} ₽\n"
+                        f"👑 Тебе ({admin_fee_percent}%): {fee_admin:.2f} ₽\n"
                         f"👤 Юзеру: {net_amount:.2f} ₽"
                     )
                     
@@ -1000,9 +1033,10 @@ async def handle_xrocket_webhook(request: web.Request):
                     user_row = await conn.fetchrow("SELECT username FROM users WHERE user_id = $1", user_id)
                     username = f"@{user_row['username']}" if user_row and user_row['username'] else f"ID:{user_id}"
                     
-                    # === КОМИССИИ: 9% ПС + 4% админу = 13% (юзеру 87%) ===
+                    # === КОМИССИИ (ПС фикс + твой процент из БД) ===
+                    admin_fee_percent = await get_admin_deposit_fee()
                     fee_ps = total_rub * (PAYMENT_SYSTEM_FEE_PERCENT / 100.0)
-                    fee_admin = total_rub * (ADMIN_DEPOSIT_FEE_PERCENT / 100.0)
+                    fee_admin = total_rub * (admin_fee_percent / 100.0)
                     net_amount = total_rub - fee_ps - fee_admin
                     
                     msg_id = row['message_id'] if row else None
@@ -1010,7 +1044,6 @@ async def handle_xrocket_webhook(request: web.Request):
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", net_amount, user_id)
                     await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", fee_admin, ADMIN_ID)
                         
-                # Пользователю — только "Оплата произведена"
                 reply_text = "Оплата произведена"
                 
                 if msg_id:
@@ -1023,14 +1056,13 @@ async def handle_xrocket_webhook(request: web.Request):
                     try: await bot.send_message(user_id, reply_text)
                     except: pass
 
-                # Админу — полная разбивка
                 admin_msg = (
                     f"🔔 Оплачен Чек #{check_id} (xRocket)!\n"
                     f"👤 Клиент: {username}\n"
                     f"💵 Сумма: {amount_usdt} USDT ({total_rub:.2f} ₽)\n"
                     f"\n💼 **Разбивка:**\n"
                     f"🏦 ПС ({PAYMENT_SYSTEM_FEE_PERCENT}%): {fee_ps:.2f} ₽\n"
-                    f"👑 Тебе ({ADMIN_DEPOSIT_FEE_PERCENT}%): {fee_admin:.2f} ₽\n"
+                    f"👑 Тебе ({admin_fee_percent}%): {fee_admin:.2f} ₽\n"
                     f"👤 Юзеру: {net_amount:.2f} ₽"
                 )
                     
