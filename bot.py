@@ -28,8 +28,8 @@ DEFAULT_PAYMENT_SYSTEM_FEE = 9.0
 DEFAULT_ADMIN_DEPOSIT_FEE = 4.0
 
 # --- ЮРИДИЧЕСКИЕ ССЫЛКИ ---
-OFFER_URL = "https://telegra.ph/PUBLICHNAYA-OFERTA-08-12-15"
-PRIVACY_URL = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-08-12-99"
+OFFER_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-11-23-71"
+PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-11-23-148"
 REFUND_URL = "https://telegra.ph/Politika-vozvratov-11-23"
 SUPPORT_USERNAME = "@[твой_юзернейм]"  # ⚠️ ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
 
@@ -442,7 +442,7 @@ async def c_verify(m: types.Message):
 @dp.message(Command("offer"))
 async def c_off(m: types.Message):
     b = InlineKeyboardBuilder(); b.button(text="📄 Открыть", url=OFFER_URL)
-    await m.answer("📄 **Публичная оферта**", reply_markup=b.as_markup(), parse_mode="Markdown")
+    await m.answer("📄 **Пользовательское соглашение**", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.message(Command("privacy"))
 async def c_priv(m: types.Message):
@@ -473,7 +473,7 @@ async def build_main_menu(uid):
     b.button(text="👤 Профиль", callback_data="shop_profile")
     if not v: b.button(text="🔐 Ввести код верификации", callback_data="verify_enter")
     
-    b.row(InlineKeyboardButton(text="📄 Оферта", url=OFFER_URL), InlineKeyboardButton(text="🔒 Политика", url=PRIVACY_URL))
+    b.row(InlineKeyboardButton(text="📄 Соглашение", url=OFFER_URL), InlineKeyboardButton(text="🔒 Политика", url=PRIVACY_URL))
     b.row(InlineKeyboardButton(text="🔄 Политика возвратов", url=REFUND_URL))
     
     if v: b.adjust(1,1,1,2,1)
