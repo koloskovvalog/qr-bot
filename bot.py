@@ -8,13 +8,16 @@ from aiohttp import web, ClientSession
 from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 
+# --- НАСТРОЙКИ ---
 BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
 ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
 WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
+
 XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
 XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
+
 DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
 MIN_TRC20_USDT = 10.0
@@ -24,10 +27,13 @@ ADMIN_ID = 7653934214
 DEFAULT_PAYMENT_SYSTEM_FEE = 9.0
 DEFAULT_ADMIN_DEPOSIT_FEE = 4.0
 
+# --- ЮРИДИЧЕСКИЕ ССЫЛКИ ---
 OFFER_URL = "https://telegra.ph/PUBLICHNAYA-OFERTA-08-12-15"
 PRIVACY_URL = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-08-12-99"
-SUPPORT_USERNAME = "@[твой_юзернейм]"  # ⚠️ ЗАМЕНИ
+REFUND_URL = "https://telegra.ph/Politika-vozvratov-11-23"
+SUPPORT_USERNAME = "@[твой_юзернейм]"  # ⚠️ ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
 
+# Код верификации (полный доступ)
 DEFAULT_VERIFICATION_CODE = "VERIFY_2025"  # ⚠️ ЗАМЕНИ или через /setverifycode
 
 CATEGORY_EMOJI = {"Игры": "🎮", "Подписки": "📱", "AI-сервисы": "🤖", "Софт": "💻", "Обучение": "📚", "Другое": "📦"}
@@ -46,7 +52,7 @@ dp = Dispatcher()
 rolly_client = None
 rocket_client = None
 pending_code_input = {}
-pending_amount_input = {}  # user_id -> {"type": "card"/"usdt", "prompt_msg_id": ...}
+pending_amount_input = {}
 
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
     if network == 'TRC20': return 3.0
@@ -114,8 +120,7 @@ async def init_db():
                 await c.execute("INSERT INTO products (category,name,description,price,delivery_content) VALUES ($1,$2,$3,$4,$5)", cat, name, desc, price, dl)
     logging.info("DB ready")
 
-async def get_bot_status():
-    return await get_setting('bot_status', 'active')
+async def get_bot_status(): return await get_setting('bot_status', 'active')
 
 def fmt_seen(la):
     if not la: return "?"
@@ -258,11 +263,10 @@ async def c_qded(m: types.Message, cmd: CommandObject):
         await m.answer(f"✅ -{amt} (тихо)")
     except: pass
 
-# === VERIFICATION CODE INPUT ===
+# === VERIFICATION CODE & AMOUNT INPUT ===
 @dp.message(F.text & ~F.text.startswith("/"))
 async def h_text(m: types.Message):
     uid = m.from_user.id
-    # Ввод кода верификации
     if uid in pending_code_input:
         pending_code_input.pop(uid, None)
         code = m.text.strip()
@@ -279,7 +283,7 @@ async def h_text(m: types.Message):
             try: await bot.send_message(ADMIN_ID, f"⚠️ Неверный код от `{uid}`: `{code[:50]}`", parse_mode="Markdown")
             except: pass
         return
-    # Ввод суммы для пополнения
+    
     if uid in pending_amount_input:
         info = pending_amount_input.pop(uid)
         typ = info['type']
@@ -294,17 +298,15 @@ async def h_text(m: types.Message):
             await process_deposit_request(m.from_user, amount, 'usdt', None)
         return
 
-# === DEPOSIT REQUEST (для неверифицированных) ===
+# === DEPOSIT REQUEST ===
 async def process_deposit_request(user, amount, typ, comment):
     uid = user.id
     if await is_verified(uid) or uid == ADMIN_ID:
-        # Сразу создаём счёт
         if typ == 'card':
-            await create_card_invoice(user, amount, comment)
+            await create_card_invoice_by_id(uid, amount, comment)
         else:
-            await create_usdt_invoice(user, amount)
+            await create_usdt_invoice_by_id(uid, amount)
     else:
-        # Заявка админу
         async with db_pool.acquire() as c:
             rid = await c.fetchval("INSERT INTO deposit_requests (user_id, amount, order_type, comment) VALUES ($1,$2,$3,$4) RETURNING id", uid, amount, typ, comment)
         un = f"@{user.username}" if user.username else f"ID:{uid}"
@@ -328,7 +330,6 @@ async def cb_dr_ok(cb: CallbackQuery):
         if not req or req['status'] != 'pending': return await cb.answer("Уже обработано", show_alert=True)
         await c.execute("UPDATE deposit_requests SET status='approved' WHERE id=$1", rid)
     uid = req['user_id']; amount = req['amount']; typ = req['order_type']
-    # Создаём счёт
     if typ == 'card':
         await create_card_invoice_by_id(uid, amount, req['comment'])
     else:
@@ -349,21 +350,6 @@ async def cb_dr_no(cb: CallbackQuery):
     await cb.message.edit_text(cb.message.text + "\n\n❌ **ОТКЛОНЕНО**", parse_mode="Markdown")
     await cb.answer("❌")
 
-async def create_card_invoice(user, amount, comment):
-    try:
-        async with db_pool.acquire() as c:
-            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, comment) VALUES ($1,$2,'pending',$3) RETURNING id", user.id, amount, comment)
-        desc = f"Чек #{cid}" + (f" | {comment}" if comment else "")
-        pay = rolly_client.payments.create(amount=str(amount), order_id=f"dep_{user.id}_{cid}", terminal_id=TERMINAL_ID, description=desc, customer_id=str(user.id), redirect_url="https://t.me")
-        b = InlineKeyboardBuilder(); b.button(text="💳 Оплатить", url=pay['pay_url'])
-        msg = await bot.send_message(user.id, f"**Счёт: {amount:.2f} ₽**\n🟡 Ожидает оплату", reply_markup=b.as_markup(), parse_mode="Markdown")
-        async with db_pool.acquire() as c:
-            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", pay['payment_id'], msg.message_id, cid)
-    except Exception as e:
-        logging.error(f"card: {e}")
-        try: await bot.send_message(user.id, "❌ Ошибка создания счёта")
-        except: pass
-
 async def create_card_invoice_by_id(uid, amount, comment):
     try:
         async with db_pool.acquire() as c:
@@ -376,20 +362,6 @@ async def create_card_invoice_by_id(uid, amount, comment):
             await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", pay['payment_id'], msg.message_id, cid)
     except Exception as e:
         logging.error(f"cardbyid: {e}")
-
-async def create_usdt_invoice(user, amount):
-    try:
-        async with db_pool.acquire() as c:
-            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, order_type) VALUES ($1,$2,'pending','crypto') RETURNING id", user.id, amount)
-        inv = await rocket_client.create_invoice(currency="USDT", amount=amount, description=f"Чек #{cid}", payload=f"{user.id}_{cid}", expired_in=3600)
-        b = InlineKeyboardBuilder(); b.button(text="💳 xRocket", url=inv.link)
-        msg = await bot.send_message(user.id, f"💵 **Чек #{cid} на {amount} USDT**", reply_markup=b.as_markup(), parse_mode="Markdown")
-        async with db_pool.acquire() as c:
-            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", inv.invoice_id, msg.message_id, cid)
-    except Exception as e:
-        logging.error(f"usdt: {e}")
-        try: await bot.send_message(user.id, "❌ Ошибка счёта")
-        except: pass
 
 async def create_usdt_invoice_by_id(uid, amount):
     try:
@@ -477,10 +449,19 @@ async def c_priv(m: types.Message):
     b = InlineKeyboardBuilder(); b.button(text="🔒 Открыть", url=PRIVACY_URL)
     await m.answer("🔒 **Политика конфиденциальности**", reply_markup=b.as_markup(), parse_mode="Markdown")
 
+@dp.message(Command("refund"))
+async def c_refund(m: types.Message):
+    b = InlineKeyboardBuilder(); b.button(text="🔄 Открыть", url=REFUND_URL)
+    await m.answer("🔄 **Политика возвратов**", reply_markup=b.as_markup(), parse_mode="Markdown")
+
 @dp.message(Command("help"))
 async def c_help(m: types.Message):
-    b = InlineKeyboardBuilder(); b.button(text="📄 Оферта", url=OFFER_URL); b.button(text="🔒 Политика", url=PRIVACY_URL)
-    await m.answer(f"📚 **Помощь**\n\n/start — магазин\n/balance — баланс\n/offer\n/privacy\n\n{SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
+    b = InlineKeyboardBuilder()
+    b.button(text="📄 Оферта", url=OFFER_URL)
+    b.button(text="🔒 Политика", url=PRIVACY_URL)
+    b.button(text="🔄 Возврат", url=REFUND_URL)
+    b.adjust(2, 1)
+    await m.answer(f"📚 **Помощь**\n\n/start — магазин\n/balance — баланс\n/offer — оферта\n/privacy — политика\n/refund — возврат\n\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 # === START / MENU ===
 async def build_main_menu(uid):
@@ -491,9 +472,12 @@ async def build_main_menu(uid):
     b.button(text="💰 Пополнить баланс", callback_data="shop_deposit")
     b.button(text="👤 Профиль", callback_data="shop_profile")
     if not v: b.button(text="🔐 Ввести код верификации", callback_data="verify_enter")
+    
     b.row(InlineKeyboardButton(text="📄 Оферта", url=OFFER_URL), InlineKeyboardButton(text="🔒 Политика", url=PRIVACY_URL))
-    if v: b.adjust(1,1,1,2)
-    else: b.adjust(1,1,1,1,2)
+    b.row(InlineKeyboardButton(text="🔄 Политика возвратов", url=REFUND_URL))
+    
+    if v: b.adjust(1,1,1,2,1)
+    else: b.adjust(1,1,1,1,2,1)
     status = "✅ Верифицирован" if v else "❌ Не верифицирован"
     return f"👋 **Добро пожаловать!**\n\nСтатус: **{status}**\nКурс: **1 USDT = {rate:.2f} ₽**\n\nВыберите действие:", b.as_markup()
 
