@@ -27,13 +27,15 @@ ADMIN_ID = 7653934214
 DEFAULT_PAYMENT_SYSTEM_FEE = 9.0
 DEFAULT_ADMIN_DEPOSIT_FEE = 4.0
 
-# --- ЮРИДИЧЕСКИЕ ССЫЛКИ ---
+# --- ЮРИДИЧЕСКИЕ ДАННЫЕ И ССЫЛКИ ---
+PROJECT_NAME = "PSD Escray"
+PROJECT_DATE = "23.11.2024"
+SUPPORT_USERNAME = "@FrezzyBrezzy1"
+
 OFFER_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-11-23-71"
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-11-23-148"
 REFUND_URL = "https://telegra.ph/Politika-vozvratov-11-23"
-SUPPORT_USERNAME = "@[твой_юзернейм]"  # ⚠️ ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
 
-# Код верификации (полный доступ)
 DEFAULT_VERIFICATION_CODE = "VERIFY_2025"  # ⚠️ ЗАМЕНИ или через /setverifycode
 
 CATEGORY_EMOJI = {"Игры": "🎮", "Подписки": "📱", "AI-сервисы": "🤖", "Софт": "💻", "Обучение": "📚", "Другое": "📦"}
@@ -301,7 +303,20 @@ async def h_text(m: types.Message):
 # === DEPOSIT REQUEST ===
 async def process_deposit_request(user, amount, typ, comment):
     uid = user.id
-    if await is_verified(uid) or uid == ADMIN_ID:
+    is_v = await is_verified(uid) or uid == ADMIN_ID
+    
+    # 🔒 ПРОВЕРКА ЛИМИТОВ ДЛЯ НЕВЕРИФИЦИРОВАННЫХ
+    if not is_v:
+        rate = await get_final_rate()
+        rub_amount = amount if typ == 'card' else amount * rate
+        
+        if rub_amount < 100:
+            return await bot.send_message(uid, f"❌ Минимальная сумма для пополнения без верификации — **100 ₽** (или ~{100/rate:.2f} USDT).\n\nВведите сумму больше или пройдите верификацию.", parse_mode="Markdown")
+        
+        if rub_amount > 1000:
+            return await bot.send_message(uid, f"❌ Максимальная сумма для пополнения без верификации — **1000 ₽** (или ~{1000/rate:.2f} USDT).\n\nДля пополнения на большую сумму пройдите верификацию.", parse_mode="Markdown")
+
+    if is_v:
         if typ == 'card':
             await create_card_invoice_by_id(uid, amount, comment)
         else:
@@ -310,8 +325,15 @@ async def process_deposit_request(user, amount, typ, comment):
         async with db_pool.acquire() as c:
             rid = await c.fetchval("INSERT INTO deposit_requests (user_id, amount, order_type, comment) VALUES ($1,$2,$3,$4) RETURNING id", uid, amount, typ, comment)
         un = f"@{user.username}" if user.username else f"ID:{uid}"
-        way = "💳 Карта" if typ == 'card' else "🪙 USDT"
-        summ = f"{amount:.2f} ₽" if typ == 'card' else f"{amount:.2f} USDT"
+        
+        if typ == 'card':
+            summ = f"{amount:.2f} ₽"
+            way = "💳 Карта"
+        else:
+            rub_eq = amount * (await get_final_rate())
+            summ = f"{amount:.2f} USDT (~{rub_eq:.2f} ₽)"
+            way = "🪙 USDT"
+            
         b = InlineKeyboardBuilder()
         b.button(text="✅ Одобрить", callback_data=f"dr_ok_{rid}")
         b.button(text="❌ Отклонить", callback_data=f"dr_no_{rid}")
@@ -442,17 +464,17 @@ async def c_verify(m: types.Message):
 @dp.message(Command("offer"))
 async def c_off(m: types.Message):
     b = InlineKeyboardBuilder(); b.button(text="📄 Открыть", url=OFFER_URL)
-    await m.answer("📄 **Пользовательское соглашение**", reply_markup=b.as_markup(), parse_mode="Markdown")
+    await m.answer(f"📄 **Пользовательское соглашение**\n\nПроект: {PROJECT_NAME}\nДата: {PROJECT_DATE}\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.message(Command("privacy"))
 async def c_priv(m: types.Message):
     b = InlineKeyboardBuilder(); b.button(text="🔒 Открыть", url=PRIVACY_URL)
-    await m.answer("🔒 **Политика конфиденциальности**", reply_markup=b.as_markup(), parse_mode="Markdown")
+    await m.answer(f"🔒 **Политика конфиденциальности**\n\nПроект: {PROJECT_NAME}\nДата: {PROJECT_DATE}\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.message(Command("refund"))
 async def c_refund(m: types.Message):
     b = InlineKeyboardBuilder(); b.button(text="🔄 Открыть", url=REFUND_URL)
-    await m.answer("🔄 **Политика возвратов**", reply_markup=b.as_markup(), parse_mode="Markdown")
+    await m.answer(f"🔄 **Политика возвратов**\n\nПроект: {PROJECT_NAME}\nДата: {PROJECT_DATE}\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.message(Command("help"))
 async def c_help(m: types.Message):
@@ -461,7 +483,7 @@ async def c_help(m: types.Message):
     b.button(text="🔒 Политика", url=PRIVACY_URL)
     b.button(text="🔄 Возврат", url=REFUND_URL)
     b.adjust(2, 1)
-    await m.answer(f"📚 **Помощь**\n\n/start — магазин\n/balance — баланс\n/offer — оферта\n/privacy — политика\n/refund — возврат\n\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
+    await m.answer(f"📚 **Помощь**\n\nПроект: {PROJECT_NAME}\n/start — магазин\n/balance — баланс\n/offer — оферта\n/privacy — политика\n/refund — возврат\n\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 # === START / MENU ===
 async def build_main_menu(uid):
@@ -479,7 +501,7 @@ async def build_main_menu(uid):
     if v: b.adjust(1,1,1,2,1)
     else: b.adjust(1,1,1,1,2,1)
     status = "✅ Верифицирован" if v else "❌ Не верифицирован"
-    return f"👋 **Добро пожаловать!**\n\nСтатус: **{status}**\nКурс: **1 USDT = {rate:.2f} ₽**\n\nВыберите действие:", b.as_markup()
+    return f"👋 **Добро пожаловать в {PROJECT_NAME}!**\n\nСтатус: **{status}**\nКурс: **1 USDT = {rate:.2f} ₽**\n\nВыберите действие:", b.as_markup()
 
 @dp.message(Command("start"))
 async def c_start(m: types.Message):
@@ -562,7 +584,7 @@ async def cb_dep(cb: CallbackQuery):
     b.button(text="🪙 USDT (xRocket)", callback_data="dep_usdt")
     b.row(InlineKeyboardButton(text="🔙", callback_data="shop_main"))
     v = await is_verified(cb.from_user.id)
-    note = "" if v else "\n\n_⚠️ Требуется одобрение администратора_"
+    note = "" if v else f"\n\n_⚠️ Требуется одобрение админа._\n_Лимит без верификации: **100 - 1000 ₽**._"
     await cb.message.edit_text(f"💰 **Пополнение**\n\nКурс: 1 USDT = {rate:.2f} ₽{note}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "dep_card")
