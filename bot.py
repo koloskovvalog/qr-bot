@@ -1,7 +1,6 @@
 import asyncio, logging, asyncpg, os, hmac, hashlib, json, time
 from datetime import datetime, timezone
-from typing import Callable, Dict, Any, Awaitable
-from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -10,7 +9,7 @@ from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "8981416843:AAGbxO6c5hRoV0O3yIsXrL7gxVz3lAiqsy4"  # ⚠️ Новый токен
+BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
 ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
@@ -29,15 +28,16 @@ DEFAULT_PAYMENT_SYSTEM_FEE = 9.0
 DEFAULT_ADMIN_DEPOSIT_FEE = 4.0
 
 # --- ЮРИДИЧЕСКИЕ ДАННЫЕ И ССЫЛКИ ---
-PROJECT_NAME = "PSD Escray"
-PROJECT_DATE = "23.11.2024"
-SUPPORT_USERNAME = "@FrezzyBrezzy1"
+PROJECT_NAME = "DigitalShop"             # ⚠️ ЗАМЕНИ НА СВОЕ НАЗВАНИЕ
+PROJECT_DATE = "23.11.2026"              # ⚠️ АКТУАЛЬНАЯ ДАТА
+SUPPORT_USERNAME = "@[твой_юзернейм]"    # ⚠️ ТВОЙ ЮЗЕРНЕЙМ (для связи)
 
 OFFER_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-11-23-71"
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-11-23-148"
 REFUND_URL = "https://telegra.ph/Politika-vozvratov-11-23"
 
-DEFAULT_VERIFICATION_CODE = "VERIFY_2025"
+# Код верификации (полный доступ)
+DEFAULT_VERIFICATION_CODE = "VERIFY_2025"  # ⚠️ ЗАМЕНИ или через /setverifycode
 
 CATEGORY_EMOJI = {"Игры": "🎮", "Подписки": "📱", "AI-сервисы": "🤖", "Софт": "💻", "Обучение": "📚", "Другое": "📦"}
 
@@ -57,26 +57,6 @@ rocket_client = None
 pending_code_input = {}
 pending_amount_input = {}
 
-# === АНТИ-ФЛУД МИДЛВАРЬ (Защита от бана Telegram) ===
-class ThrottlingMiddleware(BaseMiddleware):
-    def __init__(self, limit=0.5):
-        self.limit = limit
-        self.users = {}
-
-    async def __call__(self, handler: Callable[[types.TelegramObject, Dict[str, Any]], Awaitable[Any]], event: types.TelegramObject, data: Dict[str, Any]) -> Any:
-        user_id = event.from_user.id if hasattr(event, 'from_user') else None
-        if user_id:
-            now = time.time()
-            if user_id in self.users:
-                if now - self.users[user_id] < self.limit:
-                    return # Игнорируем спам
-            self.users[user_id] = now
-        return await handler(event, data)
-
-# Подключаем защиту
-dp.message.middleware(ThrottlingMiddleware(limit=0.5))
-dp.callback_query.middleware(ThrottlingMiddleware(limit=0.5))
-
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
     if network == 'TRC20': return 3.0
     elif network == 'BEP20': return (amount_usdt * 0.01) + 2.0
@@ -89,7 +69,7 @@ async def fetch_base_rate():
     global _base_rate, _last_rate_update
     if time.time() - _last_rate_update < 60 and _base_rate > 0: return _base_rate
     try:
-        async with ClientSession() as s: # Правильное закрытие сессии
+        async with ClientSession() as s:
             async with s.get("https://api.rapira.net/open/market/rates", timeout=10) as r:
                 data = await r.json()
                 rd = next((i for i in data.get('data', []) if i.get('symbol') == 'USDT/RUB'), None)
@@ -324,17 +304,7 @@ async def h_text(m: types.Message):
 # === DEPOSIT REQUEST ===
 async def process_deposit_request(user, amount, typ, comment):
     uid = user.id
-    is_v = await is_verified(uid) or uid == ADMIN_ID
-    
-    if not is_v:
-        rate = await get_final_rate()
-        rub_amount = amount if typ == 'card' else amount * rate
-        if rub_amount < 100:
-            return await bot.send_message(uid, f"❌ Минимальная сумма для пополнения без верификации — **100 ₽** (или ~{100/rate:.2f} USDT).", parse_mode="Markdown")
-        if rub_amount > 1000:
-            return await bot.send_message(uid, f"❌ Максимальная сумма для пополнения без верификации — **1000 ₽** (или ~{1000/rate:.2f} USDT).", parse_mode="Markdown")
-
-    if is_v:
+    if await is_verified(uid) or uid == ADMIN_ID:
         if typ == 'card':
             await create_card_invoice_by_id(uid, amount, comment)
         else:
@@ -343,15 +313,8 @@ async def process_deposit_request(user, amount, typ, comment):
         async with db_pool.acquire() as c:
             rid = await c.fetchval("INSERT INTO deposit_requests (user_id, amount, order_type, comment) VALUES ($1,$2,$3,$4) RETURNING id", uid, amount, typ, comment)
         un = f"@{user.username}" if user.username else f"ID:{uid}"
-        
-        if typ == 'card':
-            summ = f"{amount:.2f} ₽"
-            way = "💳 Карта"
-        else:
-            rub_eq = amount * (await get_final_rate())
-            summ = f"{amount:.2f} USDT (~{rub_eq:.2f} ₽)"
-            way = "🪙 USDT"
-            
+        way = "💳 Карта" if typ == 'card' else "🪙 USDT"
+        summ = f"{amount:.2f} ₽" if typ == 'card' else f"{amount:.2f} USDT"
         b = InlineKeyboardBuilder()
         b.button(text="✅ Одобрить", callback_data=f"dr_ok_{rid}")
         b.button(text="❌ Отклонить", callback_data=f"dr_no_{rid}")
@@ -602,7 +565,7 @@ async def cb_dep(cb: CallbackQuery):
     b.button(text="🪙 USDT (xRocket)", callback_data="dep_usdt")
     b.row(InlineKeyboardButton(text="🔙", callback_data="shop_main"))
     v = await is_verified(cb.from_user.id)
-    note = "" if v else f"\n\n_⚠️ Требуется одобрение админа._\n_Лимит без верификации: **100 - 1000 ₽**._"
+    note = "" if v else "\n\n_⚠️ Требуется одобрение администратора_"
     await cb.message.edit_text(f"💰 **Пополнение**\n\nКурс: 1 USDT = {rate:.2f} ₽{note}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "dep_card")
@@ -906,20 +869,13 @@ async def main():
     await init_db()
     rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
-    
     app = web.Application()
     app.router.add_post("/rollypay-webhook", wh_rolly)
     app.router.add_post("/xrocket-webhook", wh_xr)
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT); await site.start()
     logging.info(f"Порт {WEBHOOK_PORT}")
-    
-    try:
-        await dp.start_polling(bot)
-    finally:
-        # Закрываем сессии при выключении (решает проблему Unclosed client session)
-        await bot.session.close()
-        await runner.cleanup()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
