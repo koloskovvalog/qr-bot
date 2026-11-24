@@ -9,7 +9,7 @@ from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
+BOT_TOKEN = "8981416843:AAGbxO6c5hRoV0O3yIsXrL7gxVz3lAiqsy4"
 ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
