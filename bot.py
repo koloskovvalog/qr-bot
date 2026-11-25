@@ -19,7 +19,7 @@ def required_env(name: str) -> str:
         raise RuntimeError(f"Не задана обязательная переменная окружения: {name}")
     return value
 
-BOT_TOKEN = required_env("9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo")
+BOT_TOKEN = required_env("BOT_TOKEN")
 ROLLYPAY_API_KEY = required_env("aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts")
 TERMINAL_ID = required_env("02485c32-7013-40f6-9c1f-00eb12f51d31")
 SIGNING_SECRET = required_env("SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk")
