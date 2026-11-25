@@ -20,6 +20,7 @@ def required_env(name: str) -> str:
     return value
 
 BOT_TOKEN = required_env("BOT_TOKEN")
+bot = Bot(token=BOT_TOKEN)
 ROLLYPAY_API_KEY = required_env("ROLLYPAY_API_KEY")
 TERMINAL_ID = required_env("TERMINAL_ID")
 SIGNING_SECRET = required_env("SIGNING_SECRET")
