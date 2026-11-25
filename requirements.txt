@@ -1,5 +1,5 @@
-aiogram
-asyncpg
+aiogram==3.13.1
+aiohttp==3.10.10
+asyncpg==0.30.0
 rollypay
-aiohttp
 aiorocket2
