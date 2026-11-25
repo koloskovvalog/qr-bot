@@ -6,21 +6,28 @@ from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+from aiogram.exceptions import TelegramRetryAfter
 from aiohttp import web, ClientSession
 from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "8981416843:AAGbxO6c5hRoV0O3yIsXrL7gxVz3lAiqsy4"
-ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
-TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
-SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
-WEBHOOK_PORT = int(os.environ.get("PORT", 8080))
+# Секреты задаются в Render -> Environment, а не хранятся в исходном коде.
+def required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Не задана обязательная переменная окружения: {name}")
+    return value
 
-XROCKET_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHBJZCI6IjMwNzc2NSIsImp0aSI6ImFwcDozMDc3NjU6YWMzYjUyODgtYWI3MS00MzUyLTgzNWEtYjRmNjVjZTMyNGQwIiwiaWF0IjoxNzkzNzE1MjA4fQ.nBCxGBwKmyaKjt4cW_jrtLBlagXxGQbvgD5c14yT2TI"
-XROCKET_WEBHOOK_SECRET = "74524a9673bb8d1f18dd00eaf22eecd7daf75fbfefd664d1389cefaead0a6673"
-
-DATABASE_URL = "postgresql://postgres.qrfqdihhoqvlaqkuyols:Koloskov2006@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+BOT_TOKEN = required_env("BOT_TOKEN")
+ROLLYPAY_API_KEY = required_env("ROLLYPAY_API_KEY")
+TERMINAL_ID = required_env("TERMINAL_ID")
+SIGNING_SECRET = required_env("SIGNING_SECRET")
+XROCKET_API_KEY = required_env("XROCKET_API_KEY")
+XROCKET_WEBHOOK_SECRET = required_env("XROCKET_WEBHOOK_SECRET")
+DATABASE_URL = required_env("DATABASE_URL")
+WEBHOOK_PORT = int(os.environ.get("PORT", "10000"))
+BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()  # polling или webhook
 
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
@@ -1024,108 +1031,110 @@ async def wh_xr(request: web.Request):
 
 # === 
 
+async def health_check(request: web.Request):
+    return web.Response(text="OK", status=200)
+
+
+async def run_polling():
+    """Запускает polling и переживает временные ошибки Telegram API."""
+    delay = 5
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+            logging.info("Запускаю Telegram polling")
+            await dp.start_polling(
+                bot,
+                handle_signals=False,
+                close_bot_session=False,
+                drop_pending_updates=False,
+            )
+            return
+        except TelegramRetryAfter as exc:
+            delay = max(float(exc.retry_after), 1.0) + 1.0
+            logging.warning("Telegram ограничил запросы; повтор через %.1f сек.", delay)
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("Ошибка Telegram polling; повтор через %s сек.", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
+
+
 async def main():
     global rolly_client, rocket_client
 
-    await init_db()
-
-    rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
-    rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
-
-    app = web.Application()
-
-    # Платёжные webhook
-    app.router.add_post("/rollypay-webhook", wh_rolly)
-    app.router.add_post("/xrocket-webhook", wh_xr)
-
-    render_url = os.getenv("RENDER_EXTERNAL_URL")
-    port = int(os.getenv("PORT", WEBHOOK_PORT))
-
-    runner = web.AppRunner(app)
-
+    runner = None
     try:
-        if render_url:
-            # Режим Webhook для Render
+        await init_db()
+        rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
+        rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
+
+        app = web.Application()
+        app.router.add_get("/", health_check, allow_head=True)
+        app.router.add_get("/health", health_check)
+        app.router.add_post("/rollypay-webhook", wh_rolly)
+        app.router.add_post("/xrocket-webhook", wh_xr)
+
+        render_url = os.getenv("RENDER_EXTERNAL_URL")
+        port = int(os.getenv("PORT", str(WEBHOOK_PORT)))
+        runner = web.AppRunner(app)
+
+        # Telegram webhook включается только при явном BOT_MODE=webhook.
+        # По умолчанию используется polling: это обходит ситуацию, когда
+        # Telegram показывает установленный webhook, но не присылает POST.
+        if BOT_MODE == "webhook":
+            if not render_url:
+                raise RuntimeError("BOT_MODE=webhook требует RENDER_EXTERNAL_URL")
             webhook_path = "/telegram-webhook"
             webhook_url = f"{render_url.rstrip('/')}{webhook_path}"
-
             webhook_secret = os.getenv("WEBHOOK_SECRET")
+            if not webhook_secret:
+                raise RuntimeError("Для BOT_MODE=webhook задайте WEBHOOK_SECRET в Render")
 
-            # Регистрируем Telegram handler ДО запуска сервера
             SimpleRequestHandler(
                 dispatcher=dp,
                 bot=bot,
-                secret_token=webhook_secret
-            ).register(
-                app,
-                path=webhook_path
-            )
+                secret_token=webhook_secret,
+                handle_in_background=False,
+            ).register(app, path=webhook_path)
 
-            await runner.setup()
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=port)
+        await site.start()
+        logging.info("HTTP-сервер запущен на порту %s; режим Telegram: %s", port, BOT_MODE)
 
-            site = web.TCPSite(
-                runner,
-                host="0.0.0.0",
-                port=port
-            )
-
-            await site.start()
-
-            logging.info("HTTP сервер запущен на порту %s", port)
-
-            # Устанавливаем Webhook
+        if BOT_MODE == "webhook":
             await bot.set_webhook(
                 url=webhook_url,
                 secret_token=webhook_secret,
                 allowed_updates=dp.resolve_used_update_types(),
-                drop_pending_updates=True
+                drop_pending_updates=False,
             )
-
-            # Проверяем регистрацию
-            webhook_info = await bot.get_webhook_info()
-
+            info = await bot.get_webhook_info()
             logging.info(
-                "TELEGRAM WEBHOOK INFO: %s",
-                {
-                    "url": webhook_info.url,
-                    "pending_update_count": webhook_info.pending_update_count,
-                    "last_error_message": webhook_info.last_error_message
-                }
+                "Telegram webhook: url=%s pending=%s last_error=%s",
+                info.url,
+                info.pending_update_count,
+                info.last_error_message,
             )
-
-            logging.info("Telegram Webhook успешно запущен")
-
-            # Не завершаем приложение
             await asyncio.Event().wait()
-
         else:
-            # Локальный режим Polling
-            logging.info("RENDER_EXTERNAL_URL не найден. Запуск Polling")
-
-            await runner.setup()
-
-            site = web.TCPSite(
-                runner,
-                host="0.0.0.0",
-                port=port
-            )
-
-            await site.start()
-
-            await bot.delete_webhook(drop_pending_updates=True)
-
-            await dp.start_polling(
-                bot,
-                drop_pending_updates=True
-            )
+            # Важно: polling и webhook одного токена одновременно работать не могут.
+            await run_polling()
 
     except Exception:
-        logging.exception("Ошибка запуска бота")
+        logging.exception("Критическая ошибка запуска приложения")
         raise
-
     finally:
-        await runner.cleanup()
-        await bot.session.close()
+        if runner is not None:
+            await runner.cleanup()
+        try:
+            await bot.session.close()
+        except Exception:
+            logging.exception("Ошибка закрытия Telegram-сессии")
+        if db_pool is not None:
+            await db_pool.close()
 
 
 if __name__ == "__main__":
