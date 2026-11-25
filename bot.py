@@ -20,13 +20,13 @@ def required_env(name: str) -> str:
     return value
 
 BOT_TOKEN = required_env("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
 ROLLYPAY_API_KEY = required_env("ROLLYPAY_API_KEY")
 TERMINAL_ID = required_env("TERMINAL_ID")
 SIGNING_SECRET = required_env("SIGNING_SECRET")
 XROCKET_API_KEY = required_env("XROCKET_API_KEY")
 XROCKET_WEBHOOK_SECRET = required_env("XROCKET_WEBHOOK_SECRET")
 DATABASE_URL = required_env("DATABASE_URL")
+WEBHOOK_PORT = int(os.environ.get("PORT", "10000"))
 BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()  # polling или webhook
 
 MIN_TRC20_USDT = 10.0
@@ -1077,7 +1077,7 @@ async def main():
         app.router.add_post("/xrocket-webhook", wh_xr)
 
         render_url = os.getenv("RENDER_EXTERNAL_URL")
-        port = int(os.getenv("PORT", str(WEBHOOK_PORT)))
+        port = int(os.getenv("PORT", "10000"))
         runner = web.AppRunner(app)
 
         # Telegram webhook включается только при явном BOT_MODE=webhook.
