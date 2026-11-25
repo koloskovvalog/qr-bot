@@ -1023,6 +1023,7 @@ async def wh_xr(request: web.Request):
         logging.error(f"whxr: {e}"); return web.Response(text="err", status=500)
 
 # === 
+
 async def main():
     global rolly_client, rocket_client
 
@@ -1033,86 +1034,83 @@ async def main():
 
     app = web.Application()
 
-    # Регистрируем платёжные webhook
+    # Платёжные webhook
     app.router.add_post("/rollypay-webhook", wh_rolly)
     app.router.add_post("/xrocket-webhook", wh_xr)
 
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    render_url = os.getenv("RENDER_EXTERNAL_URL")
+    port = int(os.getenv("PORT", WEBHOOK_PORT))
 
-    if RENDER_URL:
-        # === WEBHOOK MODE ===
+    runner = web.AppRunner(app)
 
-        WEBHOOK_PATH = f"/telegram-webhook/{BOT_TOKEN}"
-        WEBHOOK_URL = f"{RENDER_URL}{WEBHOOK_PATH}"
+    try:
+        if render_url:
+            # Режим Webhook для Render
+            webhook_path = "/telegram-webhook"
+            webhook_url = f"{render_url.rstrip('/')}{webhook_path}"
 
-        # ВАЖНО: регистрируем Telegram handler ДО runner.setup()
-        SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot
-        ).register(app, path=WEBHOOK_PATH)
+            webhook_secret = os.getenv("WEBHOOK_SECRET")
 
-        # Настраиваем корректное закрытие приложения
-        runner = web.AppRunner(app)
+            # Регистрируем Telegram handler ДО запуска сервера
+            SimpleRequestHandler(
+                dispatcher=dp,
+                bot=bot,
+                secret_token=webhook_secret
+            ).register(
+                app,
+                path=webhook_path
+            )
 
-        try:
             await runner.setup()
 
             site = web.TCPSite(
                 runner,
-                "0.0.0.0",
-                WEBHOOK_PORT
+                host="0.0.0.0",
+                port=port
             )
 
             await site.start()
 
-            logging.info(
-                f"Сервер запущен на порту {WEBHOOK_PORT}"
-            )
+            logging.info("HTTP сервер запущен на порту %s", port)
 
+            # Устанавливаем Webhook
             await bot.set_webhook(
-                url=WEBHOOK_URL,
+                url=webhook_url,
+                secret_token=webhook_secret,
+                allowed_updates=dp.resolve_used_update_types(),
                 drop_pending_updates=True
             )
 
+            # Проверяем регистрацию
+            webhook_info = await bot.get_webhook_info()
+
             logging.info(
-                f"✅ Бот работает через Webhook: {WEBHOOK_URL}"
+                "TELEGRAM WEBHOOK INFO: %s",
+                {
+                    "url": webhook_info.url,
+                    "pending_update_count": webhook_info.pending_update_count,
+                    "last_error_message": webhook_info.last_error_message
+                }
             )
 
+            logging.info("Telegram Webhook успешно запущен")
+
+            # Не завершаем приложение
             await asyncio.Event().wait()
 
-        finally:
-            try:
-                await bot.delete_webhook()
-            except Exception:
-                logging.exception("Ошибка удаления webhook")
+        else:
+            # Локальный режим Polling
+            logging.info("RENDER_EXTERNAL_URL не найден. Запуск Polling")
 
-            await runner.cleanup()
-
-            await bot.session.close()
-
-    else:
-        # === LOCAL POLLING MODE ===
-
-        logging.info(
-            "⚠️ RENDER_EXTERNAL_URL не найден. Запуск через Polling..."
-        )
-
-        runner = web.AppRunner(app)
-
-        try:
             await runner.setup()
 
             site = web.TCPSite(
                 runner,
-                "0.0.0.0",
-                WEBHOOK_PORT
+                host="0.0.0.0",
+                port=port
             )
 
             await site.start()
-
-            logging.info(
-                f"Сервер запущен на порту {WEBHOOK_PORT}"
-            )
 
             await bot.delete_webhook(drop_pending_updates=True)
 
@@ -1121,10 +1119,19 @@ async def main():
                 drop_pending_updates=True
             )
 
-        finally:
-            await runner.cleanup()
-            await bot.session.close()
+    except Exception:
+        logging.exception("Ошибка запуска бота")
+        raise
+
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s"
+    )
+
     asyncio.run(main())
