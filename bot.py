@@ -1,4 +1,4 @@
-import asyncio, logging, asyncpg, os, hmac, hashlib, json, time
+import asyncio, logging, asyncpg, os, hmac, hashlib, json, time, urllib.parse, random
 from datetime import datetime, timezone
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
@@ -28,6 +28,7 @@ XROCKET_WEBHOOK_SECRET = required_env("XROCKET_WEBHOOK_SECRET")
 DATABASE_URL = required_env("DATABASE_URL")
 WEBHOOK_PORT = int(os.environ.get("PORT", "10000"))
 BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()  # polling или webhook
+MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip().rstrip("/")
 
 MIN_TRC20_USDT = 10.0
 MIN_BEP20_USDT = 50.0
@@ -145,6 +146,21 @@ async def init_db():
         if (await c.fetchval("SELECT COUNT(*) FROM products")) == 0:
             for cat, name, desc, price, dl in DEMO_PRODUCTS:
                 await c.execute("INSERT INTO products (category,name,description,price,delivery_content) VALUES ($1,$2,$3,$4,$5)", cat, name, desc, price, dl)
+        # Отдельная виртуальная экономика Mini App; не связана с денежным балансом магазина.
+        await c.execute("""CREATE TABLE IF NOT EXISTS cs2_wallets (
+            user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+            coins INTEGER NOT NULL DEFAULT 1000 CHECK (coins >= 0), updated_at TIMESTAMPTZ DEFAULT NOW()
+        )""")
+        await c.execute("""CREATE TABLE IF NOT EXISTS cs2_inventory (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            item_name TEXT NOT NULL, rarity TEXT NOT NULL, case_name TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )""")
+        await c.execute("""CREATE TABLE IF NOT EXISTS cs2_openings (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            case_name TEXT NOT NULL, cost INTEGER NOT NULL, item_name TEXT NOT NULL,
+            rarity TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+        )""")
     logging.info("DB ready")
 
 async def get_bot_status(): return await get_setting('bot_status', 'active')
@@ -612,6 +628,8 @@ async def build_main_menu(uid):
     
     if v: b.adjust(1,1,1,2,1,1)
     else: b.adjust(1,1,1,1,2,1,1)
+    if MINI_APP_URL:
+        b.row(InlineKeyboardButton(text="🎮 CS2 CASES — открыть кейсы", web_app=types.WebAppInfo(url=MINI_APP_URL)))
     status = "✅ Верифицирован" if v else "❌ Не верифицирован"
     return f"👋 **Добро пожаловать в {PROJECT_NAME}!**\n\nСтатус: **{status}**\nКурс: **1 USDT = {rate:.2f} ₽**\n\nВыберите действие:", b.as_markup()
 
@@ -1031,6 +1049,103 @@ async def wh_xr(request: web.Request):
 
 # === 
 
+# === CS2 MINI APP (бесплатный демо-режим, виртуальные монеты) ===
+CS2_CASES = {
+    "dust": {"name": "DUST II", "cost": 100, "items": [
+        ("Glock-18 | Гремучая смерть", "Mil-Spec", 48), ("MP9 | Песчаная штриховка", "Industrial", 30),
+        ("AK-47 | Красная линия", "Classified", 15), ("AWP | Древесная гадюка", "Covert", 6), ("★ Нож | Гамма-волны", "Rare Special", 1)]},
+    "mirage": {"name": "MIRAGE", "cost": 250, "items": [
+        ("P250 | Песчаные дюны", "Mil-Spec", 45), ("Desert Eagle | Бронзовая декорация", "Restricted", 30),
+        ("M4A1-S | Поток", "Classified", 18), ("AK-47 | Императрица", "Covert", 6), ("★ Нож | Мраморный градиент", "Rare Special", 1)]},
+    "inferno": {"name": "INFERNO", "cost": 500, "items": [
+        ("MAC-10 | Тепловой удар", "Mil-Spec", 44), ("USP-S | Кайман", "Restricted", 30),
+        ("AWP | Азимов", "Covert", 18), ("M4A4 | Вой", "Covert", 7), ("★ Перчатки | Спецназ", "Rare Special", 1)]}
+}
+
+
+def validate_telegram_init_data(init_data: str):
+    if not init_data or len(init_data) > 10000:
+        return None
+    try:
+        pairs = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop("hash", None)
+        if not received_hash:
+            return None
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        calculated = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calculated, received_hash):
+            return None
+        auth_date = int(pairs.get("auth_date", "0"))
+        if time.time() - auth_date > 86400 or auth_date > time.time() + 60:
+            return None
+        user = json.loads(pairs.get("user", "{}"))
+        uid = int(user.get("id", 0))
+        return (uid, user) if uid > 0 else None
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+async def cs2_auth(request):
+    result = validate_telegram_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+    if not result:
+        return None, web.json_response({"error": "Telegram authorization failed. Open the app from Telegram."}, status=401)
+    uid, tg_user = result
+    async with db_pool.acquire() as c:
+        await c.execute("INSERT INTO users(user_id, username, last_active) VALUES($1,$2,NOW()) ON CONFLICT(user_id) DO UPDATE SET username=EXCLUDED.username, last_active=NOW()", uid, tg_user.get("username"))
+        await c.execute("INSERT INTO cs2_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING", uid)
+        coins = await c.fetchval("SELECT coins FROM cs2_wallets WHERE user_id=$1", uid)
+    return (uid, tg_user, coins), None
+
+
+async def cs2_api_config(request):
+    auth, error = await cs2_auth(request)
+    if error: return error
+    uid, user, coins = auth
+    cases = [{"id": k, "name": v["name"], "cost": v["cost"]} for k,v in CS2_CASES.items()]
+    return web.json_response({"user": {"id": uid, "name": user.get("first_name", "Игрок")}, "coins": coins, "cases": cases})
+
+
+async def cs2_api_inventory(request):
+    auth, error = await cs2_auth(request)
+    if error: return error
+    uid, _, coins = auth
+    async with db_pool.acquire() as c:
+        rows = await c.fetch("SELECT id,item_name,rarity,case_name,created_at FROM cs2_inventory WHERE user_id=$1 ORDER BY id DESC LIMIT 50", uid)
+    return web.json_response({"coins": coins, "items": [{"id": r["id"], "name": r["item_name"], "rarity": r["rarity"], "case": r["case_name"], "date": r["created_at"].isoformat()} for r in rows]})
+
+
+async def cs2_api_open(request):
+    auth, error = await cs2_auth(request)
+    if error: return error
+    uid, _, _ = auth
+    try:
+        payload = await request.json()
+        case_id = str(payload.get("case_id", ""))
+        case = CS2_CASES.get(case_id)
+        if not case: return web.json_response({"error": "Unknown case"}, status=400)
+    except (ValueError, AttributeError):
+        return web.json_response({"error": "Invalid request"}, status=400)
+
+    # Результат и списание фиксируются одной транзакцией; повторный запрос не создаёт отрицательный баланс.
+    names = [x[0] for x in case["items"]]
+    weights = [x[2] for x in case["items"]]
+    selected = random.choices(case["items"], weights=weights, k=1)[0]
+    async with db_pool.acquire() as c:
+        async with c.transaction():
+            wallet = await c.fetchrow("SELECT coins FROM cs2_wallets WHERE user_id=$1 FOR UPDATE", uid)
+            if not wallet:
+                await c.execute("INSERT INTO cs2_wallets(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
+                wallet = await c.fetchrow("SELECT coins FROM cs2_wallets WHERE user_id=$1 FOR UPDATE", uid)
+            if wallet["coins"] < case["cost"]:
+                return web.json_response({"error": "Недостаточно демо-монет", "coins": wallet["coins"]}, status=400)
+            new_balance = wallet["coins"] - case["cost"]
+            await c.execute("UPDATE cs2_wallets SET coins=$1, updated_at=NOW() WHERE user_id=$2", new_balance, uid)
+            await c.execute("INSERT INTO cs2_inventory(user_id,item_name,rarity,case_name) VALUES($1,$2,$3,$4)", uid, selected[0], selected[1], case["name"])
+            await c.execute("INSERT INTO cs2_openings(user_id,case_name,cost,item_name,rarity) VALUES($1,$2,$3,$4,$5)", uid, case["name"], case["cost"], selected[0], selected[1])
+    return web.json_response({"coins": new_balance, "item": {"name": selected[0], "rarity": selected[1]}})
+
+
 async def health_check(request: web.Request):
     return web.Response(text="OK", status=200)
 
@@ -1075,6 +1190,10 @@ async def main():
         app.router.add_get("/health", health_check)
         app.router.add_post("/rollypay-webhook", wh_rolly)
         app.router.add_post("/xrocket-webhook", wh_xr)
+        app.router.add_get("/api/cs2/config", cs2_api_config)
+        app.router.add_get("/api/cs2/inventory", cs2_api_inventory)
+        app.router.add_post("/api/cs2/open", cs2_api_open)
+        app.router.add_static("/miniapp/", path=os.path.join(os.path.dirname(__file__), "static"), show_index=True)
 
         render_url = os.getenv("RENDER_EXTERNAL_URL")
         port = int(os.getenv("PORT", "10000"))
