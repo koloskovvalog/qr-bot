@@ -1,6 +1,7 @@
 import asyncio, logging, asyncpg, os, hmac, hashlib, json, time
 from datetime import datetime, timezone
-from aiogram import Bot, Dispatcher, F, types
+from typing import Callable, Dict, Any, Awaitable
+from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -9,7 +10,7 @@ from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
 
 # --- НАСТРОЙКИ ---
-BOT_TOKEN = "9037852041:AAGlmd1cTt0Mbc9CM6t-kYJimE86h2cRiEo"
+BOT_TOKEN = "8981416843:AAGbxO6c5hRoV0O3yIsXrL7gxVz3lAiqsy4"
 ROLLYPAY_API_KEY = "aMkEd8uF3EY1PM5Zzki5oFfPVx7pnRUiuxYUJQLS5ts"
 TERMINAL_ID = "02485c32-7013-40f6-9c1f-00eb12f51d31"
 SIGNING_SECRET = "SQ7ZPKKj0l-_yFL_KsARgUj6FjuMJ51v4KFgbr53MAk"
@@ -27,17 +28,14 @@ ADMIN_ID = 7653934214
 DEFAULT_PAYMENT_SYSTEM_FEE = 9.0
 DEFAULT_ADMIN_DEPOSIT_FEE = 4.0
 
-# --- ЮРИДИЧЕСКИЕ ДАННЫЕ И ССЫЛКИ ---
-PROJECT_NAME = "DigitalShop"             # ⚠️ ЗАМЕНИ НА СВОЕ НАЗВАНИЕ
-PROJECT_DATE = "23.11.2026"              # ⚠️ АКТУАЛЬНАЯ ДАТА
-SUPPORT_USERNAME = "@[твой_юзернейм]"    # ⚠️ ТВОЙ ЮЗЕРНЕЙМ (для связи)
+PROJECT_NAME = "PSD Escray"
+PROJECT_DATE = "23.11.2024"
+SUPPORT_USERNAME = "@FrezzyBrezzy1"
 
 OFFER_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-11-23-71"
 PRIVACY_URL = "https://telegra.ph/Politika-konfidencialnosti-11-23-148"
 REFUND_URL = "https://telegra.ph/Politika-vozvratov-11-23"
-
-# Код верификации (полный доступ)
-DEFAULT_VERIFICATION_CODE = "VERIFY_2025"  # ⚠️ ЗАМЕНИ или через /setverifycode
+DEFAULT_VERIFICATION_CODE = "VERIFY_2025"
 
 CATEGORY_EMOJI = {"Игры": "🎮", "Подписки": "📱", "AI-сервисы": "🤖", "Софт": "💻", "Обучение": "📚", "Другое": "📦"}
 
@@ -56,6 +54,24 @@ rolly_client = None
 rocket_client = None
 pending_code_input = {}
 pending_amount_input = {}
+admin_states = {}
+
+# === АНТИ-ФЛУД МИДЛВАРЬ ===
+class ThrottlingMiddleware(BaseMiddleware):
+    def __init__(self, limit=0.3):
+        self.limit = limit
+        self.users = {}
+    async def __call__(self, handler: Callable[[types.TelegramObject, Dict[str, Any]], Awaitable[Any]], event: types.TelegramObject, data: Dict[str, Any]) -> Any:
+        user_id = event.from_user.id if hasattr(event, 'from_user') else None
+        if user_id:
+            now = time.time()
+            if user_id in self.users and now - self.users[user_id] < self.limit:
+                return
+            self.users[user_id] = now
+        return await handler(event, data)
+
+dp.message.middleware(ThrottlingMiddleware(0.3))
+dp.callback_query.middleware(ThrottlingMiddleware(0.3))
 
 def calculate_network_fee(network: str, amount_usdt: float) -> float:
     if network == 'TRC20': return 3.0
@@ -161,7 +177,185 @@ async def mw_maint(handler, event, data):
 async def err_h(update, exception):
     logging.error(f"err: {exception}"); return True
 
-# === ADMIN ===
+# === ВВОД ТЕКСТА ===
+@dp.message(F.text & ~F.text.startswith("/"))
+async def h_text(m: types.Message):
+    uid = m.from_user.id
+    
+    if uid == ADMIN_ID and uid in admin_states:
+        state = admin_states[uid]
+        action = state.get("action")
+        
+        if action == "create":
+            step = state.get("step")
+            if step == "category":
+                state["category"] = m.text.strip()
+                state["step"] = "name"
+                return await m.answer("2️⃣ Введите **название** товара:", parse_mode="Markdown")
+            elif step == "name":
+                state["name"] = m.text.strip()
+                state["step"] = "desc"
+                return await m.answer("3️⃣ Введите **описание** (или `-` чтобы пропустить):", parse_mode="Markdown")
+            elif step == "desc":
+                state["desc"] = m.text.strip() if m.text.strip() != "-" else ""
+                state["step"] = "price"
+                return await m.answer("4️⃣ Введите **цену** в рублях (например `550`):", parse_mode="Markdown")
+            elif step == "price":
+                try:
+                    price = float(m.text.replace(',', '.'))
+                    state["price"] = price
+                    state["step"] = "delivery"
+                    return await m.answer("5️⃣ Что бот должен выдать юзеру после покупки?\nИли `-` если хотите, чтобы юзер обратился к вам.", parse_mode="Markdown")
+                except:
+                    return await m.answer("❌ Введите число.")
+            elif step == "delivery":
+                state["delivery"] = m.text.strip() if m.text.strip() != "-" else "Свяжитесь с админом для получения"
+                async with db_pool.acquire() as c:
+                    pid = await c.fetchval("INSERT INTO products (category,name,description,price,delivery_content) VALUES ($1,$2,$3,$4,$5) RETURNING id", 
+                                           state["category"], state["name"], state["desc"], state["price"], state["delivery"])
+                admin_states.pop(uid)
+                return await m.answer(f"✅ **Товар успешно создан!**\nID: `{pid}`", parse_mode="Markdown")
+
+        elif action == "edit_price":
+            try:
+                price = float(m.text.replace(',', '.'))
+                async with db_pool.acquire() as c:
+                    await c.execute("UPDATE products SET price=$1 WHERE id=$2", price, state["pid"])
+                admin_states.pop(uid)
+                return await m.answer(f"✅ Цена обновлена!")
+            except:
+                return await m.answer("❌ Введите число.")
+                
+        elif action == "edit_desc":
+            async with db_pool.acquire() as c:
+                await c.execute("UPDATE products SET description=$1 WHERE id=$2", m.text.strip(), state["pid"])
+            admin_states.pop(uid)
+            return await m.answer(f"✅ Описание обновлено!")
+
+    if uid in pending_code_input:
+        pending_code_input.pop(uid, None)
+        code = m.text.strip()
+        if code == await get_verification_code():
+            async with db_pool.acquire() as c:
+                await c.execute("INSERT INTO users (user_id, last_active, verified_go6) VALUES ($1,NOW(),TRUE) ON CONFLICT (user_id) DO UPDATE SET verified_go6=TRUE", uid)
+            await m.answer("✅ Верификация пройдена! Пополнение без ограничений.")
+            try:
+                un = f"@{m.from_user.username}" if m.from_user.username else f"ID:{uid}"
+                await bot.send_message(ADMIN_ID, f"✅ Верифицирован по коду: {un} `{uid}`", parse_mode="Markdown")
+            except: pass
+        else:
+            await m.answer("❌ Неверный код")
+            try: await bot.send_message(ADMIN_ID, f"⚠️ Неверный код от `{uid}`: `{code[:50]}`", parse_mode="Markdown")
+            except: pass
+        return
+    
+    if uid in pending_amount_input:
+        info = pending_amount_input.pop(uid)
+        typ = info['type']
+        try:
+            amount = float(m.text.replace(',', '.'))
+            if amount <= 0: raise ValueError
+        except:
+            await m.answer("❌ Введите число"); return
+        if typ == 'card':
+            await process_deposit_request(m.from_user, amount, 'card', None)
+        else:
+            await process_deposit_request(m.from_user, amount, 'usdt', None)
+        return
+
+# === DEPOSIT REQUEST ===
+async def process_deposit_request(user, amount, typ, comment):
+    uid = user.id
+    is_v = await is_verified(uid) or uid == ADMIN_ID
+    
+    if not is_v:
+        rate = await get_final_rate()
+        rub_amount = amount if typ == 'card' else amount * rate
+        if rub_amount < 100:
+            return await bot.send_message(uid, f"❌ Минимальная сумма для пополнения без верификации — **100 ₽** (или ~{100/rate:.2f} USDT).", parse_mode="Markdown")
+        if rub_amount > 1000:
+            return await bot.send_message(uid, f"❌ Максимальная сумма для пополнения без верификации — **1000 ₽** (или ~{1000/rate:.2f} USDT).", parse_mode="Markdown")
+
+    if is_v:
+        if typ == 'card':
+            await create_card_invoice_by_id(uid, amount, comment)
+        else:
+            await create_usdt_invoice_by_id(uid, amount)
+    else:
+        async with db_pool.acquire() as c:
+            rid = await c.fetchval("INSERT INTO deposit_requests (user_id, amount, order_type, comment) VALUES ($1,$2,$3,$4) RETURNING id", uid, amount, typ, comment)
+        un = f"@{user.username}" if user.username else f"ID:{uid}"
+        
+        if typ == 'card':
+            summ = f"{amount:.2f} ₽"
+            way = "💳 Карта"
+        else:
+            rub_eq = amount * (await get_final_rate())
+            summ = f"{amount:.2f} USDT (~{rub_eq:.2f} ₽)"
+            way = "🪙 USDT"
+            
+        b = InlineKeyboardBuilder()
+        b.button(text="✅ Одобрить", callback_data=f"dr_ok_{rid}")
+        b.button(text="❌ Отклонить", callback_data=f"dr_no_{rid}")
+        try:
+            sent = await bot.send_message(ADMIN_ID, f"💰 **ЗАЯВКА НА ПОПОЛНЕНИЕ #{rid}**\n👤 {un}\n`{uid}`\nСпособ: {way}\nСумма: **{summ}**\n\n_Юзер не верифицирован_", reply_markup=b.as_markup(), parse_mode="Markdown")
+            async with db_pool.acquire() as c: await c.execute("UPDATE deposit_requests SET admin_msg_id=$1 WHERE id=$2", sent.message_id, rid)
+        except: pass
+        await bot.send_message(uid, "⏳ Заявка на пополнение отправлена администратору. Ожидайте одобрения.")
+
+@dp.callback_query(F.data.startswith("dr_ok_"))
+async def cb_dr_ok(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    rid = int(cb.data.split("_")[2])
+    async with db_pool.acquire() as c:
+        req = await c.fetchrow("SELECT * FROM deposit_requests WHERE id=$1", rid)
+        if not req or req['status'] != 'pending': return await cb.answer("Уже обработано", show_alert=True)
+        await c.execute("UPDATE deposit_requests SET status='approved' WHERE id=$1", rid)
+    uid = req['user_id']; amount = req['amount']; typ = req['order_type']
+    if typ == 'card':
+        await create_card_invoice_by_id(uid, amount, req['comment'])
+    else:
+        await create_usdt_invoice_by_id(uid, amount)
+    await cb.message.edit_text(cb.message.text + "\n\n✅ **ОДОБРЕНО**", parse_mode="Markdown")
+    await cb.answer("✅")
+
+@dp.callback_query(F.data.startswith("dr_no_"))
+async def cb_dr_no(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    rid = int(cb.data.split("_")[2])
+    async with db_pool.acquire() as c:
+        req = await c.fetchrow("SELECT * FROM deposit_requests WHERE id=$1", rid)
+        if not req or req['status'] != 'pending': return await cb.answer("Уже обработано", show_alert=True)
+        await c.execute("UPDATE deposit_requests SET status='rejected' WHERE id=$1", rid)
+    try: await bot.send_message(req['user_id'], "❌ Заявка на пополнение отклонена.")
+    except: pass
+    await cb.message.edit_text(cb.message.text + "\n\n❌ **ОТКЛОНЕНО**", parse_mode="Markdown")
+    await cb.answer("❌")
+
+async def create_card_invoice_by_id(uid, amount, comment):
+    try:
+        async with db_pool.acquire() as c:
+            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, comment) VALUES ($1,$2,'pending',$3) RETURNING id", uid, amount, comment)
+        desc = f"Чек #{cid}"
+        pay = rolly_client.payments.create(amount=str(amount), order_id=f"dep_{uid}_{cid}", terminal_id=TERMINAL_ID, description=desc, customer_id=str(uid), redirect_url="https://t.me")
+        b = InlineKeyboardBuilder(); b.button(text="💳 Оплатить", url=pay['pay_url'])
+        msg = await bot.send_message(uid, f"**Счёт: {amount:.2f} ₽**\n🟡 Ожидает оплату", reply_markup=b.as_markup(), parse_mode="Markdown")
+        async with db_pool.acquire() as c:
+            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", pay['payment_id'], msg.message_id, cid)
+    except Exception as e: logging.error(f"cardbyid: {e}")
+
+async def create_usdt_invoice_by_id(uid, amount):
+    try:
+        async with db_pool.acquire() as c:
+            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, order_type) VALUES ($1,$2,'pending','crypto') RETURNING id", uid, amount)
+        inv = await rocket_client.create_invoice(currency="USDT", amount=amount, description=f"Чек #{cid}", payload=f"{uid}_{cid}", expired_in=3600)
+        b = InlineKeyboardBuilder(); b.button(text="💳 xRocket", url=inv.link)
+        msg = await bot.send_message(uid, f"💵 **Чек #{cid} на {amount} USDT**", reply_markup=b.as_markup(), parse_mode="Markdown")
+        async with db_pool.acquire() as c:
+            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", inv.invoice_id, msg.message_id, cid)
+    except Exception as e: logging.error(f"usdtbyid: {e}")
+
+# === ADMIN COMMANDS ===
 @dp.message(Command("stop_bot"))
 async def c_stop(m: types.Message):
     if m.from_user.id != ADMIN_ID: return
@@ -266,119 +460,7 @@ async def c_qded(m: types.Message, cmd: CommandObject):
         await m.answer(f"✅ -{amt} (тихо)")
     except: pass
 
-# === VERIFICATION CODE & AMOUNT INPUT ===
-@dp.message(F.text & ~F.text.startswith("/"))
-async def h_text(m: types.Message):
-    uid = m.from_user.id
-    if uid in pending_code_input:
-        pending_code_input.pop(uid, None)
-        code = m.text.strip()
-        if code == await get_verification_code():
-            async with db_pool.acquire() as c:
-                await c.execute("INSERT INTO users (user_id, last_active, verified_go6) VALUES ($1,NOW(),TRUE) ON CONFLICT (user_id) DO UPDATE SET verified_go6=TRUE", uid)
-            await m.answer("✅ Верификация пройдена! Пополнение без ограничений.")
-            try:
-                un = f"@{m.from_user.username}" if m.from_user.username else f"ID:{uid}"
-                await bot.send_message(ADMIN_ID, f"✅ Верифицирован по коду: {un} `{uid}`", parse_mode="Markdown")
-            except: pass
-        else:
-            await m.answer("❌ Неверный код")
-            try: await bot.send_message(ADMIN_ID, f"⚠️ Неверный код от `{uid}`: `{code[:50]}`", parse_mode="Markdown")
-            except: pass
-        return
-    
-    if uid in pending_amount_input:
-        info = pending_amount_input.pop(uid)
-        typ = info['type']
-        try:
-            amount = float(m.text.replace(',', '.'))
-            if amount <= 0: raise ValueError
-        except:
-            await m.answer("❌ Введите число"); return
-        if typ == 'card':
-            await process_deposit_request(m.from_user, amount, 'card', None)
-        else:
-            await process_deposit_request(m.from_user, amount, 'usdt', None)
-        return
-
-# === DEPOSIT REQUEST ===
-async def process_deposit_request(user, amount, typ, comment):
-    uid = user.id
-    if await is_verified(uid) or uid == ADMIN_ID:
-        if typ == 'card':
-            await create_card_invoice_by_id(uid, amount, comment)
-        else:
-            await create_usdt_invoice_by_id(uid, amount)
-    else:
-        async with db_pool.acquire() as c:
-            rid = await c.fetchval("INSERT INTO deposit_requests (user_id, amount, order_type, comment) VALUES ($1,$2,$3,$4) RETURNING id", uid, amount, typ, comment)
-        un = f"@{user.username}" if user.username else f"ID:{uid}"
-        way = "💳 Карта" if typ == 'card' else "🪙 USDT"
-        summ = f"{amount:.2f} ₽" if typ == 'card' else f"{amount:.2f} USDT"
-        b = InlineKeyboardBuilder()
-        b.button(text="✅ Одобрить", callback_data=f"dr_ok_{rid}")
-        b.button(text="❌ Отклонить", callback_data=f"dr_no_{rid}")
-        try:
-            sent = await bot.send_message(ADMIN_ID, f"💰 **ЗАЯВКА НА ПОПОЛНЕНИЕ #{rid}**\n👤 {un}\n`{uid}`\nСпособ: {way}\nСумма: **{summ}**\n\n_Юзер не верифицирован_", reply_markup=b.as_markup(), parse_mode="Markdown")
-            async with db_pool.acquire() as c: await c.execute("UPDATE deposit_requests SET admin_msg_id=$1 WHERE id=$2", sent.message_id, rid)
-        except: pass
-        await bot.send_message(uid, "⏳ Заявка на пополнение отправлена администратору. Ожидайте одобрения.")
-
-@dp.callback_query(F.data.startswith("dr_ok_"))
-async def cb_dr_ok(cb: CallbackQuery):
-    if cb.from_user.id != ADMIN_ID: return
-    rid = int(cb.data.split("_")[2])
-    async with db_pool.acquire() as c:
-        req = await c.fetchrow("SELECT * FROM deposit_requests WHERE id=$1", rid)
-        if not req or req['status'] != 'pending': return await cb.answer("Уже обработано", show_alert=True)
-        await c.execute("UPDATE deposit_requests SET status='approved' WHERE id=$1", rid)
-    uid = req['user_id']; amount = req['amount']; typ = req['order_type']
-    if typ == 'card':
-        await create_card_invoice_by_id(uid, amount, req['comment'])
-    else:
-        await create_usdt_invoice_by_id(uid, amount)
-    await cb.message.edit_text(cb.message.text + "\n\n✅ **ОДОБРЕНО**", parse_mode="Markdown")
-    await cb.answer("✅")
-
-@dp.callback_query(F.data.startswith("dr_no_"))
-async def cb_dr_no(cb: CallbackQuery):
-    if cb.from_user.id != ADMIN_ID: return
-    rid = int(cb.data.split("_")[2])
-    async with db_pool.acquire() as c:
-        req = await c.fetchrow("SELECT * FROM deposit_requests WHERE id=$1", rid)
-        if not req or req['status'] != 'pending': return await cb.answer("Уже обработано", show_alert=True)
-        await c.execute("UPDATE deposit_requests SET status='rejected' WHERE id=$1", rid)
-    try: await bot.send_message(req['user_id'], "❌ Заявка на пополнение отклонена.")
-    except: pass
-    await cb.message.edit_text(cb.message.text + "\n\n❌ **ОТКЛОНЕНО**", parse_mode="Markdown")
-    await cb.answer("❌")
-
-async def create_card_invoice_by_id(uid, amount, comment):
-    try:
-        async with db_pool.acquire() as c:
-            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, comment) VALUES ($1,$2,'pending',$3) RETURNING id", uid, amount, comment)
-        desc = f"Чек #{cid}"
-        pay = rolly_client.payments.create(amount=str(amount), order_id=f"dep_{uid}_{cid}", terminal_id=TERMINAL_ID, description=desc, customer_id=str(uid), redirect_url="https://t.me")
-        b = InlineKeyboardBuilder(); b.button(text="💳 Оплатить", url=pay['pay_url'])
-        msg = await bot.send_message(uid, f"**Счёт: {amount:.2f} ₽**\n🟡 Ожидает оплату", reply_markup=b.as_markup(), parse_mode="Markdown")
-        async with db_pool.acquire() as c:
-            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", pay['payment_id'], msg.message_id, cid)
-    except Exception as e:
-        logging.error(f"cardbyid: {e}")
-
-async def create_usdt_invoice_by_id(uid, amount):
-    try:
-        async with db_pool.acquire() as c:
-            cid = await c.fetchval("INSERT INTO orders (user_id, amount, status, order_type) VALUES ($1,$2,'pending','crypto') RETURNING id", uid, amount)
-        inv = await rocket_client.create_invoice(currency="USDT", amount=amount, description=f"Чек #{cid}", payload=f"{uid}_{cid}", expired_in=3600)
-        b = InlineKeyboardBuilder(); b.button(text="💳 xRocket", url=inv.link)
-        msg = await bot.send_message(uid, f"💵 **Чек #{cid} на {amount} USDT**", reply_markup=b.as_markup(), parse_mode="Markdown")
-        async with db_pool.acquire() as c:
-            await c.execute("UPDATE orders SET payment_id=$1, message_id=$2 WHERE id=$3", inv.invoice_id, msg.message_id, cid)
-    except Exception as e:
-        logging.error(f"usdtbyid: {e}")
-
-# === COMMANDS ===
+# === USER COMMANDS ===
 @dp.message(Command("new"))
 async def c_new(m: types.Message, cmd: CommandObject):
     if not cmd.args: return await m.answer("`/new 500`")
@@ -459,12 +541,52 @@ async def c_refund(m: types.Message):
 
 @dp.message(Command("help"))
 async def c_help(m: types.Message):
+    await send_help(m.chat.id)
+
+# === HELP FUNCTION (общая для команды и кнопки) ===
+async def send_help(chat_id, edit_msg=None):
+    is_admin = chat_id == ADMIN_ID
+    text = (
+        f"📚 **Справка по командам**\n\n"
+        f"🛒 /start — открыть магазин\n"
+        f"💰 /balance — проверить баланс\n"
+        f"📥 /new [сумма] — пополнить рубли (пример: `/new 500`)\n"
+        f"💵 /usdt [сумма] — пополнить USDT (пример: `/usdt 10`)\n"
+        f"💸 /withdraw [сумма] [сеть] [адрес] — вывод USDT\n"
+        f"🔐 /verify — ввести код верификации\n"
+        f"📄 /offer — пользовательское соглашение\n"
+        f"🔒 /privacy — политика конфиденциальности\n"
+        f"🔄 /refund — политика возвратов\n"
+    )
+    if is_admin:
+        text += (
+            f"\n\n👑 **КОМАНДЫ АДМИНИСТРАТОРА:**\n"
+            f"🔧 /admin — админ-панель\n"
+            f"⏸ /stop_bot — остановить бота\n"
+            f"▶️ /start_bot — запустить бота\n"
+            f"💱 /setmarkup [число] — наценка к курсу\n"
+            f"📊 /setfee — показать проценты\n"
+            f"📊 /setfee ps [%] — комиссия ПС\n"
+            f"📊 /setfee me [%] — твой процент\n"
+            f"🔐 /setverifycode — код верификации\n"
+            f"✅ /allow [ID] — верифицировать юзера\n"
+            f"🚫 /deny [ID] — снять верификацию\n"
+            f"➕ /add [ID] [сумма] — начислить\n"
+            f"➖ /deduct [ID] [сумма] — списать\n"
+            f"➖ /quiet_deduct [ID] [сумма] — списать тихо\n"
+        )
+    
     b = InlineKeyboardBuilder()
-    b.button(text="📄 Оферта", url=OFFER_URL)
-    b.button(text="🔒 Политика", url=PRIVACY_URL)
-    b.button(text="🔄 Возврат", url=REFUND_URL)
-    b.adjust(2, 1)
-    await m.answer(f"📚 **Помощь**\n\nПроект: {PROJECT_NAME}\n/start — магазин\n/balance — баланс\n/offer — оферта\n/privacy — политика\n/refund — возврат\n\nПоддержка: {SUPPORT_USERNAME}", reply_markup=b.as_markup(), parse_mode="Markdown")
+    if is_admin:
+        b.row(InlineKeyboardButton(text="👑 Открыть админ-панель", callback_data="a_main"))
+    b.row(InlineKeyboardButton(text="🔙 Назад в меню", callback_data="shop_main"))
+    
+    if edit_msg:
+        try:
+            await edit_msg.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
+            return
+        except: pass
+    await bot.send_message(chat_id, text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 # === START / MENU ===
 async def build_main_menu(uid):
@@ -478,9 +600,10 @@ async def build_main_menu(uid):
     
     b.row(InlineKeyboardButton(text="📄 Соглашение", url=OFFER_URL), InlineKeyboardButton(text="🔒 Политика", url=PRIVACY_URL))
     b.row(InlineKeyboardButton(text="🔄 Политика возвратов", url=REFUND_URL))
+    b.row(InlineKeyboardButton(text="📚 Все команды", callback_data="help_menu"))
     
-    if v: b.adjust(1,1,1,2,1)
-    else: b.adjust(1,1,1,1,2,1)
+    if v: b.adjust(1,1,1,2,1,1)
+    else: b.adjust(1,1,1,1,2,1,1)
     status = "✅ Верифицирован" if v else "❌ Не верифицирован"
     return f"👋 **Добро пожаловать в {PROJECT_NAME}!**\n\nСтатус: **{status}**\nКурс: **1 USDT = {rate:.2f} ₽**\n\nВыберите действие:", b.as_markup()
 
@@ -488,6 +611,11 @@ async def build_main_menu(uid):
 async def c_start(m: types.Message):
     t, k = await build_main_menu(m.from_user.id)
     await m.answer(t, reply_markup=k, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "help_menu")
+async def cb_help_menu(cb: CallbackQuery):
+    await send_help(cb.from_user.id, edit_msg=cb.message)
+    await cb.answer()
 
 @dp.callback_query(F.data == "shop_main")
 async def cb_main(cb: CallbackQuery):
@@ -565,7 +693,7 @@ async def cb_dep(cb: CallbackQuery):
     b.button(text="🪙 USDT (xRocket)", callback_data="dep_usdt")
     b.row(InlineKeyboardButton(text="🔙", callback_data="shop_main"))
     v = await is_verified(cb.from_user.id)
-    note = "" if v else "\n\n_⚠️ Требуется одобрение администратора_"
+    note = "" if v else f"\n\n_⚠️ Требуется одобрение админа._\n_Лимит без верификации: **100 - 1000 ₽**._"
     await cb.message.edit_text(f"💰 **Пополнение**\n\nКурс: 1 USDT = {rate:.2f} ₽{note}", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "dep_card")
@@ -601,39 +729,6 @@ async def cb_hist(cb: CallbackQuery):
     b = InlineKeyboardBuilder(); b.row(InlineKeyboardButton(text="🔙", callback_data="shop_profile"))
     await cb.message.edit_text(t, reply_markup=b.as_markup(), parse_mode="Markdown")
 
-# === PRODUCTS MGMT ===
-@dp.message(Command("addproduct"))
-async def c_ap(m: types.Message, cmd: CommandObject):
-    if m.from_user.id != ADMIN_ID: return
-    if not cmd.args: return await m.answer("`/addproduct Категория | Название | Описание | Цена | Выдача`")
-    parts = [x.strip() for x in cmd.args.split("|")]
-    if len(parts) < 4: return await m.answer("❌ мин 4 поля")
-    try: price = float(parts[3].replace(',','.'))
-    except: return await m.answer("❌ цена")
-    dl = parts[4] if len(parts) > 4 else None
-    async with db_pool.acquire() as c:
-        pid = await c.fetchval("INSERT INTO products (category,name,description,price,delivery_content) VALUES ($1,$2,$3,$4,$5) RETURNING id", parts[0], parts[1], parts[2], price, dl)
-    await m.answer(f"✅ Товар #{pid}")
-
-@dp.message(Command("products"))
-async def c_ps(m: types.Message):
-    if m.from_user.id != ADMIN_ID: return
-    async with db_pool.acquire() as c:
-        ps = await c.fetch("SELECT id, category, name, price, is_active FROM products ORDER BY category, id")
-    if not ps: return await m.answer("Пусто")
-    t = "📦 **Товары:**\n\n" + "\n".join(f"{'✅' if p['is_active'] else '🚫'} `#{p['id']}` {p['category']} → {p['name']} — {p['price']:.0f}₽" for p in ps)
-    await m.answer(t, parse_mode="Markdown")
-
-@dp.message(Command("delproduct"))
-async def c_dp(m: types.Message, cmd: CommandObject):
-    if m.from_user.id != ADMIN_ID: return
-    if not cmd.args: return await m.answer("`/delproduct 5`")
-    try: pid = int(cmd.args.strip())
-    except: return await m.answer("❌")
-    async with db_pool.acquire() as c:
-        r = await c.execute("DELETE FROM products WHERE id=$1", pid)
-    await m.answer(f"✅ удалён" if r != "DELETE 0" else "❌ не найден")
-
 # === ADMIN PANEL ===
 @dp.message(Command("admin"))
 async def c_admin(m: types.Message):
@@ -643,6 +738,7 @@ async def c_admin(m: types.Message):
     b.button(text="👥 Юзеры", callback_data="a_users_0")
     b.button(text="📦 Товары", callback_data="a_products_0")
     b.button(text="📋 Заказы", callback_data="a_purchases_0")
+    b.button(text="📚 Все команды", callback_data="help_menu")
     await m.answer("👑 **Админ:**", reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data == "a_stats")
@@ -670,8 +766,10 @@ async def cb_am(cb: CallbackQuery):
     b.button(text="👥 Юзеры", callback_data="a_users_0")
     b.button(text="📦 Товары", callback_data="a_products_0")
     b.button(text="📋 Заказы", callback_data="a_purchases_0")
+    b.button(text="📚 Все команды", callback_data="help_menu")
     await cb.message.edit_text("👑 **Админ:**", reply_markup=b.as_markup(), parse_mode="Markdown")
 
+# --- УПРАВЛЕНИЕ ТОВАРАМИ ---
 @dp.callback_query(F.data.startswith("a_products_"))
 async def cb_ap(cb: CallbackQuery):
     if cb.from_user.id != ADMIN_ID: return
@@ -679,13 +777,39 @@ async def cb_ap(cb: CallbackQuery):
     async with db_pool.acquire() as c:
         ps = await c.fetch("SELECT id,name,price,is_active FROM products ORDER BY id LIMIT $1 OFFSET $2", lim, off)
         tot = await c.fetchval("SELECT COUNT(*) FROM products") or 0
-    kb = [[InlineKeyboardButton(text=f"{'✅' if p['is_active'] else '🚫'} #{p['id']} {p['name']} — {p['price']:.0f}₽", callback_data=f"a_pt_{p['id']}")] for p in ps]
+    
+    kb = []
+    for p in ps:
+        emoji = "✅" if p['is_active'] else "🚫"
+        kb.append([InlineKeyboardButton(text=f"{emoji} #{p['id']} {p['name']} — {p['price']:.0f}₽", callback_data=f"a_pv_{p['id']}")])
+    
     nav = []
     if pg > 0: nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"a_products_{pg-1}"))
     if off+lim < tot: nav.append(InlineKeyboardButton(text="➡️", callback_data=f"a_products_{pg+1}"))
     if nav: kb.append(nav)
+    
+    kb.append([InlineKeyboardButton(text="➕ Создать товар", callback_data="a_prod_create")])
     kb.append([InlineKeyboardButton(text="🔙", callback_data="a_main")])
-    await cb.message.edit_text(f"📦 Товары (Стр.{pg+1})", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    
+    await cb.message.edit_text(f"📦 **Управление товарами** (Стр.{pg+1}):", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("a_pv_"))
+async def cb_apv(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    pid = int(cb.data.split("_")[2])
+    async with db_pool.acquire() as c: p = await c.fetchrow("SELECT * FROM products WHERE id=$1", pid)
+    if not p: return await cb.answer("Товар не найден", show_alert=True)
+    
+    t = f"📦 **{p['name']}**\n\n📁 Категория: {p['category']}\n💰 Цена: {p['price']:.0f}₽\n📝 Описание: {p['description'] or '-'}\n🎁 Выдача: {p['delivery_content'] or '-'}\nСтатус: {'✅ Вкл' if p['is_active'] else '🚫 Выкл'}"
+    
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Выключить" if p['is_active'] else "🚫 Включить", callback_data=f"a_pt_{pid}")
+    b.button(text="💰 Изменить цену", callback_data=f"a_edit_price_{pid}")
+    b.button(text="📝 Изменить описание", callback_data=f"a_edit_desc_{pid}")
+    b.button(text="🗑 Удалить", callback_data=f"a_del_prod_{pid}")
+    b.row(InlineKeyboardButton(text="🔙 К товарам", callback_data="a_products_0"))
+    
+    await cb.message.edit_text(t, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("a_pt_"))
 async def cb_apt(cb: CallbackQuery):
@@ -693,9 +817,42 @@ async def cb_apt(cb: CallbackQuery):
     pid = int(cb.data.split("_")[2])
     async with db_pool.acquire() as c:
         await c.execute("UPDATE products SET is_active=NOT is_active WHERE id=$1", pid)
-    await cb.answer("✅")
+    await cb.answer("✅ Статус изменен")
+    await cb_apv(cb)
+
+@dp.callback_query(F.data == "a_prod_create")
+async def cb_apc(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    admin_states[cb.from_user.id] = {"action": "create", "step": "category"}
+    await cb.message.answer("1️⃣ Введите **категорию** товара (например: `Игры`, `Подписки`, `VPN`):", parse_mode="Markdown")
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("a_edit_price_"))
+async def cb_aep(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    pid = int(cb.data.split("_")[3])
+    admin_states[cb.from_user.id] = {"action": "edit_price", "pid": pid}
+    await cb.message.answer(f"Введите **новую цену** в рублях для товара #{pid}:", parse_mode="Markdown")
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("a_edit_desc_"))
+async def cb_aed(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    pid = int(cb.data.split("_")[3])
+    admin_states[cb.from_user.id] = {"action": "edit_desc", "pid": pid}
+    await cb.message.answer(f"Введите **новое описание** для товара #{pid} (можно `-`, чтобы очистить):", parse_mode="Markdown")
+    await cb.answer()
+
+@dp.callback_query(F.data.startswith("a_del_prod_"))
+async def cb_adp(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID: return
+    pid = int(cb.data.split("_")[3])
+    async with db_pool.acquire() as c:
+        await c.execute("DELETE FROM products WHERE id=$1", pid)
+    await cb.answer("🗑 Товар удален")
     await cb_ap(cb)
 
+# --- ЗАКАЗЫ И ЮЗЕРЫ ---
 @dp.callback_query(F.data.startswith("a_purchases_"))
 async def cb_apur(cb: CallbackQuery):
     if cb.from_user.id != ADMIN_ID: return
@@ -869,13 +1026,22 @@ async def main():
     await init_db()
     rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("Webhook удален, запускаем Polling...")
+
     app = web.Application()
     app.router.add_post("/rollypay-webhook", wh_rolly)
     app.router.add_post("/xrocket-webhook", wh_xr)
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT); await site.start()
-    logging.info(f"Порт {WEBHOOK_PORT}")
-    await dp.start_polling(bot)
+    logging.info(f"Порт {WEBHOOK_PORT} запущен")
+    
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
