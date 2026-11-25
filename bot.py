@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiohttp import web, ClientSession
 from rollypay import RollyPayClient
 from aiorocket2 import xRocketClient
@@ -1021,27 +1022,53 @@ async def wh_xr(request: web.Request):
     except Exception as e:
         logging.error(f"whxr: {e}"); return web.Response(text="err", status=500)
 
+# === ГЛАВНЫЙ ЗАПУСК (WEBHOOK ДЛЯ RENDER) ===
 async def main():
     global rolly_client, rocket_client
     await init_db()
     rolly_client = RollyPayClient(api_key=ROLLYPAY_API_KEY)
     rocket_client = xRocketClient(api_key=XROCKET_API_KEY)
-    
-    await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Webhook удален, запускаем Polling...")
 
     app = web.Application()
     app.router.add_post("/rollypay-webhook", wh_rolly)
     app.router.add_post("/xrocket-webhook", wh_xr)
-    runner = web.AppRunner(app); await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT); await site.start()
-    logging.info(f"Порт {WEBHOOK_PORT} запущен")
+
+    # Проверяем, запущены ли мы на Render (он сам подставляет эту переменную)
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
     
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-        await runner.cleanup()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
+    await site.start()
+    logging.info(f"Сервер запущен на порту {WEBHOOK_PORT}")
+
+    if RENDER_URL:
+        # === РЕЖИМ WEBHOOK (ДЛЯ RENDER) ===
+        WEBHOOK_PATH = f"/telegram-webhook/{BOT_TOKEN}"
+        WEBHOOK_URL = f"{RENDER_URL}{WEBHOOK_PATH}"
+        
+        # Регистрируем обработчик сообщений от Telegram
+        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+        
+        # Устанавливаем вебхук (удаляем старые, если были)
+        await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
+        logging.info(f"✅ Бот работает через Webhook: {WEBHOOK_URL}")
+        
+        # Держим процесс активным
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await bot.session.close()
+            await runner.cleanup()
+    else:
+        # === РЕЖИМ POLLING (ДЛЯ ЛОКАЛЬНОГО ЗАПУСКА) ===
+        logging.info("⚠️ RENDER_EXTERNAL_URL не найден. Запуск через Polling...")
+        await bot.delete_webhook(drop_pending_updates=True)
+        try:
+            await dp.start_polling(bot, drop_pending_updates=True)
+        finally:
+            await bot.session.close()
+            await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
