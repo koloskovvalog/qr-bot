@@ -1157,7 +1157,7 @@ async def cs2_steam_price_worker():
                                 try:
                                     rub_price = (Decimal(str(usd_price)) * rate).quantize(Decimal("0.01"))
                                     if rub_price > 0:
-                                        updates.append((item["market_hash_name"], str(rub_price), provider))
+                                        updates.append((item["market_hash_name"], f"{rub_price} ₽", provider))
                                 except (InvalidOperation, KeyError, TypeError):
                                     continue
                             if updates:
