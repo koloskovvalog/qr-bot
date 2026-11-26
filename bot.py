@@ -1386,7 +1386,7 @@ async def create_upgrade_attempt(request):
     async with db.acquire() as conn:
         async with conn.transaction():
             source = await conn.fetchrow("""
-                SELECT id, item_type, item_name, rarity, value_minor
+                SELECT id, item_type, item_name, rarity, value_minor, market_hash_name
                 FROM user_inventory
                 WHERE id=$1 AND user_id=$2 AND item_type=$3 AND consumed_at IS NULL
                 FOR UPDATE
