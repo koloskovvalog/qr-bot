@@ -530,6 +530,64 @@ async def get_inventory(request):
     } for row in rows]})
 
 
+async def create_bulk_orders(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        raw_ids = data.get("product_ids")
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 20:
+            raise ValueError()
+        product_ids = [int(value) for value in raw_ids]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Передайте от 1 до 20 корректных product_ids")
+
+    created = []
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            for product_id in product_ids:
+                product = await conn.fetchrow("""
+                    SELECT id, title, price_minor, currency
+                    FROM products
+                    WHERE id = $1 AND active = TRUE
+                    FOR SHARE
+                """, product_id)
+                if not product:
+                    raise web.HTTPNotFound(text=f"Товар {product_id} не найден или отключён")
+                order_id = await conn.fetchval("""
+                    INSERT INTO orders(user_id, username, product_id, product_title, amount_minor, currency)
+                    VALUES($1, $2, $3, $4, $5, $6)
+                    RETURNING id
+                """, user["id"], user.get("username"), product["id"],
+                     product["title"], product["price_minor"], product["currency"])
+                created.append({
+                    "order_id": order_id, "title": product["title"],
+                    "amount_minor": product["price_minor"], "currency": product["currency"]
+                })
+                await conn.execute("""
+                    INSERT INTO audit_log(actor_id, action, details)
+                    VALUES($1, 'order_created', $2::jsonb)
+                """, user["id"], json.dumps({
+                    "order_id": order_id, "product_id": product_id, "source": "cart"
+                }))
+
+    summary = "\n".join(
+        f"#{x['order_id']} — {x['title']} ({format_price(x['amount_minor'], x['currency'])})"
+        for x in created
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🛒 Новые заказы из корзины ({len(created)})\n"
+                f"Покупатель: {user.get('first_name', '')} (@{user.get('username') or 'не указан'})\n"
+                f"Telegram ID: {user['id']}\n\n{summary}"
+            )
+        except Exception:
+            logger.exception("Could not notify admin %s", admin_id)
+
+    return web.json_response({"ok": True, "orders": created, "count": len(created)})
+
+
 async def get_my_orders(request):
     user = verify_telegram_user(request)
 
@@ -956,6 +1014,7 @@ def create_app():
     app.router.add_get("/health", health)
     app.router.add_get("/api/products", get_products)
     app.router.add_post("/api/orders", create_order)
+    app.router.add_post("/api/orders/bulk", create_bulk_orders)
     app.router.add_get("/api/orders", get_my_orders)
     app.router.add_get("/api/cases", get_cases)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
