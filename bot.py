@@ -835,7 +835,7 @@ async def admin_get_payment_providers(request):
         "items": [{
             "code": row["code"], "title": row["title"],
             "mode": row["mode"], "enabled": row["enabled"],
-            "public_config": dict(row["public_config"] or {}),
+            "public_config": (json.loads(row["public_config"]) if isinstance(row["public_config"], str) else (row["public_config"] or {})),
             "updated_at": row["updated_at"].isoformat()
         } for row in rows],
         "transaction_count": transactions,
