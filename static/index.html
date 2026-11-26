@@ -99,14 +99,25 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .upgrade-target{min-height:170px}
 .case-stage{margin-top:16px}
 @media(min-width:700px){.bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:min(720px,calc(100% - 32px));border:1px solid #4b3c20;border-bottom:0;border-radius:16px 16px 0 0}.tabs{display:none}.ux-home{grid-template-columns:1.2fr .8fr}}
-@media(max-width:520px){main{padding:14px 12px 24px}.top{margin-bottom:14px}.hero{padding:19px;border-radius:18px}.hero h1{font-size:25px}.hero p{font-size:12px}.ux-home{grid-template-columns:1fr}.ux-shortcuts{grid-template-columns:repeat(4,1fr)}.ux-shortcut{font-size:9px;padding:9px 3px}.ux-shortcut span{font-size:17px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.product{padding:10px;min-height:190px}.product h3{font-size:12px}.bottom-nav button{font-size:8px}.upgrade-wheel-box{width:min(68vw,250px)}.case-stage{padding:20px 12px}}
+ .skin-tools{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}
+.skin-tools input,.skin-tools select{width:100%;min-width:0;background:#111;border:1px solid #333;color:#eee;border-radius:11px;padding:12px;font:inherit}
+.skin-meta{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}
+.skin-tag{font-size:10px;color:#d9bd7a;border:1px solid #594a2d;border-radius:20px;padding:4px 7px}
+.skin-price{font-size:14px;font-weight:800;color:#e8c879;margin-top:8px}
+.skin-price small{display:block;color:#999;font-size:10px;font-weight:400;margin-top:3px}
+.skin-card{background:linear-gradient(145deg,#191919,#101010);border:1px solid #2d2a23;border-radius:14px;padding:11px;min-width:0}
+.skin-card img{width:100%;height:105px;object-fit:contain;display:block;margin-bottom:8px}
+.skin-card strong{display:block;font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.skin-card .muted{font-size:10px}
+.skin-loadmore{width:100%;margin-top:12px}
+@media(max-width:520px){main{padding:14px 12px 24px}.top{margin-bottom:14px}.hero{padding:19px;border-radius:18px}.hero h1{font-size:25px}.hero p{font-size:12px}.ux-home{grid-template-columns:1fr}.ux-shortcuts{grid-template-columns:repeat(4,1fr)}.ux-shortcut{font-size:9px;padding:9px 3px}.ux-shortcut span{font-size:17px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.product{padding:10px;min-height:190px}.product h3{font-size:12px}.bottom-nav button{font-size:8px}.upgrade-wheel-box{width:min(68vw,250px)}.case-stage{padding:20px 12px}.skin-tools{grid-template-columns:1fr 1fr}.skin-card{padding:8px}.skin-card img{height:82px}}
 
 </style>
 </head>
 <body><main>
 <header class="top"><div class="brand">QR <span>BOT</span> PRO</div><div class="pill">✦ PREMIUM STORE</div></header>
 <section class="hero"><div class="eyebrow">EXCLUSIVE DIGITAL GOODS</div><h1>Покупки<br>в премиальном стиле</h1><p>Выбирайте цифровые товары, открывайте CS2-кейсы и улучшайте предметы в виртуальном апгрейдере.</p><div class="upgrade-entry"><button class="hero-cta" id="heroUpgrade">✦ ОТКРЫТЬ CS2 АПГРЕЙДЕР</button></div></section>
-<div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
+<div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="skinsTab">CS2 Скины</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
 <section id="catalogView">
 <div class="ux-home" id="uxHome">
  <div class="ux-welcome"><strong>Рады видеть в QR BOT PRO</strong><p>Выбирай цифровые товары, открывай виртуальные CS2-кейсы и пробуй улучшать предметы. Все игровые операции сейчас работают в демо-режиме.</p></div>
@@ -121,6 +132,19 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
+<section id="skinsView" hidden>
+ <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
+ <div class="case-intro">Варианты износа, StatTrak™ и Souvenir. Цены загружаются из Steam Community Market и показываются только после получения ответа Steam. Это справочный каталог; предметы здесь виртуальные и не продаются.</div>
+ <div class="skin-tools">
+  <input id="skinSearch" type="search" placeholder="Поиск скина или оружия…">
+  <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
+  <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
+  <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
+ </div>
+ <div class="muted" id="skinPriceNote">Цены Steam обновляются постепенно в фоновом режиме. Необновлённая цена не заменяется выдуманной.</div>
+ <div class="grid" id="skinGrid"><div class="empty">Загрузка каталога скинов…</div></div>
+ <button class="goldbtn skin-loadmore" id="loadMoreSkins" hidden>Загрузить ещё</button>
+</section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
 <div class="case-intro">Открывай виртуальные кейсы, смотри вероятности и собирай коллекцию. Все предметы — демонстрационные, не передаются в Steam и не имеют денежной стоимости.</div>
@@ -197,6 +221,49 @@ function removeCartOne(id){const n=cart.get(id)||0;if(n<=1)cart.delete(id);else 
 function updateCart(){let qty=0,total=0,currency="RUB";for(const [id,n] of cart){const p=products.find(x=>x.id===id);if(p){qty+=n;total+=p.price_minor*n;currency=p.currency}}$("cartbar").hidden=qty===0;$("cartCount").textContent="Корзина · "+qty+" шт.";$("cartTotal").textContent=money(total,currency)}
 async function checkout(){if(!initData){toast("Откройте магазин через Telegram.");return}if(!cart.size)return;const ids=[];for(const [id,n] of cart){for(let i=0;i<n;i++)ids.push(id)}if(!confirm("Создать "+ids.length+" заказ(ов) на выбранные товары?"))return;$("checkout").disabled=true;try{const d=await api("/api/orders/bulk",{method:"POST",body:JSON.stringify({product_ids:ids})});cart.clear();updateCart();renderProducts();toast("Создано заказов: "+d.count);await showOrders();switchTab("orders")}catch(e){toast(e.message)}finally{$("checkout").disabled=false}}
 async function loadProducts(){try{const d=await api("/api/products");products=d.items||[];renderFilters();renderProducts();updateCart()}catch(e){$("products").innerHTML='<div class="empty">Не удалось загрузить каталог. Откройте Mini App через Telegram.</div>'}}
+
+let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=false,skinCatalogBusy=false;
+let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinSearchTimer=null;
+function renderSkinCatalog(){
+ const grid=$("skinGrid");
+ if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">Ничего не найдено. Измени фильтры.</div>';}
+ else grid.innerHTML=skinCatalogItems.map(x=>'<article class="skin-card">'+
+  '<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">'+
+  '<strong>'+esc(x.name)+'</strong><div class="muted">'+esc(x.weapon||"CS2")+' · '+esc(x.rarity||"Редкость не указана")+'</div>'+
+  '<div class="skin-meta">'+(x.wear?'<span class="skin-tag">'+esc(x.wear)+'</span>':'')+
+  (x.stattrak?'<span class="skin-tag">StatTrak™</span>':'')+(x.souvenir?'<span class="skin-tag">Souvenir</span>':'')+
+  (x.phase?'<span class="skin-tag">'+esc(x.phase)+'</span>':'')+'</div>'+
+  '<div class="skin-price">'+(x.steam_lowest_price?esc(x.steam_lowest_price):'Цена уточняется')+
+  '<small>'+(x.steam_median_price?'Медиана: '+esc(x.steam_median_price):'Медиана пока не получена')+
+  (x.steam_volume?' · Продажи: '+esc(x.steam_volume):'')+'</small></div>'+
+  (x.steam_fetched_at?'<div class="muted">Steam: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
+  '</article>').join("");
+ $("skinsCount").textContent=skinCatalogTotal.toLocaleString("ru-RU")+" вариантов";
+ $("loadMoreSkins").hidden=!skinCatalogHasMore;
+ $("loadMoreSkins").disabled=skinCatalogBusy;
+}
+async function loadSkinCatalog(reset=true){
+ if(skinCatalogBusy)return;
+ if(reset){skinCatalogPage=0;skinCatalogItems=[];}
+ skinCatalogBusy=true;renderSkinCatalog();
+ try{
+  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"48",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort});
+  const d=await api("/api/cs2/skins?"+params.toString());
+  skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
+  skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
+  skinCatalogPage=Number(d.page||0)+1;
+  $("skinPriceNote").textContent="Источник цен: Steam Community Market · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы.";
+ }catch(e){if(reset)$("skinGrid").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
+ finally{skinCatalogBusy=false;renderSkinCatalog();}
+}
+function initSkinCatalog(){
+ $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),350)};
+ $("skinWear").onchange=()=>{skinCatalogWear=$("skinWear").value;loadSkinCatalog(true)};
+ $("skinRarity").onchange=()=>{skinCatalogRarity=$("skinRarity").value;loadSkinCatalog(true)};
+ $("skinSort").onchange=()=>{skinCatalogSort=$("skinSort").value;loadSkinCatalog(true)};
+ $("loadMoreSkins").onclick=()=>loadSkinCatalog(false);
+}
+
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(orderStatusLabel(o.status))+'</div><div class="muted">'+new Date(o.created_at).toLocaleString("ru-RU")+'</div>'+((["paid","delivered","cancelled","refunded"].includes(o.status))?"":'<button class="buy" data-demo-pay="'+o.id+'">Создать демо-платёж</button>')+'</div>').join("");document.querySelectorAll("[data-demo-pay]").forEach(b=>b.onclick=()=>createDemoPayment(Number(b.dataset.demoPay)))}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
@@ -302,8 +369,8 @@ async function doUpgrade(){
  }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
 async function loadProfile(){try{const d=await api("/api/profile");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>'}catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
-function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","cases","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
-$("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
+function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
+$("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function adminInit(){try{const d=await api("/api/admin/orders");$("adminPanel").style.display="block";if(!d.items.length){$("adminOrders").innerHTML="Заказов пока нет."}else{$("adminOrders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(o.status)+' · user '+o.user_id+'</div><select id="st'+o.id+'"><option value="invoice_sent">Счёт отправлен</option><option value="paid">Оплата подтверждена</option><option value="delivered">Выдано</option><option value="cancelled">Отменён</option><option value="refunded">Возвращён</option></select><button onclick="setStatus('+o.id+')">Сохранить</button></div>').join("")}await loadPaymentAdmin()}catch(e){}}
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}

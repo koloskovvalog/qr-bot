@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import secrets
+import re
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl
 
@@ -47,6 +48,9 @@ dp = Dispatcher()
 db: asyncpg.Pool | None = None
 CS2_CATALOG_CACHE = {}
 CS2_CATALOG_CACHE_AT = {}
+CS2_PRICE_QUEUE = asyncio.Queue()
+CS2_PRICE_QUEUED = set()
+CS2_PRICE_WORKER_TASK = None
 
 
 # ============================================================
@@ -730,7 +734,7 @@ async def get_inventory(request):
 # ============================================================
 
 CS2_CATALOG_URLS = {
-    "skins": "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json",
+    "skins": "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins_not_grouped.json",
     "cases": "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/crates.json",
 }
 
@@ -773,10 +777,24 @@ async def load_cs2_catalog(kind: str):
                 continue
             rarity = entry.get("rarity") or {}
             rarity_name = rarity.get("name", "Неизвестно") if isinstance(rarity, dict) else str(rarity)
+            wear = entry.get("wear") or {}
+            wear_name = wear.get("name", "") if isinstance(wear, dict) else str(wear or "")
+            weapon = entry.get("weapon") or {}
+            weapon_name = weapon.get("name", "") if isinstance(weapon, dict) else str(weapon or "")
+            market_hash_name = str(entry.get("market_hash_name") or name).strip()
             item = {
-                "id": str(entry.get("id") or name),
-                "name": name,
+                "id": str(entry.get("id") or market_hash_name),
+                "name": market_hash_name if kind == "skins" else name,
+                "base_name": name,
+                "market_hash_name": market_hash_name,
+                "weapon": weapon_name,
+                "wear": wear_name,
                 "rarity": rarity_name,
+                "stattrak": bool(entry.get("stattrak", False)),
+                "souvenir": bool(entry.get("souvenir", False)),
+                "phase": str(entry.get("phase") or ""),
+                "float_min": entry.get("min_float"),
+                "float_max": entry.get("max_float"),
                 "image_url": image_url,
                 "value_minor": cs2_virtual_value(rarity),
                 "item_type": "skin" if kind == "skins" else "case",
@@ -794,6 +812,209 @@ async def load_cs2_catalog(kind: str):
             return CS2_CATALOG_CACHE[kind]
         raise web.HTTPServiceUnavailable(text="Каталог CS2 временно недоступен")
 
+
+
+def steam_price_to_minor(value):
+    """Parse a localized Steam RUB price into kopecks without guessing missing values."""
+    if not value:
+        return None
+    raw = re.sub(r"[^0-9,\.]", "", str(value))
+    if not raw:
+        return None
+    if "," in raw and "." in raw:
+        decimal_sep = "," if raw.rfind(",") > raw.rfind(".") else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        raw = raw.replace(thousands_sep, "").replace(decimal_sep, ".")
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+    try:
+        amount = Decimal(raw)
+        if amount <= 0:
+            return None
+        return int(amount * 100)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+async def cs2_steam_price_worker():
+    """Conservative background worker: one Steam Market request about every 3.2 seconds."""
+    timeout = aiohttp.ClientTimeout(total=15)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; QR-BOT-PRO/1.0)",
+        "Accept": "application/json",
+    }
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        while True:
+            market_hash_name = await CS2_PRICE_QUEUE.get()
+            retry_later = False
+            try:
+                params = {
+                    "appid": "730",
+                    "currency": "5",
+                    "country": "RU",
+                    "market_hash_name": market_hash_name,
+                }
+                async with session.get(
+                    "https://steamcommunity.com/market/priceoverview/",
+                    params=params,
+                ) as response:
+                    if response.status == 429:
+                        logger.warning("Steam Market rate limited; backing off for 60 seconds")
+                        await asyncio.sleep(60)
+                        retry_later = True
+                    elif response.status == 200:
+                        payload = await response.json(content_type=None)
+                        if payload.get("success"):
+                            async with db.acquire() as conn:
+                                await conn.execute("""
+                                    INSERT INTO cs2_steam_prices(
+                                        market_hash_name, lowest_price, median_price,
+                                        volume, currency, fetched_at
+                                    )
+                                    VALUES($1, $2, $3, $4, 'RUB', NOW())
+                                    ON CONFLICT (market_hash_name) DO UPDATE SET
+                                        lowest_price=EXCLUDED.lowest_price,
+                                        median_price=EXCLUDED.median_price,
+                                        volume=EXCLUDED.volume,
+                                        currency='RUB',
+                                        fetched_at=NOW()
+                                """, market_hash_name,
+                                     payload.get("lowest_price"),
+                                     payload.get("median_price"),
+                                     payload.get("volume"))
+                    else:
+                        logger.info("Steam Market price request returned HTTP %s", response.status)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Steam Market price refresh failed for %s", market_hash_name, exc_info=True)
+            finally:
+                CS2_PRICE_QUEUE.task_done()
+                if retry_later:
+                    await CS2_PRICE_QUEUE.put(market_hash_name)
+                else:
+                    CS2_PRICE_QUEUED.discard(market_hash_name)
+            await asyncio.sleep(3.2)
+
+
+def queue_cs2_price_refresh(items):
+    """Queue only a small page-sized batch; duplicate names are coalesced."""
+    for item in items:
+        if CS2_PRICE_QUEUE.qsize() >= 250:
+            break
+        market_name = item.get("market_hash_name")
+        if market_name and market_name not in CS2_PRICE_QUEUED:
+            CS2_PRICE_QUEUED.add(market_name)
+            CS2_PRICE_QUEUE.put_nowait(market_name)
+
+
+async def get_cs2_skins(request):
+    catalog = await load_cs2_catalog("skins")
+    query = request.query.get("q", "").strip().casefold()[:80]
+    wear_filter = request.query.get("wear", "").strip().casefold()
+    rarity_filter = request.query.get("rarity", "").strip().casefold()
+    sort = request.query.get("sort", "name")
+    try:
+        page = max(0, min(int(request.query.get("page", "0")), 10000))
+        limit = max(1, min(int(request.query.get("limit", "48")), 60))
+    except ValueError:
+        page, limit = 0, 48
+
+    items = catalog
+    if query:
+        items = [x for x in items if query in (
+            x["name"] + " " + x.get("weapon", "") + " " +
+            x.get("rarity", "") + " " + x.get("wear", "") +
+            (" StatTrak" if x.get("stattrak") else "") +
+            (" Souvenir" if x.get("souvenir") else "")
+        ).casefold()]
+    if wear_filter:
+        items = [x for x in items if x.get("wear", "").casefold() == wear_filter]
+    if rarity_filter:
+        items = [x for x in items if x.get("rarity", "").casefold() == rarity_filter]
+
+    if sort in {"price_asc", "price_desc"} and items:
+        all_names = [x["market_hash_name"] for x in items]
+        async with db.acquire() as conn:
+            all_price_rows = await conn.fetch("""
+                SELECT market_hash_name, lowest_price
+                FROM cs2_steam_prices
+                WHERE market_hash_name = ANY($1::text[])
+            """, all_names)
+        all_prices = {
+            r["market_hash_name"]: steam_price_to_minor(r["lowest_price"])
+            for r in all_price_rows
+        }
+        items.sort(
+            key=lambda x: (
+                all_prices.get(x["market_hash_name"]) is None,
+                -(all_prices.get(x["market_hash_name"]) or 0)
+                if sort == "price_desc"
+                else (all_prices.get(x["market_hash_name"]) or 0),
+            )
+        )
+
+    total = len(items)
+    start = page * limit
+    page_items = items[start:start + limit]
+    names = [x["market_hash_name"] for x in page_items]
+
+    async with db.acquire() as conn:
+        price_rows = await conn.fetch("""
+            SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
+            FROM cs2_steam_prices
+            WHERE market_hash_name = ANY($1::text[])
+        """, names) if names else []
+    prices = {r["market_hash_name"]: r for r in price_rows}
+
+    enriched = []
+    stale = []
+    now = time.time()
+    for source in page_items:
+        item = dict(source)
+        price = prices.get(item["market_hash_name"])
+        if price:
+            item["steam_lowest_price"] = price["lowest_price"]
+            item["steam_median_price"] = price["median_price"]
+            item["steam_volume"] = price["volume"]
+            item["steam_fetched_at"] = price["fetched_at"].isoformat()
+            item["market_price_minor"] = steam_price_to_minor(price["lowest_price"])
+            is_stale = (now - price["fetched_at"].timestamp()) > 43200
+        else:
+            item["steam_lowest_price"] = None
+            item["steam_median_price"] = None
+            item["steam_volume"] = None
+            item["steam_fetched_at"] = None
+            item["market_price_minor"] = None
+            is_stale = True
+        if is_stale:
+            stale.append(source)
+        enriched.append(item)
+
+    if sort in {"price_asc", "price_desc"}:
+        enriched.sort(
+            key=lambda x: (x.get("market_price_minor") is None,
+                           x.get("market_price_minor") or 0),
+            reverse=(sort == "price_desc"),
+        )
+    elif sort == "rarity":
+        enriched.sort(key=lambda x: x.get("rarity", ""))
+
+    # Refresh a small batch asynchronously; cached values remain visible immediately.
+    queue_cs2_price_refresh(stale[:8])
+    return web.json_response({
+        "items": enriched,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": start + len(page_items) < total,
+        "price_source": "Steam Community Market priceoverview",
+        "price_currency": "RUB",
+        "price_cache_hours": 12,
+        "demo_only": True,
+    })
+
+
 async def get_cs2_catalog(request):
     kind = request.query.get("kind", "skins")
     items = await load_cs2_catalog(kind)
@@ -801,8 +1022,26 @@ async def get_cs2_catalog(request):
         limit = min(max(int(request.query.get("limit", "120")), 1), 200)
     except ValueError:
         limit = 120
+    selected = items[-limit:]
+    if kind == "skins" and selected:
+        names = [x.get("market_hash_name") for x in selected if x.get("market_hash_name")]
+        async with db.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
+                FROM cs2_steam_prices WHERE market_hash_name = ANY($1::text[])
+            """, names) if names else []
+        price_map = {r["market_hash_name"]: r for r in rows}
+        for item in selected:
+            price = price_map.get(item.get("market_hash_name"))
+            if price:
+                item["steam_lowest_price"] = price["lowest_price"]
+                item["steam_median_price"] = price["median_price"]
+                item["steam_volume"] = price["volume"]
+                market_minor = steam_price_to_minor(price["lowest_price"])
+                if market_minor:
+                    item["value_minor"] = market_minor
     return web.json_response({
-        "items": items[-limit:],
+        "items": selected,
         "source": "ByMykel/CSGO-API",
         "demo_only": True,
     })
@@ -874,6 +1113,14 @@ async def create_upgrade_attempt(request):
                 raise web.HTTPNotFound(text="Предмет уже использован или не найден")
             source_value = int(source["value_minor"])
             target_value = int(target["value_minor"])
+            if target.get("market_hash_name"):
+                market_price = await conn.fetchval("""
+                    SELECT lowest_price FROM cs2_steam_prices
+                    WHERE market_hash_name=$1
+                """, target["market_hash_name"])
+                market_minor = steam_price_to_minor(market_price)
+                if market_minor:
+                    target_value = market_minor
             if target_value <= source_value:
                 raise web.HTTPBadRequest(text="Выберите предмет дороже исходного")
             chance = min(90.0, max(1.0, round(source_value / target_value * 75, 2)))
@@ -1702,10 +1949,21 @@ async def on_startup(app: web.Application):
         allowed_updates=dp.resolve_used_update_types(),
     )
 
+    global CS2_PRICE_WORKER_TASK
+    if CS2_PRICE_WORKER_TASK is None or CS2_PRICE_WORKER_TASK.done():
+        CS2_PRICE_WORKER_TASK = asyncio.create_task(cs2_steam_price_worker())
     logger.info("QR BOT PRO started")
 
 
 async def on_cleanup(app: web.Application):
+    global CS2_PRICE_WORKER_TASK
+    if CS2_PRICE_WORKER_TASK is not None:
+        CS2_PRICE_WORKER_TASK.cancel()
+        try:
+            await CS2_PRICE_WORKER_TASK
+        except asyncio.CancelledError:
+            pass
+        CS2_PRICE_WORKER_TASK = None
     if db is not None:
         await db.close()
 
@@ -1743,6 +2001,7 @@ def create_app():
         admin_simulate_demo_payment,
     )
     app.router.add_get("/api/cs2/catalog", get_cs2_catalog)
+    app.router.add_get("/api/cs2/skins", get_cs2_skins)
     app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
     app.router.add_post("/api/upgrades/attempt", create_upgrade_attempt)
     app.router.add_get("/api/upgrades/history", get_upgrade_history)
