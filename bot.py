@@ -1019,6 +1019,11 @@ async def get_cs2_skins(request):
     query = request.query.get("q", "").strip().casefold()[:80]
     wear_filter = request.query.get("wear", "").strip().casefold()
     rarity_filter = request.query.get("rarity", "").strip().casefold()
+    phase_filter = request.query.get("phase", "").strip().casefold()
+    stattrak_only = request.query.get("stattrak") == "1"
+    souvenir_only = request.query.get("souvenir") == "1"
+    min_price_minor = steam_price_to_minor(request.query.get("min_price"))
+    max_price_minor = steam_price_to_minor(request.query.get("max_price"))
     sort = request.query.get("sort", "name")
     try:
         page = max(0, min(int(request.query.get("page", "0")), 10000))
@@ -1030,7 +1035,8 @@ async def get_cs2_skins(request):
     if query:
         items = [x for x in items if query in (
             x["name"] + " " + x.get("weapon", "") + " " +
-            x.get("rarity", "") + " " + x.get("wear", "") +
+            x.get("rarity", "") + " " + x.get("wear", "") + " " +
+            x.get("phase", "") +
             (" StatTrak" if x.get("stattrak") else "") +
             (" Souvenir" if x.get("souvenir") else "")
         ).casefold()]
@@ -1038,8 +1044,19 @@ async def get_cs2_skins(request):
         items = [x for x in items if x.get("wear", "").casefold() == wear_filter]
     if rarity_filter:
         items = [x for x in items if x.get("rarity", "").casefold() == rarity_filter]
+    if phase_filter:
+        items = [x for x in items if x.get("phase", "").casefold() == phase_filter]
+    if stattrak_only:
+        items = [x for x in items if x.get("stattrak")]
+    if souvenir_only:
+        items = [x for x in items if x.get("souvenir")]
 
-    if sort in {"price_asc", "price_desc"} and items:
+    all_prices = {}
+    if items and (
+        sort in {"price_asc", "price_desc"}
+        or min_price_minor is not None
+        or max_price_minor is not None
+    ):
         all_names = [x["market_hash_name"] for x in items]
         async with db.acquire() as conn:
             all_price_rows = await conn.fetch("""
@@ -1048,9 +1065,19 @@ async def get_cs2_skins(request):
                 WHERE market_hash_name = ANY($1::text[])
             """, all_names)
         all_prices = {
-            r["market_hash_name"]: steam_price_to_minor(r["lowest_price"])
-            for r in all_price_rows
+            row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
+            for row in all_price_rows
         }
+
+    if min_price_minor is not None or max_price_minor is not None:
+        items = [
+            x for x in items
+            if all_prices.get(x["market_hash_name"]) is not None
+            and (min_price_minor is None or all_prices[x["market_hash_name"]] >= min_price_minor)
+            and (max_price_minor is None or all_prices[x["market_hash_name"]] <= max_price_minor)
+        ]
+
+    if sort in {"price_asc", "price_desc"}:
         items.sort(
             key=lambda x: (
                 all_prices.get(x["market_hash_name"]) is None,
@@ -1059,6 +1086,10 @@ async def get_cs2_skins(request):
                 else (all_prices.get(x["market_hash_name"]) or 0),
             )
         )
+    elif sort == "rarity":
+        items.sort(key=lambda x: x.get("rarity", ""))
+    else:
+        items.sort(key=lambda x: x.get("name", "").casefold())
 
     total = len(items)
     start = page * limit
@@ -1071,7 +1102,7 @@ async def get_cs2_skins(request):
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
         """, names) if names else []
-    prices = {r["market_hash_name"]: r for r in price_rows}
+    prices = {row["market_hash_name"]: row for row in price_rows}
 
     enriched = []
     stale = []
@@ -1096,15 +1127,6 @@ async def get_cs2_skins(request):
         if is_stale:
             stale.append(source)
         enriched.append(item)
-
-    if sort in {"price_asc", "price_desc"}:
-        enriched.sort(
-            key=lambda x: (x.get("market_price_minor") is None,
-                           x.get("market_price_minor") or 0),
-            reverse=(sort == "price_desc"),
-        )
-    elif sort == "rarity":
-        enriched.sort(key=lambda x: x.get("rarity", ""))
 
     # Refresh a small batch asynchronously; cached values remain visible immediately.
     queue_cs2_price_refresh(stale[:8])
