@@ -138,6 +138,77 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .skin-loadmore{width:100%;margin-top:12px}
 @media(max-width:520px){main{padding:14px 12px 24px}.top{margin-bottom:14px}.hero{padding:19px;border-radius:18px}.hero h1{font-size:25px}.hero p{font-size:12px}.ux-home{grid-template-columns:1fr}.ux-shortcuts{grid-template-columns:repeat(4,1fr)}.ux-shortcut{font-size:9px;padding:9px 3px}.ux-shortcut span{font-size:17px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.product{padding:10px;min-height:190px}.product h3{font-size:12px}.bottom-nav button{font-size:8px}.upgrade-wheel-box{width:min(68vw,250px)}.case-stage{padding:20px 12px}.skin-tools{grid-template-columns:1fr 1fr}.skin-card{padding:8px}.skin-card img{height:82px}}
 
+
+/* QR BOT PRO · CS2 upgrader visual refresh */
+#upgradeView{padding-bottom:28px}
+#upgradeView>.section:first-child{margin:4px 2px 14px;align-items:center}
+#upgradeView>.section:first-child h2{font-size:22px;letter-spacing:-.4px}
+#upgradeView>.section:first-child .count{padding:7px 10px;border:1px solid #62502b;border-radius:30px;background:#211a0d;color:#e8cf8c;font-weight:900;letter-spacing:1px}
+#upgradeView>.case-intro{background:linear-gradient(115deg,#201a10,#111216 75%);border:1px solid #4d4028;border-radius:18px;padding:15px 16px;color:#c9c4b8}
+#upgradeView .upgrade-live-panel{position:relative;top:auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,220px);grid-template-areas:"title title" "wheel controls";gap:8px 18px;align-items:center;padding:17px;border-radius:22px;border:1px solid #66532f;background:radial-gradient(ellipse at 50% 0%,#332817 0,#17140f 58%,#111116 100%);box-shadow:0 16px 38px #0008;margin:14px 0}
+#upgradeView .upgrade-wheel-title{grid-area:title;text-align:center;font-size:10px;letter-spacing:2.5px}
+#upgradeView .upgrade-wheel-box{grid-area:wheel;width:min(100%,220px);margin:0 auto}
+#upgradeView .upgrade-live-controls{grid-area:controls;align-self:center}
+#upgradeView .upgrade-wheel{border-width:8px;box-shadow:0 0 0 5px #292113,0 0 38px #d8b45a30;background:conic-gradient(from -90deg,#f3d98d 0 var(--chance,25%),#38332a var(--chance,25%) 100%)}
+#upgradeView .upgrade-wheel:before{inset:9px;border:1px dashed #f8e6b866}
+#upgradeView .upgrade-wheel:after{inset:29%;background:radial-gradient(circle at 35% 25%,#4a3920,#111116 78%);border-color:#e0bb68}
+#upgradeView .upgrade-wheel-pointer:before{width:5px;left:calc(50% - 2.5px);height:46%;background:linear-gradient(180deg,#fff8df,#d9a83f);box-shadow:0 0 12px #f4d98a88}
+#upgradeView .upgrade-wheel-pointer:after{border-bottom-color:#fff1b9;filter:drop-shadow(0 0 5px #e4c36e)}
+#upgradeView .upgrade-wheel-center strong{font-size:30px}
+#upgradeView .upgrade-wheel-status{color:#d8c99e;font-size:11px;line-height:1.45}
+#upgradeView .upgrade-wheel-legend{gap:12px}
+#upgradeView .upgrade-wheel-legend span:first-child:before{background:#f0d68b}
+#upgradeView .upgrade-wheel-legend span:last-child:before{background:#51452e}
+#upgradeView .upgrade-live-controls .goldbtn{border-radius:13px;min-height:46px;background:linear-gradient(135deg,#f5df9e,#bd8d36);box-shadow:0 8px 22px #d8b45a2b}
+#upgradeView .upgrade-panel{padding:16px;border-radius:20px;border-color:#39352d;background:linear-gradient(145deg,#191916,#111114 82%);box-shadow:0 12px 30px #0005}
+#upgradeView .upgrade-panel>label{display:block;margin:4px 0 8px;font-size:11px;font-weight:850;letter-spacing:.5px;color:#d9c99f}
+#upgradeView #upgradeSource,#upgradeView #upgradeMode{height:46px;margin:0 0 13px;border:1px solid #49402e;border-radius:12px;background:#0d0e10;color:#f6f0df;padding:0 13px}
+#upgradeView #upgradeSourceInfo{padding:10px 12px;border:1px solid #39342a;border-radius:11px;background:#12120f;color:#c9c1b1;line-height:1.45}
+#upgradeView .upgrade-preset-panel{padding:15px;border-radius:16px;border-color:#4b402b;background:linear-gradient(145deg,#19170f,#101114)}
+#upgradeView .preset-heading{font-size:13px;letter-spacing:.2px}
+#upgradeView .preset-label{margin-top:13px;font-size:10px;letter-spacing:1px;text-transform:uppercase}
+#upgradeView .preset-row{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+#upgradeView .preset-row button{min-height:40px;border-radius:10px;background:#222018;border-color:#51452e;color:#e8d7a8;transition:transform .15s,border-color .15s,background .15s}
+#upgradeView .preset-row button:active{transform:scale(.97)}
+#upgradeView .preset-row button.active{background:linear-gradient(135deg,#f1d88e,#b98732);box-shadow:0 5px 16px #d8b45a30}
+#upgradeView .upgrade-custom{border-color:#383124}
+#upgradeView .upgrade-custom summary{padding:5px 0;color:#f0d99b}
+#upgradeView .custom-upgrade-grid input{min-height:40px;border-radius:10px}
+#upgradeView .custom-upgrade-grid button{border-radius:10px;background:linear-gradient(135deg,#e9d18c,#b98732);color:#171208}
+#upgradeView #upgradePresetStatus{margin-top:11px;line-height:1.45}
+#upgradeView .upgrade-chance{font-size:30px;margin:14px 0 4px;text-shadow:0 0 18px #d8b45a38}
+#upgradeView #upgradeTargetInfo{padding:8px 10px;border-radius:10px;background:#11110f;line-height:1.45}
+#upgradeView .upgrade-target-tools{padding:14px;border:1px solid #38352e;border-radius:17px;background:#151513;margin-top:14px}
+#upgradeView .upgrade-target-tools .search,#upgradeView .skin-tools input,#upgradeView .skin-tools select{min-height:43px;border-radius:11px;background:#0c0d0f;border-color:#484033}
+#upgradeView .skin-tools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+#upgradeView .skin-tools select{grid-column:1/-1;width:100%;color:#e8dfca;padding:0 10px}
+#upgradeView .section:has(#upgradeTargetCount){margin-top:20px}
+#upgradeView #upgradeTargets{gap:10px}
+#upgradeView .upgrade-target{min-height:190px;padding:12px;border-radius:16px;background:linear-gradient(155deg,#222018,#121316 80%);border-color:#3e3a31;text-align:left;cursor:pointer;transition:transform .16s,border-color .16s,box-shadow .16s}
+#upgradeView .upgrade-target:active{transform:scale(.985)}
+#upgradeView .upgrade-target.selected{border-color:#e0bd68;box-shadow:0 0 0 1px #d8b45a66,0 8px 24px #d8b45a18}
+#upgradeView .upgrade-target img{height:94px;filter:drop-shadow(0 8px 10px #0008)}
+#upgradeView .upgrade-target strong{font-size:11px;min-height:30px}
+#upgradeView .upgrade-target small{font-size:10px;color:#d5c9ad}
+#upgradeView .skin-loadmore{width:100%;margin-top:10px}
+#upgradeView .upgrade-result{border-radius:15px;background:linear-gradient(145deg,#211b10,#121212);line-height:1.55}
+#upgradeView .upgrade-history .order{border-radius:13px;background:#151513;border-color:#39352c}
+@media(max-width:430px){
+ #upgradeView .upgrade-live-panel{grid-template-columns:minmax(0,1fr) 112px;gap:8px 10px;padding:13px}
+ #upgradeView .upgrade-live-panel .upgrade-wheel-box{width:112px}
+ #upgradeView .upgrade-live-controls .goldbtn{font-size:11px;min-height:42px;padding:8px 6px}
+ #upgradeView .upgrade-wheel-center strong{font-size:21px}
+ #upgradeView .upgrade-wheel-title{font-size:9px}
+ #upgradeView .upgrade-wheel-status{font-size:10px}
+ #upgradeView .upgrade-wheel-legend{font-size:9px;gap:7px}
+ #upgradeView .preset-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+ #upgradeView .preset-row button{padding:8px 3px;font-size:10px}
+}
+@media(min-width:650px){
+ #upgradeView .upgrade-target-tools{display:grid;grid-template-columns:1fr;gap:0}
+ #upgradeView #upgradeTargets{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
 </style>
 </head>
 <body><main>
