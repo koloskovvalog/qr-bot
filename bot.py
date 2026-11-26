@@ -1267,6 +1267,8 @@ async def get_cs2_skins(request):
             item["steam_volume"] = price["volume"]
             item["steam_fetched_at"] = price["fetched_at"].isoformat()
             item["market_price_minor"] = steam_price_to_minor(price["lowest_price"])
+            if item["market_price_minor"]:
+                item["value_minor"] = item["market_price_minor"]
             is_stale = (now - price["fetched_at"].timestamp()) > 43200
         else:
             item["steam_lowest_price"] = None
@@ -1393,7 +1395,36 @@ async def create_upgrade_attempt(request):
                 raise web.HTTPNotFound(text="Предмет уже использован или не найден")
             source_value = int(source["value_minor"])
             target_value = int(target["value_minor"])
-            if target.get("market_hash_name"):
+            if item_type == "skin":
+                if not source.get("market_hash_name"):
+                    raise web.HTTPConflict(text="Для исходного скина пока нет точного Steam Market имени")
+                source_price = await conn.fetchrow("""
+                    SELECT lowest_price, fetched_at FROM cs2_steam_prices
+                    WHERE market_hash_name=$1
+                """, source["market_hash_name"])
+                source_fresh = bool(source_price and
+                    (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= 43200)
+                source_market_minor = steam_price_to_minor(source_price["lowest_price"]) if source_fresh else None
+                if not source_market_minor:
+                    queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
+                    raise web.HTTPConflict(text="Обновляем цену исходного скина в Steam. Повторите апгрейд через минуту.")
+                source_value = source_market_minor
+                target_price = await conn.fetchrow("""
+                    SELECT lowest_price, fetched_at FROM cs2_steam_prices
+                    WHERE market_hash_name=$1
+                """, target["market_hash_name"])
+                target_fresh = bool(target_price and
+                    (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= 43200)
+                target_market_minor = steam_price_to_minor(target_price["lowest_price"]) if target_fresh else None
+                if not target_market_minor:
+                    queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
+                    raise web.HTTPConflict(text="Цена цели ещё не получена из Steam. Выберите другой скин или попробуйте позже.")
+                if target_market_minor < 200 or target_market_minor > 10000000:
+                    raise web.HTTPBadRequest(text="Для апгрейда доступны цели стоимостью от 2 до 100 000 ₽ по Steam Market.")
+                target_value = target_market_minor
+                target["value_minor"] = target_market_minor
+                target["market_price_minor"] = target_market_minor
+            elif target.get("market_hash_name"):
                 market_price = await conn.fetchval("""
                     SELECT lowest_price FROM cs2_steam_prices
                     WHERE market_hash_name=$1
