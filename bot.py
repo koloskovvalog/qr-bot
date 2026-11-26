@@ -851,28 +851,48 @@ async def admin_configure_payment_provider(request):
     try:
         data = await request.json()
         enabled = bool(data.get("enabled", False))
+        merchant_id = str(data.get("merchant_id", "")).strip()[:100]
+        api_url = str(data.get("api_url", "")).strip()[:300]
     except (TypeError, json.JSONDecodeError):
         raise web.HTTPBadRequest(text="Некорректные данные")
-    # Real provider credentials and live mode are intentionally not accepted here.
-    if code == "antilopay" and enabled:
-        raise web.HTTPConflict(
-            text="Antilopay нельзя включить до реализации официального API-адаптера и проверки webhook."
-        )
+    # No secret keys are accepted or persisted in this demo configuration.
+    if code == "antilopay":
+        if api_url and not api_url.startswith("https://"):
+            raise web.HTTPBadRequest(text="API URL должен начинаться с https://")
+        async with db.acquire() as conn:
+            await conn.execute("""
+                UPDATE payment_providers
+                SET enabled = FALSE, mode = 'unconfigured',
+                    public_config = jsonb_build_object(
+                        'description', 'Демо-профиль. Реальное подключение ещё не выполнено.',
+                        'merchant_id', $1,
+                        'api_url', $2,
+                        'credentials_saved', FALSE
+                    ),
+                    updated_at = NOW()
+                WHERE code = 'antilopay'
+            """, merchant_id, api_url)
+        await write_audit(user["id"], "payment_provider_demo_profile_saved", {
+            "provider": code, "merchant_id_present": bool(merchant_id),
+            "api_url_present": bool(api_url), "secrets_saved": False
+        })
+        return web.json_response({
+            "ok": True, "provider": code, "enabled": False,
+            "mode": "unconfigured",
+            "message": "Демо-профиль сохранён. API-ключ не запрашивался; реальная оплата не подключена."
+        })
     async with db.acquire() as conn:
         await conn.execute("""
             UPDATE payment_providers
-            SET enabled = $1,
-                mode = CASE WHEN $1 THEN 'demo' ELSE 'unconfigured' END,
+            SET enabled = $1, mode = CASE WHEN $1 THEN 'demo' ELSE 'unconfigured' END,
                 updated_at = NOW()
-            WHERE code = $2
-        """, enabled if code == "demo" else False, code)
+            WHERE code = 'demo'
+        """, enabled)
     await write_audit(user["id"], "payment_provider_configured", {
-        "provider": code, "enabled": enabled if code == "demo" else False,
-        "mode": "demo"
+        "provider": code, "enabled": enabled, "mode": "demo"
     })
     return web.json_response({"ok": True, "provider": code,
-                              "enabled": enabled if code == "demo" else False,
-                              "mode": "demo"})
+                              "enabled": enabled, "mode": "demo"})
 
 
 async def create_demo_payment(request):
