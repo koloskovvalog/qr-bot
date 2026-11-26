@@ -136,9 +136,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="skinsView" hidden>
  <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
- <div class="case-intro">Варианты износа, StatTrak™ и Souvenir. Цены загружаются из Steam Community Market и показываются только после получения ответа Steam. Это справочный каталог; предметы здесь виртуальные и не продаются.</div>
+ <div class="case-intro">Полный каталог вариантов CS2. Введи название оружия или скина — поиск работает по всему каталогу. Цены Steam показываются в рублях и обновляются постепенно.</div>
  <div class="skin-tools">
-  <input id="skinSearch" type="search" placeholder="Поиск скина или оружия…">
+  <input id="skinSearch" type="search" minlength="2" autocomplete="off" placeholder="Начни вводить: AK-47 Redline, AWP Asiimov…">
   <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
   <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
   <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
@@ -149,12 +149,12 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
  <div class="muted" id="skinPriceNote">Цены Steam обновляются постепенно в фоновом режиме. Необновлённая цена не заменяется выдуманной.</div>
- <div class="grid" id="skinGrid"><div class="empty">Загрузка каталога скинов…</div></div>
+ <div class="grid" id="skinGrid"><div class="empty">Введи минимум 2 символа — покажем подходящие скины без бесконечной прокрутки всего каталога.</div></div>
  <button class="goldbtn skin-loadmore" id="loadMoreSkins" hidden>Загрузить ещё</button>
 </section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Открывай виртуальные кейсы, смотри вероятности и собирай коллекцию. Все предметы — демонстрационные, не передаются в Steam и не имеют денежной стоимости.</div>
+<div class="case-intro">Открывай кейсы, получай предметы с изображением и ценой Steam в ₽. Их можно направить в апгрейд или обменять на виртуальный баланс. Предметы и баланс не являются реальными активами и не выводятся на карту.</div>
 <div id="caseCards" class="grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 <div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
 <button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
@@ -233,7 +233,8 @@ let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=
 let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="",skinCatalogMaxPrice="",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinSearchTimer=null;
 function renderSkinCatalog(){
  const grid=$("skinGrid");
- if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">Ничего не найдено. Измени фильтры.</div>';}
+ if(!skinCatalogQuery || skinCatalogQuery.length<2){grid.innerHTML='<div class="empty">Введи минимум 2 символа для поиска по всему каталогу CS2.</div>';}
+ else if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">По запросу ничего не найдено. Попробуй другое название или английское написание.</div>';}
  else grid.innerHTML=skinCatalogItems.map(x=>'<article class="skin-card">'+
   '<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">'+
   '<strong>'+esc(x.name)+'</strong><div class="muted">'+esc(x.weapon||"CS2")+' · '+esc(x.rarity||"Редкость не указана")+'</div>'+
@@ -245,7 +246,7 @@ function renderSkinCatalog(){
   (x.steam_volume?' · Продажи: '+esc(x.steam_volume):'')+'</small></div>'+
   (x.steam_fetched_at?'<div class="muted">Steam: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
   '</article>').join("");
- $("skinsCount").textContent=skinCatalogTotal.toLocaleString("ru-RU")+" вариантов";
+ $("skinsCount").textContent=skinCatalogQuery.length>=2?skinCatalogTotal.toLocaleString("ru-RU")+" результатов":skinCatalogTotal.toLocaleString("ru-RU")+" в каталоге";
  $("loadMoreSkins").hidden=!skinCatalogHasMore;
  $("loadMoreSkins").disabled=skinCatalogBusy;
 }
@@ -254,7 +255,7 @@ async function loadSkinCatalog(reset=true){
  if(reset){skinCatalogPage=0;skinCatalogItems=[];}
  skinCatalogBusy=true;renderSkinCatalog();
  try{
-  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"48",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort,phase:skinCatalogPhase,min_price:skinCatalogMinPrice,max_price:skinCatalogMaxPrice,stattrak:skinCatalogStatTrak?"1":"0",souvenir:skinCatalogSouvenir?"1":"0"});
+  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"24",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort,phase:skinCatalogPhase,min_price:skinCatalogMinPrice,max_price:skinCatalogMaxPrice,stattrak:skinCatalogStatTrak?"1":"0",souvenir:skinCatalogSouvenir?"1":"0"});
   const d=await api("/api/cs2/skins?"+params.toString());
   skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
@@ -264,7 +265,7 @@ async function loadSkinCatalog(reset=true){
  finally{skinCatalogBusy=false;renderSkinCatalog();}
 }
 function initSkinCatalog(){
- $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),350)};
+ $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);if(skinCatalogQuery.length<2){skinCatalogItems=[];skinCatalogTotal=0;skinCatalogHasMore=false;renderSkinCatalog();return;}skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),220)};
  $("skinWear").onchange=()=>{skinCatalogWear=$("skinWear").value;loadSkinCatalog(true)};
  $("skinRarity").onchange=()=>{skinCatalogRarity=$("skinRarity").value;loadSkinCatalog(true)};
  $("skinSort").onchange=()=>{skinCatalogSort=$("skinSort").value;loadSkinCatalog(true)};
