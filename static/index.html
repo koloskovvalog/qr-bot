@@ -30,6 +30,13 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 @keyframes casePulse{from{transform:scale(.94) rotate(-3deg);filter:brightness(.8)}to{transform:scale(1.08) rotate(3deg);filter:brightness(1.5)}}
 .case-reel{display:none;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning{display:block}.reel-track{display:flex;gap:8px;width:max-content;animation:reelSlide 1.55s cubic-bezier(.12,.72,.2,1) forwards}.reel-card{width:128px;min-height:62px;display:grid;place-items:center;text-align:center;padding:9px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}@keyframes reelSlide{from{transform:translateX(0)}to{transform:translateX(-720px)}}
 .case-result{border:1px solid var(--gold);border-radius:15px;background:#16130d;padding:16px;margin-top:14px;animation:reveal .45s ease-out}.case-result strong{display:block;color:var(--gold2);font-size:17px;margin:7px}.case-result small{color:var(--muted)}
+.case-result-image{width:100%;max-width:250px;height:150px;object-fit:contain;display:block;margin:8px auto;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:12px}
+.case-result-price{font-size:22px;font-weight:900;color:var(--gold2);margin:10px 0}
+.case-result-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.case-result-actions button{flex:1;min-width:120px}
+.wallet-card{display:flex;justify-content:space-between;align-items:center;padding:16px;border:1px solid var(--gold);border-radius:14px;background:linear-gradient(120deg,#241d10,#111);margin:12px 0}
+.wallet-card small{display:block;color:var(--muted);font-size:11px}.wallet-card strong{display:block;font-size:24px;color:var(--gold2);margin-top:5px}
+.reel-card img{width:100%;height:62px;object-fit:contain;display:block}
+.inventory-actions{display:flex;flex-direction:column;gap:6px}.inventory-item .sell-item{background:#242014;border:1px solid var(--gold);color:var(--gold2);border-radius:10px;padding:9px 11px}
 @keyframes reveal{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
 .case-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.case-item,.inventory-item{border:1px solid var(--line);background:#171510;border-radius:13px;padding:12px}.case-item strong,.inventory-item strong{display:block;font-size:12px;margin:6px 0}.case-item small,.inventory-item small{font-size:10px;color:var(--muted)}.case-chance{color:var(--gold2);font-size:11px;font-weight:800}.inventory{display:grid;gap:8px}.inventory-item{display:flex;align-items:center;justify-content:space-between;gap:10px}.rarity{font-size:10px;color:var(--gold2)}
 .item-thumb{width:76px;height:58px;object-fit:contain;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:9px;flex-shrink:0}
@@ -163,6 +170,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
+ <div class="wallet-card"><div><small>Виртуальный баланс</small><strong id="walletBalance">0,00 ₽</strong></div><span>₽ RUB</span></div>
  <div id="profileStats" class="profile-grid"><div class="empty">Загрузка профиля…</div></div>
  <div class="order"><strong>Ваш реферальный код</strong><div id="myReferralCode" class="profile-code">—</div><button class="buy" id="copyReferralCode">Скопировать код</button><div class="muted">Поделитесь кодом с друзьями. Бонусы начисляются только после ручного подтверждения оплаты их первого заказа.</div></div>
  <div class="order"><strong>Применить код друга</strong><div class="profile-form"><input id="referralInput" maxlength="32" placeholder="Реферальный код"><button class="buy" id="applyReferralCode">Применить</button></div><div class="muted">Доступно до первого заказа, один раз.</div></div>
@@ -301,9 +309,40 @@ function skinMetaTags(x){
  if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.value_minor?money(i.value_minor,"₽"):"Цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
-async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small>'+skinMetaTags(d.item)+'</div>';toast("Предмет добавлен в виртуальный инвентарь");await showInventory();}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
+async function openCase(){
+ if(!initData){toast("Откройте приложение через Telegram.");return}
+ const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");
+ if(!id||button.disabled)return;
+ button.disabled=true;stage.classList.add("rolling");
+ const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
+ if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
+ reel.innerHTML='<div class="reel-track">'+Array.from({length:18},(_,n)=>{
+  const item=pool[n%pool.length];
+  return '<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="">':'')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span></div>';
+ }).join("")+'</div>';
+ reel.classList.add("spinning");
+ $("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';
+ try{
+  const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
+  const [,d]=await Promise.all([new Promise(r=>setTimeout(r,2100)),request]);
+  stage.classList.remove("rolling");reel.classList.remove("spinning");
+  const x=d.item,price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
+  const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
+  $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
+   (x.image_url?'<img class="case-result-image" src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'">':'')+
+   '<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · шанс '+Number(x.chance_percent).toFixed(2)+'%</small>'+
+   skinMetaTags(x)+'<div class="case-result-price">'+price+'</div>'+
+   '<div class="case-result-actions"><button class="goldbtn" onclick="upgradeInventoryItem('+x.inventory_id+',&quot;skin&quot;)">В апгрейд</button>'+sell+'</div>'+
+   '<small>Цена Steam · RUB. Продажа начисляет виртуальный баланс.</small></div>';
+  toast("Скин добавлен в инвентарь");
+  await showInventory();await refreshWalletBalance();
+ }catch(e){
+  stage.classList.remove("rolling");reel.classList.remove("spinning");
+  $("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>';
+ }finally{button.disabled=false}
+}
 async function showInventory(){
  try{
   const d=await api("/api/inventory");
