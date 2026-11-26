@@ -869,14 +869,20 @@ async function doUpgrade(){
  $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';$("upgradeWheelStatus").textContent="Запрашиваем результат…";
  const wheel=$("upgradeWheel"),pointer=$("upgradeWheelPointer");pointer.style.transition="none";pointer.style.transform="rotate(0deg)";void pointer.offsetWidth;
  try{
-  const d=await api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})});
+  let d=null;
+  for(let attempt=0;attempt<15;attempt++){
+   d=await api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})});
+   if(!d.pending)break;
+   $("upgradeWheelStatus").textContent=(d.message||"Обновляем рыночные цены…")+" ("+(attempt+1)+"/15)";
+   await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+  if(!d||d.pending)throw new Error("Цены ещё обновляются. Предмет не списан — повтори апгрейд чуть позже.");
   const stopAngle=Number(d.roll_percent||0)*3.6;const finalAngle=2160+stopAngle;
   if(typeof pointer.animate==="function"){const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:4200,easing:"cubic-bezier(.10,.72,.12,1)",fill:"forwards"});await spin.finished;pointer.style.transform="rotate("+stopAngle+"deg)";spin.cancel();}
   else{pointer.style.transition="transform 4.2s cubic-bezier(.10,.72,.12,1)";requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");await new Promise(r=>setTimeout(r,4300));pointer.style.transition="none";pointer.style.transform="rotate("+stopAngle+"deg)";}
   $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — стрелка остановилась в секторе":"✕ НЕУДАЧА — стрелка остановилась вне сектора";
   $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
-  const hist=await api("/api/upgrades/history");$("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("");
   await showInventory();
   await loadUpgradeTargets(true);
  }catch(e){pointer.style.transition="none";pointer.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
