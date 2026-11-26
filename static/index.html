@@ -47,7 +47,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .upgrade-result{padding:14px;border:1px solid var(--gold);border-radius:14px;background:#19150d;margin-top:12px}
 .upgrade-entry{display:flex;justify-content:center;margin:15px 0 0}
 .upgrade-entry button{border:1px solid #9a7837;border-radius:13px;padding:12px 20px;background:linear-gradient(135deg,#f3dc98,#b98732);color:#171208;font-weight:950;letter-spacing:.3px;box-shadow:0 7px 24px #d8b45a30}
-.upgrade-wheel-panel{display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 12px 16px;margin:12px 0 16px;border:1px solid #69552c;border-radius:20px;background:radial-gradient(circle at 50% 40%,#302515,#14120e 70%)}
+.upgrade-wheel-panel{display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px;margin:10px 0 14px;border:1px solid #9a7837;border-radius:18px;background:radial-gradient(circle at 50% 40%,#302515,#14120e 70%);box-shadow:0 10px 28px #0009}.upgrade-live-panel{position:sticky;top:6px;z-index:7;backdrop-filter:blur(16px)}.upgrade-live-panel .upgrade-wheel-box{width:min(38vw,176px);margin:2px auto}.upgrade-live-controls{width:100%;display:grid;gap:8px}.upgrade-live-controls .goldbtn{width:100%;min-height:48px;font-size:14px;box-shadow:0 5px 20px #d8b45a30}.upgrade-live-controls #upgradeResult:empty{display:none}.upgrade-live-controls .upgrade-result{margin:0}
 .upgrade-wheel-title{font-size:11px;letter-spacing:2px;color:var(--gold2);font-weight:900}
 .upgrade-wheel-box{width:min(76vw,270px);aspect-ratio:1;position:relative;display:grid;place-items:center;margin:8px auto 4px}
 .upgrade-wheel{width:100%;height:100%;border-radius:50%;position:relative;border:7px solid #b68b3d;box-shadow:0 0 0 4px #302515,0 0 35px #d8b45a30; background:conic-gradient(from -90deg,var(--gold2) 0 var(--chance,25%),#51452e var(--chance,25%) 100%);transform:rotate(0deg);transition:transform 1.9s cubic-bezier(.12,.72,.12,1);overflow:hidden}
@@ -132,7 +132,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
 <div class="case-intro">Выбирай виртуальный предмет из инвентаря и цель дороже. Шанс рассчитывается сервером по условной стоимости. При неудаче виртуальный предмет ставки расходуется. Реальные деньги и Steam-предметы не используются.</div>
-<div class="upgrade-wheel-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL</div><div class="upgrade-wheel-box"><div class="upgrade-wheel-pointer"></div><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-center"><strong id="upgradeWheelPercent">—%</strong><small>CHANCE</small></div></div><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div></div>
+<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box"><div class="upgrade-wheel-pointer"></div><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-center"><strong id="upgradeWheelPercent">—%</strong><small>CHANCE</small></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
 <select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
@@ -145,8 +145,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <input class="search" id="upgradeSearch" type="search" placeholder="Поиск оружия или кейса…">
 <div class="section"><h2>Что получить</h2><span class="count" id="upgradeTargetCount"></span></div>
 <div id="upgradeTargets" class="grid"><div class="empty">Загрузка каталога…</div></div>
-<div class="upgrade-actions"><button class="goldbtn" id="doUpgrade" disabled>✦ Улучшить</button></div>
-<div id="upgradeResult"></div>
+
 <div class="section"><h2>История апгрейдов</h2></div><div id="upgradeHistory" class="upgrade-history"></div>
 </section>
 <div class="cartbar" id="cartbar" hidden><div><div class="cartmeta" id="cartCount">Корзина · 0</div><div class="muted" id="cartTotal"></div></div><div class="cart-actions"><button class="cart-clear" id="clearCart" type="button">Очистить</button><button class="goldbtn" id="checkout">Оформить заказ</button></div></div>
@@ -279,16 +278,17 @@ async function doUpgrade(){
  const source=currentUpgradeSource(),target=selectedUpgradeTarget,type=$("upgradeMode").value;
  if(!source||!target)return;
  if(!confirm("Подтвердить демо-апгрейд? При неудаче предмет «"+source.item_name+"» будет списан из виртуального инвентаря. Это действие нельзя отменить."))return;
- $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';
+ $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';$("upgradeWheelStatus").textContent="Запрашиваем результат…";
+ const wheel=$("upgradeWheel");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;wheel.style.transition="transform 1.5s cubic-bezier(.12,.72,.12,1)";wheel.style.transform="rotate(720deg)";
  try{
   const d=await api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})});
-  const wheel=$("upgradeWheel");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;wheel.style.transition="transform 1.9s cubic-bezier(.12,.72,.12,1)";const stopAngle=d.success?360-(Number(d.chance_percent)||1)/2:180;wheel.style.transform="rotate("+(1440+stopAngle)+"deg)";$("upgradeWheelStatus").textContent="Колесо вращается…";await new Promise(r=>setTimeout(r,1950));$("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — сектор выиграл":"✕ НЕУДАЧА — сектор не совпал";
+  wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;wheel.style.transition="transform 1.9s cubic-bezier(.12,.72,.12,1)";const stopAngle=d.success?360-(Number(d.chance_percent)||1)/2:180;wheel.style.transform="rotate("+(1440+stopAngle)+"deg)";$("upgradeWheelStatus").textContent="Колесо вращается…";await new Promise(r=>setTimeout(r,1950));$("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — сектор выиграл":"✕ НЕУДАЧА — сектор не совпал";
   $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
   const hist=await api("/api/upgrades/history");$("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("");
   await showInventory();
   await loadUpgradeTargets();
- }catch(e){$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
+ }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
 function switchTab(t){$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","cases","upgrade","orders","inventory"].forEach(x=>$(x+"Tab").classList.toggle("active",t===x));document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
 $("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
