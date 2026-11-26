@@ -1368,6 +1368,77 @@ async def claim_demo_case(request):
             """, user["id"], case["title"], case["image_url"])
     return web.json_response({"ok": True, "inventory_id": inventory_id, "message": "Тестовый кейс добавлен в инвентарь"})
 
+async def suggest_upgrade_target(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        source_id = int(data.get("source_inventory_id"))
+        item_type = str(data.get("item_type", "skin"))
+        mode = str(data.get("mode", "multiplier"))
+        raw_value = float(data.get("value"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Передайте корректный режим и значение")
+    if item_type != "skin":
+        raise web.HTTPBadRequest(text="Автоподбор по X и процентам доступен для скинов")
+    if mode not in {"multiplier", "chance"}:
+        raise web.HTTPBadRequest(text="Неизвестный режим подбора")
+    if mode == "multiplier" and not 1.01 <= raw_value <= 500:
+        raise web.HTTPBadRequest(text="Множитель должен быть от 1.01x до 500x")
+    if mode == "chance" and not 0.1 <= raw_value < 75:
+        raise web.HTTPBadRequest(text="Шанс должен быть от 0.1% до 75%")
+    catalog = await load_cs2_catalog("skins")
+    async with db.acquire() as conn:
+        source = await conn.fetchrow("""
+            SELECT id, item_type, item_name, value_minor, market_hash_name
+            FROM user_inventory
+            WHERE id=$1 AND user_id=$2 AND item_type='skin' AND consumed_at IS NULL
+            FOR SHARE
+        """, source_id, user["id"])
+        if not source:
+            raise web.HTTPNotFound(text="Исходный скин не найден в инвентаре")
+        source_price = await conn.fetchrow("""
+            SELECT lowest_price, fetched_at FROM cs2_steam_prices
+            WHERE market_hash_name=$1
+        """, source["market_hash_name"]) if source["market_hash_name"] else None
+        fresh_source = bool(source_price and
+            (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
+        source_value = steam_price_to_minor(source_price["lowest_price"]) if fresh_source else None
+        if not source_value:
+            if source.get("market_hash_name"):
+                queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
+            raise web.HTTPConflict(text="Обновляем цену исходного скина Steam. Попробуйте ещё раз через минуту.")
+        desired = source_value * raw_value if mode == "multiplier" else source_value * 75.0 / raw_value
+        names = [x.get("market_hash_name") for x in catalog if x.get("market_hash_name")]
+        rows = await conn.fetch("""
+            SELECT market_hash_name, lowest_price, fetched_at
+            FROM cs2_steam_prices
+            WHERE market_hash_name = ANY($1::text[])
+        """, names)
+    prices = {}
+    stale_names = set()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        minor = steam_price_to_minor(row["lowest_price"])
+        fresh = (now-row["fetched_at"]).total_seconds() <= 43200
+        if fresh and minor and 200 <= minor <= 10000000 and minor > source_value:
+            prices[row["market_hash_name"]] = minor
+        elif not fresh:
+            stale_names.add(row["market_hash_name"])
+    candidates = [x for x in catalog if x.get("market_hash_name") in prices]
+    if not candidates:
+        queue_cs2_price_refresh([x for x in catalog if x.get("market_hash_name")][:8])
+        raise web.HTTPConflict(text="Steam ещё загружает цены каталога. Попробуйте снова чуть позже или выберите цель вручную.")
+    candidates.sort(key=lambda x: abs(prices[x["market_hash_name"]]-desired)/max(desired,1))
+    chosen = dict(candidates[0])
+    chosen["market_price_minor"] = prices[chosen["market_hash_name"]]
+    chosen["value_minor"] = chosen["market_price_minor"]
+    chosen["suggested_multiplier"] = round(chosen["market_price_minor"]/source_value, 2)
+    chosen["suggested_chance_percent"] = round(source_value/chosen["market_price_minor"]*75, 2)
+    return web.json_response({"item": chosen, "source_value_minor": source_value,
+        "desired_target_minor": round(desired), "mode": mode, "value": raw_value,
+        "fresh_price_count": len(prices), "demo_only": True})
+
+
 async def create_upgrade_attempt(request):
     user = verify_telegram_user(request)
     try:
@@ -1434,7 +1505,7 @@ async def create_upgrade_attempt(request):
                     target_value = market_minor
             if target_value <= source_value:
                 raise web.HTTPBadRequest(text="Выберите предмет дороже исходного")
-            chance = min(90.0, max(1.0, round(source_value / target_value * 75, 2)))
+            chance = min(75.0, max(0.01, round(source_value / target_value * 75, 2)))
             roll = secrets.randbelow(10000)
             success = roll < int(chance * 100)
             await conn.execute("""
@@ -1466,7 +1537,7 @@ async def create_upgrade_attempt(request):
                  target_value, chance, roll, success)
     return web.json_response({
         "ok": True, "attempt_id": attempt_id, "success": success,
-        "chance_percent": chance, "source_name": source["item_name"],
+        "chance_percent": chance, "roll_percent": roll / 100.0, "source_name": source["item_name"],
         "target": target, "demo_only": True,
         "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
     })
@@ -2320,6 +2391,7 @@ def create_app():
     app.router.add_get("/api/cs2/catalog", get_cs2_catalog)
     app.router.add_get("/api/cs2/skins", get_cs2_skins)
     app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
+    app.router.add_post("/api/upgrades/suggest", suggest_upgrade_target)
     app.router.add_post("/api/upgrades/attempt", create_upgrade_attempt)
     app.router.add_get("/api/upgrades/history", get_upgrade_history)
 
