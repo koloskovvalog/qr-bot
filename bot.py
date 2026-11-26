@@ -605,11 +605,15 @@ async def get_cases(request):
         catalog_cases = []
         fallback_case_image = None
     skins_by_crate = {}
+    skins_by_id = {}
     for skin in catalog_skins:
         crate_keys = set(skin.get("crate_ids", []))
         crate_keys.update(skin.get("crate_names", []))
         for crate_key in crate_keys:
             skins_by_crate.setdefault(str(crate_key).strip().casefold(), []).append(skin)
+        for skin_key in {skin.get("id"), skin.get("skin_id")}:
+            if skin_key:
+                skins_by_id.setdefault(str(skin_key).strip().casefold(), []).append(skin)
 
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -650,6 +654,12 @@ async def get_cases(request):
                 for group in crate_skins_by_key:
                     for skin in group:
                         crate_skins_map[skin["market_hash_name"]] = skin
+                # crates.json is the authoritative membership source: its contains
+                # and contains_rare entries reference base skin IDs. Expand each
+                # base item into all wear/StatTrak/Souvenir variants in skins_not_grouped.
+                for contained_id in catalog_case.get("contains_ids", []):
+                    for skin in skins_by_id.get(str(contained_id).strip().casefold(), []):
+                        crate_skins_map[skin["market_hash_name"]] = skin
                 crate_skins = list(crate_skins_map.values())
                 if catalog_case["name"].casefold() != "премиум кейс":
                     await conn.execute("""
@@ -676,7 +686,7 @@ async def get_cases(request):
                         SELECT market_hash_name, lowest_price
                         FROM cs2_steam_prices
                         WHERE market_hash_name = ANY($1::text[])
-                          AND price_source IN ('lis_skins','market_csgo')
+                          AND price_source <> 'steam'
                     """, market_names)
                     cached_prices = {
                         row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
@@ -915,7 +925,7 @@ async def sell_inventory_item(request):
 
             price = await conn.fetchrow("""
                 SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+                WHERE market_hash_name=$1 AND price_source <> 'steam'
             """, item["market_hash_name"])
             fresh = bool(price and
                          (datetime.now(timezone.utc) - price["fetched_at"]).total_seconds() <= 43200)
@@ -964,7 +974,7 @@ async def get_inventory(request):
                    p.lowest_price, p.fetched_at
             FROM user_inventory i
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=i.market_hash_name
-                AND p.price_source IN ('lis_skins','market_csgo')
+                AND p.price_source <> 'steam'
             WHERE i.user_id = $1 AND i.consumed_at IS NULL
             ORDER BY i.id DESC LIMIT 100
         """, user["id"])
@@ -1060,8 +1070,15 @@ async def load_cs2_catalog(kind: str):
             market_hash_name = str(entry.get("market_hash_name") or name).strip()
             item = {
                 "id": str(entry.get("id") or market_hash_name),
+                "skin_id": str(entry.get("skin_id") or entry.get("id") or market_hash_name),
                 "name": market_hash_name if kind == "skins" else name,
                 "base_name": name,
+                "contains_ids": [
+                    str(item.get("id")) for item in (
+                        list(entry.get("contains") or []) + list(entry.get("contains_rare") or [])
+                    )
+                    if isinstance(item, dict) and item.get("id") is not None
+                ] if kind == "cases" else [],
                 "market_hash_name": market_hash_name,
                 "weapon": weapon_name,
                 "wear": wear_name,
@@ -1312,7 +1329,7 @@ async def get_cs2_skins(request):
                 SELECT market_hash_name, lowest_price, fetched_at
                 FROM cs2_steam_prices
                 WHERE market_hash_name = ANY($1::text[])
-                  AND price_source IN ('lis_skins','market_csgo')
+                  AND price_source <> 'steam'
             """, all_names)
         now_utc = datetime.now(timezone.utc)
         all_prices = {
@@ -1423,7 +1440,7 @@ async def get_cs2_catalog(request):
             rows = await conn.fetch("""
                 SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
                 FROM cs2_steam_prices WHERE market_hash_name = ANY($1::text[])
-                    AND price_source IN ('lis_skins','market_csgo')
+                    AND price_source <> 'steam'
             """, names) if names else []
         price_map = {r["market_hash_name"]: r for r in rows}
         for item in selected:
@@ -1511,7 +1528,7 @@ async def suggest_upgrade_target(request):
             raise web.HTTPNotFound(text="Исходный скин не найден в инвентаре")
         source_price = await conn.fetchrow("""
             SELECT lowest_price, fetched_at FROM cs2_steam_prices
-            WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+            WHERE market_hash_name=$1 AND price_source <> 'steam'
         """, source["market_hash_name"]) if source["market_hash_name"] else None
         fresh_source = bool(source_price and
             (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
@@ -1526,7 +1543,7 @@ async def suggest_upgrade_target(request):
             SELECT market_hash_name, lowest_price, fetched_at
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
-              AND price_source IN ('lis_skins','market_csgo')
+              AND price_source <> 'steam'
         """, names)
     prices = {}
     stale_names = set()
@@ -1585,7 +1602,7 @@ async def create_upgrade_attempt(request):
                     raise web.HTTPConflict(text="Для исходного скина пока нет точного Steam Market имени")
                 source_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+                    WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, source["market_hash_name"])
                 source_fresh = bool(source_price and
                     (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= 43200)
@@ -1596,7 +1613,7 @@ async def create_upgrade_attempt(request):
                 source_value = source_market_minor
                 target_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+                    WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, target["market_hash_name"])
                 target_fresh = bool(target_price and
                     (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= 43200)
@@ -1612,7 +1629,7 @@ async def create_upgrade_attempt(request):
             elif target.get("market_hash_name"):
                 market_price = await conn.fetchval("""
                     SELECT lowest_price FROM cs2_steam_prices
-                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+                    WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, target["market_hash_name"])
                 market_minor = steam_price_to_minor(market_price)
                 if market_minor:
