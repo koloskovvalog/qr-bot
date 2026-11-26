@@ -1,4 +1,3 @@
-
 import asyncio
 import hashlib
 import hmac
@@ -104,12 +103,15 @@ async def init_db():
                     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
                 ALTER TABLE orders
-                    ADD COLUMN IF NOT EXISTS product_title TEXT NOT NULL DEFAULT '',
-                    ADD COLUMN IF NOT EXISTS amount_minor BIGINT NOT NULL DEFAULT 100,
-                    ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB',
-                    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new',
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-
+    ADD COLUMN IF NOT EXISTS product_id BIGINT,
+    ADD COLUMN IF NOT EXISTS username TEXT,
+    ADD COLUMN IF NOT EXISTS product_title TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS amount_minor BIGINT NOT NULL DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB',
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new',
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    
                 DO $$
                 BEGIN
                     IF EXISTS (
