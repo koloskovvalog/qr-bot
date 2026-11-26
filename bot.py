@@ -737,9 +737,16 @@ async def get_cases(request):
         """)
     # Gradually warm Steam RUB prices for every skin in the active cases.
     # The worker remains throttled (~one request per 3.2s); the queue is bounded.
+    # Only queue prices that are missing or older than 12 hours. Repeated
+    # visits to the Cases tab must not enqueue already-fresh marketplace quotes.
+    now_utc = datetime.now(timezone.utc)
     queue_cs2_price_refresh([
         {"market_hash_name": item["market_hash_name"]}
-        for item in items if item["market_hash_name"]
+        for item in items
+        if item["market_hash_name"] and (
+            not item["fetched_at"] or
+            (now_utc - item["fetched_at"]).total_seconds() > 43200
+        )
     ])
 
     grouped = {}
@@ -759,9 +766,14 @@ async def get_cases(request):
             "souvenir": item["souvenir"], "phase": item["phase"],
         })
     result = []
+    # Keep the initial Mini App payload small: the full weighted pool stays in
+    # PostgreSQL and open_case() still draws from every active item. The client
+    # only needs a compact preview pool for the reel and the visible item list.
+    preview_limit = 48
     for case in cases:
         contents = grouped.get(case["id"], [])
         total = sum(x["weight"] for x in contents)
+        visible_contents = contents[:preview_limit]
         result.append({
             "id": case["id"], "title": case["title"],
             "description": case["description"],
@@ -769,10 +781,11 @@ async def get_cases(request):
             "currency": case["currency"],
             "image_url": case["image_url"] or fallback_case_image,
             "demo_only": True,
+            "items_total": len(contents),
             "items": [{
                 **item,
                 "chance_percent": round(item["weight"] * 100 / total, 2) if total else 0
-            } for item in contents],
+            } for item in visible_contents],
         })
     return web.json_response({"items": result})
 
