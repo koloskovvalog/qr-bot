@@ -762,21 +762,27 @@ async def open_case(request):
                      if item["name"] == selected["name"]),
                     None,
                 )
+            market_minor = None
             if selected.get("market_hash_name"):
-                cached_price = await conn.fetchval("""
-                    SELECT lowest_price FROM cs2_steam_prices
+                price_row = await conn.fetchrow("""
+                    SELECT lowest_price, fetched_at FROM cs2_steam_prices
                     WHERE market_hash_name=$1
                 """, selected["market_hash_name"])
-                market_minor = steam_price_to_minor(cached_price)
+                fresh = bool(price_row and
+                    (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
+                market_minor = steam_price_to_minor(price_row["lowest_price"]) if fresh else None
                 if market_minor:
                     selected["value_minor"] = market_minor
-            await conn.execute("""
+                else:
+                    queue_cs2_price_refresh([{"market_hash_name": selected["market_hash_name"]}])
+            inventory_id = await conn.fetchval("""
                 INSERT INTO user_inventory(
                     user_id, item_type, item_name, rarity, image_url,
                     value_minor, source, market_hash_name, wear,
                     stattrak, souvenir, phase
                 )
                 VALUES($1, 'skin', $2, $3, $4, $5, 'case', $6, $7, $8, $9, $10)
+                RETURNING id
             """, user["id"], selected["name"], selected["rarity"],
                  selected["image_url"], selected["value_minor"],
                  selected.get("market_hash_name"), selected.get("wear"),
@@ -805,6 +811,10 @@ async def open_case(request):
             "souvenir": selected.get("souvenir", False),
             "phase": selected.get("phase"),
             "image_url": selected.get("image_url"),
+            "value_minor": selected["value_minor"],
+            "market_price_minor": market_minor,
+            "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
+            "inventory_id": inventory_id,
             "chance_percent": round(selected["weight"] * 100 / total, 2),
         },
         "demo_only": True,
