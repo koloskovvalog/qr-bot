@@ -156,6 +156,27 @@ async def init_db():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
 
+                CREATE TABLE IF NOT EXISTS customer_profiles (
+                    user_id BIGINT PRIMARY KEY,
+                    referral_code TEXT NOT NULL UNIQUE,
+                    referred_by BIGINT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS loyalty_ledger (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    order_id BIGINT REFERENCES orders(id),
+                    points_delta INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS loyalty_order_reward_unique
+                    ON loyalty_ledger(user_id, order_id, reason)
+                    WHERE order_id IS NOT NULL;
+
                 INSERT INTO payment_providers(code, title, mode, enabled, public_config)
                 VALUES
                     ('demo', 'QR BOT PRO Demo Gateway', 'demo', TRUE, '{"description":"Тестовый провайдер без списания средств"}'::jsonb),
@@ -616,6 +637,120 @@ async def create_bulk_orders(request):
     return web.json_response({"ok": True, "orders": created, "count": len(created)})
 
 
+async def ensure_customer_profile(conn, user_id: int):
+    row = await conn.fetchrow(
+        "SELECT user_id, referral_code, referred_by FROM customer_profiles WHERE user_id = $1",
+        user_id,
+    )
+    if row:
+        return row
+
+    for _ in range(5):
+        code = secrets.token_hex(4).upper()
+        await conn.execute("""
+            INSERT INTO customer_profiles(user_id, referral_code)
+            VALUES($1, $2)
+            ON CONFLICT DO NOTHING
+        """, user_id, code)
+        row = await conn.fetchrow(
+            "SELECT user_id, referral_code, referred_by FROM customer_profiles WHERE user_id = $1",
+            user_id,
+        )
+        if row:
+            return row
+
+    raise web.HTTPConflict(text="Не удалось создать профиль. Повторите попытку.")
+
+
+async def get_my_profile(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            profile = await ensure_customer_profile(conn, user["id"])
+        stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*)::INTEGER AS orders_count,
+                COUNT(*) FILTER (WHERE status IN ('paid', 'delivered'))::INTEGER AS paid_orders_count
+            FROM orders WHERE user_id = $1
+        """, user["id"])
+        points = await conn.fetchval(
+            "SELECT COALESCE(SUM(points_delta), 0)::INTEGER FROM loyalty_ledger WHERE user_id = $1",
+            user["id"],
+        )
+        referrals = await conn.fetchval(
+            "SELECT COUNT(*)::INTEGER FROM customer_profiles WHERE referred_by = $1",
+            user["id"],
+        )
+        ledger = await conn.fetch("""
+            SELECT points_delta, reason, created_at
+            FROM loyalty_ledger
+            WHERE user_id = $1
+            ORDER BY id DESC LIMIT 30
+        """, user["id"])
+
+    return web.json_response({
+        "user_id": user["id"],
+        "referral_code": profile["referral_code"],
+        "has_referrer": profile["referred_by"] is not None,
+        "points": points,
+        "orders_count": stats["orders_count"],
+        "paid_orders_count": stats["paid_orders_count"],
+        "referrals_count": referrals,
+        "ledger": [{
+            "points_delta": row["points_delta"],
+            "reason": row["reason"],
+            "created_at": row["created_at"].isoformat(),
+        } for row in ledger],
+        "points_rule": "1 балл за каждые 100 единиц валюты заказа после подтверждения оплаты администратором.",
+    })
+
+
+async def apply_referral_code(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        code = str(data.get("code", "")).strip().upper()
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректные данные")
+
+    if not code or len(code) > 32:
+        raise web.HTTPBadRequest(text="Введите корректный реферальный код")
+
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            profile = await ensure_customer_profile(conn, user["id"])
+            if profile["referred_by"] is not None:
+                raise web.HTTPConflict(text="Реферальный код уже применён")
+            order_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE user_id = $1",
+                user["id"],
+            )
+            if order_count:
+                raise web.HTTPConflict(text="Код можно применить только до первого заказа")
+            referrer = await conn.fetchrow(
+                "SELECT user_id FROM customer_profiles WHERE referral_code = $1",
+                code,
+            )
+            if not referrer:
+                raise web.HTTPNotFound(text="Реферальный код не найден")
+            if referrer["user_id"] == user["id"]:
+                raise web.HTTPBadRequest(text="Нельзя применить собственный код")
+            await conn.execute("""
+                UPDATE customer_profiles
+                SET referred_by = $1, updated_at = NOW()
+                WHERE user_id = $2 AND referred_by IS NULL
+            """, referrer["user_id"], user["id"])
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id, action, details)
+                VALUES($1, 'referral_code_applied', $2::jsonb)
+            """, user["id"], json.dumps({"referrer_id": referrer["user_id"]}))
+
+    return web.json_response({
+        "ok": True,
+        "message": "Реферальный код применён. Бонусы начислятся после первой подтверждённой оплаты.",
+    })
+
+
 async def get_my_orders(request):
     user = verify_telegram_user(request)
 
@@ -785,19 +920,53 @@ async def admin_set_order_status(request):
         raise web.HTTPBadRequest(text="Недопустимый статус")
 
     async with db.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE orders
-            SET status = $1, updated_at = NOW()
-            WHERE id = $2
-            RETURNING user_id
-            """,
-            status,
-            order_id,
-        )
+        async with conn.transaction():
+            current = await conn.fetchrow("""
+                SELECT user_id, amount_minor, status
+                FROM orders WHERE id = $1 FOR UPDATE
+            """, order_id)
+            if not current:
+                raise web.HTTPNotFound(text="Заказ не найден")
 
-    if not row:
-        raise web.HTTPNotFound(text="Заказ не найден")
+            row = await conn.fetchrow("""
+                UPDATE orders
+                SET status = $1, updated_at = NOW()
+                WHERE id = $2
+                RETURNING user_id
+            """, status, order_id)
+
+            # Начисляем баллы только при первом ручном подтверждении оплаты.
+            if status == "paid" and current["status"] != "paid":
+                points = int(current["amount_minor"]) // 10000
+                if points > 0:
+                    await ensure_customer_profile(conn, current["user_id"])
+                    await conn.execute("""
+                        INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                        VALUES($1, $2, $3, 'purchase_reward')
+                        ON CONFLICT DO NOTHING
+                    """, current["user_id"], order_id, points)
+
+                referred_by = await conn.fetchval(
+                    "SELECT referred_by FROM customer_profiles WHERE user_id = $1",
+                    current["user_id"],
+                )
+                if referred_by:
+                    paid_count = await conn.fetchval("""
+                        SELECT COUNT(*) FROM orders
+                        WHERE user_id = $1 AND status IN ('paid', 'delivered')
+                    """, current["user_id"])
+                    if paid_count == 1:
+                        await conn.execute("""
+                            INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                            VALUES($1, $2, 50, 'referral_reward')
+                            ON CONFLICT DO NOTHING
+                        """, current["user_id"], order_id)
+                        await conn.execute("""
+                            INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                            VALUES($1, $2, 100, 'referral_reward')
+                            ON CONFLICT DO NOTHING
+                        """, referred_by, order_id)
+
 
     await write_audit(
         user["id"],
@@ -1231,6 +1400,8 @@ def create_app():
     app.router.add_post("/api/orders", create_order)
     app.router.add_post("/api/orders/bulk", create_bulk_orders)
     app.router.add_get("/api/orders", get_my_orders)
+    app.router.add_get("/api/profile", get_my_profile)
+    app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
