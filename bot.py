@@ -1267,6 +1267,7 @@ async def get_cs2_skins(request):
         items = [x for x in items if x.get("souvenir")]
 
     all_prices = {}
+    price_pending_count = 0
     if items and (
         sort in {"price_asc", "price_desc"}
         or min_price_minor is not None
@@ -1292,6 +1293,7 @@ async def get_cs2_skins(request):
         missing_price_items = [
             x for x in items if x["market_hash_name"] not in all_prices
         ]
+        price_pending_count = len(missing_price_items)
         queue_cs2_price_refresh(missing_price_items[:100])
 
     if min_price_minor is not None or max_price_minor is not None:
@@ -1369,9 +1371,7 @@ async def get_cs2_skins(request):
         "price_currency": "RUB",
         "price_cache_hours": 12,
         "price_range_minor": {"min": 200, "max": 10000000},
-        "price_pending_count": max(0, len(items) - len(all_prices)) if (
-            sort in {"price_asc", "price_desc"} or min_price_minor is not None or max_price_minor is not None
-        ) else len(stale),
+        "price_pending_count": price_pending_count,
         "demo_only": True,
     })
 
