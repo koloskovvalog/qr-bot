@@ -66,6 +66,8 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 @media(max-width:420px){.case-items{grid-template-columns:1fr}.tabs{gap:5px}.tab{padding:9px 10px;font-size:11px}}
 @media(max-width:420px){.grid{grid-template-columns:1fr}.hero h1{font-size:25px}.art{height:66px}}
 
+.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0}.profile-stat{border:1px solid var(--line);border-radius:13px;background:#171510;padding:13px}.profile-stat strong{display:block;color:var(--gold2);font-size:20px}.profile-stat small{color:var(--muted);font-size:10px}.profile-code{font-size:22px;letter-spacing:3px;color:var(--gold2);font-weight:900;padding:12px 0}.profile-form{display:flex;gap:8px;align-items:center}.profile-form input{flex:1;min-width:0}
+
 /* UX 2.0 */
 :root{--nav-h:72px}
 body{padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom) + 18px)}
@@ -78,7 +80,7 @@ main{padding-bottom:28px}
 .ux-shortcuts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .ux-shortcut{border:1px solid #554629;background:#17140e;color:var(--gold2);border-radius:11px;padding:10px 7px;font-size:11px;font-weight:850}
 .ux-shortcut span{display:block;font-size:18px;margin-bottom:4px}
-.bottom-nav{position:fixed;z-index:8;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#0d0c0bf2;border-top:1px solid #4b3c20;backdrop-filter:blur(16px)}
+.bottom-nav{position:fixed;z-index:8;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(6,1fr);gap:4px;background:#0d0c0bf2;border-top:1px solid #4b3c20;backdrop-filter:blur(16px)}
 .bottom-nav button{min-width:0;border:0;border-radius:11px;background:transparent;color:#aaa392;padding:7px 2px 6px;font-size:9px;font-weight:750;display:flex;flex-direction:column;align-items:center;gap:3px}
 .bottom-nav button span{font-size:18px;line-height:1.1}
 .bottom-nav button.active{background:#302515;color:var(--gold2)}
@@ -128,6 +130,14 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="muted" style="margin-top:7px">Один виртуальный кейс в день для режима «Апгрейд кейсов».</div>
 <div class="section"><h2>Содержимое кейса</h2><span class="count">Вероятности</span></div><div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
 </section>
+<section id="profileView" hidden>
+ <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
+ <div id="profileStats" class="profile-grid"><div class="empty">Загрузка профиля…</div></div>
+ <div class="order"><strong>Ваш реферальный код</strong><div id="myReferralCode" class="profile-code">—</div><button class="buy" id="copyReferralCode">Скопировать код</button><div class="muted">Поделитесь кодом с друзьями. Бонусы начисляются только после ручного подтверждения оплаты их первого заказа.</div></div>
+ <div class="order"><strong>Применить код друга</strong><div class="profile-form"><input id="referralInput" maxlength="32" placeholder="Реферальный код"><button class="buy" id="applyReferralCode">Применить</button></div><div class="muted">Доступно до первого заказа, один раз.</div></div>
+ <div class="section"><h2>История бонусов</h2></div><div id="loyaltyHistory" class="orders"><div class="empty">Загрузка…</div></div>
+ <div class="notice">1 балл за каждые 100 ₽ подтверждённого заказа. Демо-платежи и виртуальные CS2-операции баллов не начисляют.</div>
+</section>
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
@@ -164,6 +174,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
  <button data-nav="upgrade"><span>✦</span>Апгрейд</button>
  <button data-nav="inventory"><span>◇</span>Инвентарь</button>
  <button data-nav="orders"><span>▤</span>Заказы</button>
+ <button data-nav="profile"><span>♙</span>Профиль</button>
 </nav>
 </main><div class="toast" id="toast"></div>
 <script>
@@ -290,7 +301,8 @@ async function doUpgrade(){
   await loadUpgradeTargets();
  }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
-function switchTab(t){$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","cases","upgrade","orders","inventory"].forEach(x=>$(x+"Tab").classList.toggle("active",t===x));document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
+async function loadProfile(){try{const d=await api("/api/profile");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>'}catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","cases","upgrade","orders","inventory","profile"].forEach(x=>$(x+"Tab").classList.toggle("active",t===x));document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
 $("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function adminInit(){try{const d=await api("/api/admin/orders");$("adminPanel").style.display="block";if(!d.items.length){$("adminOrders").innerHTML="Заказов пока нет."}else{$("adminOrders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(o.status)+' · user '+o.user_id+'</div><select id="st'+o.id+'"><option value="invoice_sent">Счёт отправлен</option><option value="paid">Оплата подтверждена</option><option value="delivered">Выдано</option><option value="cancelled">Отменён</option><option value="refunded">Возвращён</option></select><button onclick="setStatus('+o.id+')">Сохранить</button></div>').join("")}await loadPaymentAdmin()}catch(e){}}
