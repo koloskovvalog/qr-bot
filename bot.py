@@ -34,6 +34,9 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 DATABASE_URL = os.environ["DATABASE_URL"]
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
+USD_RUB_RATE = None
+USD_RUB_RATE_AT = 0
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_PATH = "/telegram-webhook"
 
@@ -208,6 +211,8 @@ async def init_db():
                     currency TEXT NOT NULL DEFAULT 'RUB',
                     fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE cs2_steam_prices
+                    ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'steam';
                 CREATE INDEX IF NOT EXISTS idx_cs2_steam_prices_fetched
                     ON cs2_steam_prices(fetched_at);
 
@@ -640,6 +645,7 @@ async def get_cases(request):
                         SELECT market_hash_name, lowest_price
                         FROM cs2_steam_prices
                         WHERE market_hash_name = ANY($1::text[])
+                          AND price_source IN ('lis_skins','market_csgo')
                     """, market_names)
                     cached_prices = {
                         row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
@@ -691,6 +697,7 @@ async def get_cases(request):
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=ci.market_hash_name
+                AND p.price_source IN ('lis_skins','market_csgo')
             WHERE c.active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
@@ -780,7 +787,7 @@ async def open_case(request):
             if selected.get("market_hash_name"):
                 price_row = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1
+                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
                 """, selected["market_hash_name"])
                 fresh = bool(price_row and
                     (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
@@ -883,14 +890,14 @@ async def sell_inventory_item(request):
 
             price = await conn.fetchrow("""
                 SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                WHERE market_hash_name=$1
+                WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
             """, item["market_hash_name"])
             fresh = bool(price and
                          (datetime.now(timezone.utc) - price["fetched_at"]).total_seconds() <= 43200)
             market_minor = steam_price_to_minor(price["lowest_price"]) if fresh else None
             if not market_minor:
                 queue_cs2_price_refresh([{"market_hash_name": item["market_hash_name"]}])
-                raise web.HTTPConflict(text="Цена Steam обновляется. Попробуйте продать предмет чуть позже.")
+                raise web.HTTPConflict(text="Цена скина обновляется с Lis-Skins / Market.CSGO. Попробуйте продать предмет чуть позже.")
 
             # Demo marketplace credit: 90% of the fresh Steam lowest listing.
             sale_minor = market_minor * 90 // 100
@@ -932,6 +939,7 @@ async def get_inventory(request):
                    p.lowest_price, p.fetched_at
             FROM user_inventory i
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=i.market_hash_name
+                AND p.price_source IN ('lis_skins','market_csgo')
             WHERE i.user_id = $1 AND i.consumed_at IS NULL
             ORDER BY i.id DESC LIMIT 100
         """, user["id"])
@@ -1083,65 +1091,113 @@ def steam_price_to_minor(value):
         return None
 
 
+async def get_usd_rub_rate(session):
+    """Fetch and cache the current USD/RUB reference rate for marketplace quotes."""
+    global USD_RUB_RATE, USD_RUB_RATE_AT
+    if USD_RUB_RATE and time.time() - USD_RUB_RATE_AT < 3600:
+        return USD_RUB_RATE
+    async with session.get("https://open.er-api.com/v6/latest/USD") as response:
+        if response.status != 200:
+            raise RuntimeError(f"FX service returned HTTP {response.status}")
+        payload = await response.json(content_type=None)
+    rate = (payload.get("rates") or {}).get("RUB")
+    if not rate or float(rate) <= 0:
+        raise RuntimeError("USD/RUB rate is missing")
+    USD_RUB_RATE = Decimal(str(rate))
+    USD_RUB_RATE_AT = time.time()
+    return USD_RUB_RATE
+
+
 async def cs2_steam_price_worker():
-    """Conservative background worker: one Steam Market request about every 3.2 seconds."""
-    timeout = aiohttp.ClientTimeout(total=15)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; QR-BOT-PRO/1.0)",
-        "Accept": "application/json",
-    }
+    """Fetch Lis-Skins first, then Market.CSGO as a per-item fallback."""
+    timeout = aiohttp.ClientTimeout(total=25)
+    headers = {"Accept": "application/json"}
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
         while True:
-            market_hash_name = await CS2_PRICE_QUEUE.get()
+            first = await CS2_PRICE_QUEUE.get()
+            batch = [first]
+            while len(batch) < 100:
+                try:
+                    batch.append(CS2_PRICE_QUEUE.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
             retry_later = False
             try:
-                params = {
-                    "appid": "730",
-                    "currency": "5",
-                    "country": "RU",
-                    "market_hash_name": market_hash_name,
-                }
-                async with session.get(
-                    "https://steamcommunity.com/market/priceoverview/",
-                    params=params,
-                ) as response:
-                    if response.status == 429:
-                        logger.warning("Steam Market rate limited; backing off for 60 seconds")
-                        await asyncio.sleep(60)
-                        retry_later = True
-                    elif response.status == 200:
-                        payload = await response.json(content_type=None)
-                        if payload.get("success"):
-                            async with db.acquire() as conn:
-                                await conn.execute("""
-                                    INSERT INTO cs2_steam_prices(
-                                        market_hash_name, lowest_price, median_price,
-                                        volume, currency, fetched_at
-                                    )
-                                    VALUES($1, $2, $3, $4, 'RUB', NOW())
-                                    ON CONFLICT (market_hash_name) DO UPDATE SET
-                                        lowest_price=EXCLUDED.lowest_price,
-                                        median_price=EXCLUDED.median_price,
-                                        volume=EXCLUDED.volume,
-                                        currency='RUB',
-                                        fetched_at=NOW()
-                                """, market_hash_name,
-                                     payload.get("lowest_price"),
-                                     payload.get("median_price"),
-                                     payload.get("volume"))
-                    else:
-                        logger.info("Steam Market price request returned HTTP %s", response.status)
+                if not APISKINS_API_KEY:
+                    logger.warning("APISKINS_API_KEY is not configured; marketplace price refresh is paused")
+                else:
+                    payload = {
+                        "market_hash_names": batch,
+                        "providers": ["lis_skins", "market_csgo"],
+                    }
+                    async with session.post(
+                        "https://api.apiskins.com/v1/offers/batch",
+                        json=payload,
+                        headers={**headers, "X-API-KEY": APISKINS_API_KEY},
+                    ) as response:
+                        if response.status == 429:
+                            logger.warning("API Skins rate limited; retrying marketplace batch in 60 seconds")
+                            retry_later = True
+                        elif response.status == 200:
+                            offers_payload = await response.json(content_type=None)
+                            rate = await get_usd_rub_rate(session)
+                            updates = []
+                            for item in offers_payload if isinstance(offers_payload, list) else []:
+                                by_provider = {
+                                    offer.get("provider"): offer.get("price")
+                                    for offer in item.get("offers", [])
+                                    if isinstance(offer, dict)
+                                }
+                                provider = "lis_skins" if by_provider.get("lis_skins") else (
+                                    "market_csgo" if by_provider.get("market_csgo") else None
+                                )
+                                usd_price = by_provider.get(provider) if provider else None
+                                if not usd_price:
+                                    continue
+                                try:
+                                    rub_price = (Decimal(str(usd_price)) * rate).quantize(Decimal("0.01"))
+                                    if rub_price > 0:
+                                        updates.append((item["market_hash_name"], f"{rub_price} ₽", provider))
+                                except (InvalidOperation, KeyError, TypeError):
+                                    continue
+                            if updates:
+                                async with db.acquire() as conn:
+                                    await conn.executemany("""
+                                        INSERT INTO cs2_steam_prices(
+                                            market_hash_name, lowest_price, median_price,
+                                            volume, currency, fetched_at, price_source
+                                        )
+                                        VALUES($1, $2, NULL, NULL, 'RUB', NOW(), $3)
+                                        ON CONFLICT (market_hash_name) DO UPDATE SET
+                                            lowest_price=EXCLUDED.lowest_price,
+                                            median_price=NULL,
+                                            volume=NULL,
+                                            currency='RUB',
+                                            fetched_at=NOW(),
+                                            price_source=EXCLUDED.price_source
+                                    """, updates)
+                            logger.info(
+                                "Marketplace prices refreshed: %s requested, %s updated",
+                                len(batch), len(updates)
+                            )
+                        else:
+                            body = (await response.text())[:400]
+                            logger.warning("API Skins price request returned HTTP %s: %s", response.status, body)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning("Steam Market price refresh failed for %s", market_hash_name, exc_info=True)
+                logger.warning("Marketplace price refresh failed for batch of %s items", len(batch), exc_info=True)
             finally:
-                CS2_PRICE_QUEUE.task_done()
-                if retry_later:
-                    await CS2_PRICE_QUEUE.put(market_hash_name)
-                else:
+                for market_hash_name in batch:
                     CS2_PRICE_QUEUED.discard(market_hash_name)
-            await asyncio.sleep(3.2)
+                    CS2_PRICE_QUEUE.task_done()
+                if retry_later:
+                    await asyncio.sleep(60)
+                    for market_hash_name in batch:
+                        if market_hash_name not in CS2_PRICE_QUEUED:
+                            CS2_PRICE_QUEUED.add(market_hash_name)
+                            await CS2_PRICE_QUEUE.put(market_hash_name)
+            await asyncio.sleep(0.25)
 
 
 def queue_cs2_price_refresh(items):
@@ -1178,7 +1234,7 @@ async def get_cs2_skins(request):
             "items": [], "total": len(catalog), "matched": 0,
             "page": 0, "limit": 24, "has_more": False,
             "search_required": True, "price_currency": "RUB",
-            "price_source": "Steam Community Market",
+            "price_source": "Lis-Skins / Market.CSGO",
         })
     terms = [term for term in query.split() if term]
     items = [
@@ -1214,6 +1270,7 @@ async def get_cs2_skins(request):
                 SELECT market_hash_name, lowest_price
                 FROM cs2_steam_prices
                 WHERE market_hash_name = ANY($1::text[])
+                  AND price_source IN ('lis_skins','market_csgo')
             """, all_names)
         all_prices = {
             row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
@@ -1252,6 +1309,7 @@ async def get_cs2_skins(request):
             SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
+              AND price_source IN ('lis_skins','market_csgo')
         """, names) if names else []
     prices = {row["market_hash_name"]: row for row in price_rows}
 
@@ -1290,7 +1348,7 @@ async def get_cs2_skins(request):
         "page": page,
         "limit": limit,
         "has_more": start + len(page_items) < total,
-        "price_source": "Steam Community Market priceoverview",
+        "price_source": "Lis-Skins (primary) / Market.CSGO (fallback)",
         "price_currency": "RUB",
         "price_cache_hours": 12,
         "demo_only": True,
@@ -1311,6 +1369,7 @@ async def get_cs2_catalog(request):
             rows = await conn.fetch("""
                 SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
                 FROM cs2_steam_prices WHERE market_hash_name = ANY($1::text[])
+                    AND price_source IN ('lis_skins','market_csgo')
             """, names) if names else []
         price_map = {r["market_hash_name"]: r for r in rows}
         for item in selected:
@@ -1398,7 +1457,7 @@ async def suggest_upgrade_target(request):
             raise web.HTTPNotFound(text="Исходный скин не найден в инвентаре")
         source_price = await conn.fetchrow("""
             SELECT lowest_price, fetched_at FROM cs2_steam_prices
-            WHERE market_hash_name=$1
+            WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
         """, source["market_hash_name"]) if source["market_hash_name"] else None
         fresh_source = bool(source_price and
             (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
@@ -1406,13 +1465,14 @@ async def suggest_upgrade_target(request):
         if not source_value:
             if source.get("market_hash_name"):
                 queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
-            raise web.HTTPConflict(text="Обновляем цену исходного скина Steam. Попробуйте ещё раз через минуту.")
+            raise web.HTTPConflict(text="Цена скина ещё загружается с Lis-Skins / Market.CSGO. Повторите через минуту.")
         desired = source_value * raw_value if mode == "multiplier" else source_value * 75.0 / raw_value
         names = [x.get("market_hash_name") for x in catalog if x.get("market_hash_name")]
         rows = await conn.fetch("""
             SELECT market_hash_name, lowest_price, fetched_at
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
+              AND price_source IN ('lis_skins','market_csgo')
         """, names)
     prices = {}
     stale_names = set()
@@ -1427,7 +1487,7 @@ async def suggest_upgrade_target(request):
     candidates = [x for x in catalog if x.get("market_hash_name") in prices]
     if not candidates:
         queue_cs2_price_refresh([x for x in catalog if x.get("market_hash_name")][:8])
-        raise web.HTTPConflict(text="Steam ещё загружает цены каталога. Попробуйте снова чуть позже или выберите цель вручную.")
+        raise web.HTTPConflict(text="Цены каталога ещё загружаются с Lis-Skins / Market.CSGO. Повторите через минуту или выберите цель вручную.")
     candidates.sort(key=lambda x: abs(prices[x["market_hash_name"]]-desired)/max(desired,1))
     chosen = dict(candidates[0])
     chosen["market_price_minor"] = prices[chosen["market_hash_name"]]
@@ -1471,34 +1531,34 @@ async def create_upgrade_attempt(request):
                     raise web.HTTPConflict(text="Для исходного скина пока нет точного Steam Market имени")
                 source_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1
+                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
                 """, source["market_hash_name"])
                 source_fresh = bool(source_price and
                     (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= 43200)
                 source_market_minor = steam_price_to_minor(source_price["lowest_price"]) if source_fresh else None
                 if not source_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
-                    raise web.HTTPConflict(text="Обновляем цену исходного скина в Steam. Повторите апгрейд через минуту.")
+                    raise web.HTTPConflict(text="Цена исходного скина ещё загружается с Lis-Skins / Market.CSGO. Повторите апгрейд через минуту.")
                 source_value = source_market_minor
                 target_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1
+                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
                 """, target["market_hash_name"])
                 target_fresh = bool(target_price and
                     (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= 43200)
                 target_market_minor = steam_price_to_minor(target_price["lowest_price"]) if target_fresh else None
                 if not target_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
-                    raise web.HTTPConflict(text="Цена цели ещё не получена из Steam. Выберите другой скин или попробуйте позже.")
+                    raise web.HTTPConflict(text="Цена цели ещё не получена с Lis-Skins / Market.CSGO. Выберите другой скин или попробуйте позже.")
                 if target_market_minor < 200 or target_market_minor > 10000000:
-                    raise web.HTTPBadRequest(text="Для апгрейда доступны цели стоимостью от 2 до 100 000 ₽ по Steam Market.")
+                    raise web.HTTPBadRequest(text="Для апгрейда доступны цели стоимостью от 2 до 100 000 ₽ по Lis-Skins / Market.CSGO.")
                 target_value = target_market_minor
                 target["value_minor"] = target_market_minor
                 target["market_price_minor"] = target_market_minor
             elif target.get("market_hash_name"):
                 market_price = await conn.fetchval("""
                     SELECT lowest_price FROM cs2_steam_prices
-                    WHERE market_hash_name=$1
+                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
                 """, target["market_hash_name"])
                 market_minor = steam_price_to_minor(market_price)
                 if market_minor:
