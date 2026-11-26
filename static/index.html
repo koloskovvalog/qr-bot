@@ -279,7 +279,16 @@ async function loadCases(){try{const d=await api("/api/cases");casesData=d.items
  document.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
  selectCase(casesData[0].id);
  }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong><span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
+
+function skinMetaTags(x){
+ const tags=[];
+ if(x.wear)tags.push('<span class="skin-tag">'+esc(x.wear)+'</span>');
+ if(x.stattrak)tags.push('<span class="skin-tag">StatTrak™</span>');
+ if(x.souvenir)tags.push('<span class="skin-tag">Souvenir</span>');
+ if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
+ return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
+}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
 async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small></div>';toast("Предмет добавлен в виртуальный инвентарь");await showInventory();}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
 async function showInventory(){
@@ -290,7 +299,7 @@ async function showInventory(){
    $("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс, чтобы получить первый предмет.<div class="ux-empty-action"><button class="goldbtn" onclick="switchTab(\'cases\')">✦ Перейти к кейсам</button></div></div>';
    return;
   }
-  $("inventory").innerHTML=items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1;min-width:0"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small><div class="rarity">'+esc(i.rarity)+'</div></div><button class="buy" data-inv-upgrade="'+i.id+'" data-item-type="'+esc(i.item_type)+'">Апгрейд</button></div>').join("");
+  $("inventory").innerHTML=items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1;min-width:0"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small><div class="rarity">'+esc(i.rarity)+'</div>'+skinMetaTags(i)+'</div><button class="buy" data-inv-upgrade="'+i.id+'" data-item-type="'+esc(i.item_type)+'">Апгрейд</button></div>').join("");
   document.querySelectorAll("[data-inv-upgrade]").forEach(b=>b.onclick=()=>upgradeInventoryItem(Number(b.dataset.invUpgrade),b.dataset.itemType));
  }catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}
 }
@@ -340,7 +349,7 @@ function renderUpgradeTargets(){
  const list=upgradeTargets.filter(x=>(!source||x.value_minor>source.value_minor)&&(x.name+" "+x.rarity).toLowerCase().includes(q));
  $("upgradeTargetCount").textContent=list.length+" предметов";
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">Нет подходящих целей дороже выбранного предмета.</div>';$("doUpgrade").disabled=true;return}
- $("upgradeTargets").innerHTML=list.slice(0,80).map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'"><img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'"><strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.value_minor,'V')+'</small></button>').join("");
+ $("upgradeTargets").innerHTML=list.slice(0,80).map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'"><img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'"><strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.value_minor,'V')+'</small>'+skinMetaTags(x)+'</button>').join("");
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
