@@ -231,7 +231,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="skinsView" hidden>
  <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
- <div class="case-intro">Полный каталог вариантов CS2. Введи название оружия или скина — поиск работает по всему каталогу. Цены Steam показываются в рублях и обновляются постепенно.</div>
+ <div class="case-intro">Полный каталог вариантов CS2. Введи название оружия или скина — поиск работает по всему каталогу. Цены Lis-Skins (резерв — Market.CSGO) показываются в рублях и обновляются постепенно.</div>
  <div class="skin-tools">
   <input id="skinSearch" type="search" minlength="2" autocomplete="off" placeholder="Начни вводить: AK-47 Redline, AWP Asiimov…">
   <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
@@ -243,13 +243,13 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <label class="skin-check"><input id="skinStatTrak" type="checkbox"> Только StatTrak™</label>
   <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
- <div class="muted" id="skinPriceNote">Цены Steam обновляются постепенно в фоновом режиме. Необновлённая цена не заменяется выдуманной.</div>
+ <div class="muted" id="skinPriceNote">Цены Lis-Skins обновляются постепенно; если предмета нет — используется Market.CSGO. Необновлённая цена не заменяется выдуманной.</div>
  <div class="grid" id="skinGrid"><div class="empty">Введи минимум 2 символа — покажем подходящие скины без бесконечной прокрутки всего каталога.</div></div>
  <button class="goldbtn skin-loadmore" id="loadMoreSkins" hidden>Загрузить ещё</button>
 </section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Открывай кейсы, получай предметы с изображением и ценой Steam в ₽. Их можно направить в апгрейд или обменять на виртуальный баланс. Предметы и баланс не являются реальными активами и не выводятся на карту.</div>
+<div class="case-intro">Открывай кейсы, получай предметы с изображением и рыночной ценой Lis-Skins / Market.CSGO в ₽. Их можно направить в апгрейд или обменять на виртуальный баланс. Предметы и баланс не являются реальными активами и не выводятся на карту.</div>
 <div id="caseCards" class="grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 <div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
 <button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
@@ -268,7 +268,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Выбери скин из инвентаря и конкретную цель из каталога CS2. Стоимость и шанс считаются по актуальной цене Steam Market в рублях. Каталог включает бюджетные скины от 2 ₽ до дорогих вариантов до 100 000 ₽. Виртуальные предметы не являются предметами Steam, реальные деньги не используются.</div>
+<div class="case-intro">Выбери скин из инвентаря и конкретную цель из каталога CS2. Стоимость и шанс считаются по актуальной цене Lis-Skins; если её нет — по Market.CSGO, в рублях. Каталог включает бюджетные скины от 2 ₽ до дорогих вариантов до 100 000 ₽. Виртуальные предметы не являются предметами Steam, реальные деньги не используются.</div>
 <div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><strong id="upgradeWheelPercent">—%</strong><small>CHANCE</small></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
@@ -290,7 +290,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <div class="custom-upgrade-grid"><label>Свой множитель (X)<input id="upgradeCustomMultiplier" type="number" min="1.01" max="500" step="0.01" value="2"></label><button type="button" id="applyCustomMultiplier">Подобрать по X</button>
   <label>Свой шанс (%)<input id="upgradeCustomChance" type="number" min="0.1" max="74.99" step="0.1" value="35"></label><button type="button" id="applyCustomChance">Подобрать по %</button></div>
  </details>
- <div class="muted" id="upgradePresetStatus">Выбери X или процент — подберём ближайший скин по актуальной цене Steam.</div>
+ <div class="muted" id="upgradePresetStatus">Выбери X или процент — подберём ближайший скин по актуальной цене Lis-Skins / Market.CSGO.</div>
 </div>
 <div class="upgrade-chance" id="upgradeChance">—%</div>
 <div class="muted" id="upgradeTargetInfo" style="text-align:center">Выбери цель улучшения</div>
@@ -302,7 +302,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <input id="upgradeMaxPrice" type="number" min="2" max="100000" step="1" placeholder="До 100 000 ₽">
   <select id="upgradeSort"><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option><option value="name">По названию</option></select>
  </div>
- <div class="muted" id="upgradePriceNote">Цены берутся из Steam Community Market в RUB. Для выбора доступны только скины с полученной ценой; остальные отображаются как «Цена уточняется».</div>
+ <div class="muted" id="upgradePriceNote">Цены берутся с Lis-Skins (резерв — Market.CSGO) и конвертируются в RUB. Для выбора доступны только скины с полученной ценой; остальные отображаются как «Цена уточняется».</div>
 </div>
 <div class="section"><h2>Выбери целевой скин</h2><span class="count" id="upgradeTargetCount"></span></div>
 <div id="upgradeTargets" class="grid"><div class="empty">Введи минимум 2 символа для поиска по всему каталогу CS2.</div></div>
@@ -365,7 +365,7 @@ function renderSkinCatalog(){
   '<div class="skin-price">'+(x.steam_lowest_price?esc(x.steam_lowest_price):'Цена уточняется')+
   '<small>'+(x.steam_median_price?'Медиана: '+esc(x.steam_median_price):'Медиана пока не получена')+
   (x.steam_volume?' · Продажи: '+esc(x.steam_volume):'')+'</small></div>'+
-  (x.steam_fetched_at?'<div class="muted">Steam: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
+  (x.steam_fetched_at?'<div class="muted">Источник обновлён: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
   '</article>').join("");
  $("skinsCount").textContent=skinCatalogQuery.length>=2?skinCatalogTotal.toLocaleString("ru-RU")+" результатов":skinCatalogTotal.toLocaleString("ru-RU")+" в каталоге";
  $("loadMoreSkins").hidden=!skinCatalogHasMore;
@@ -381,7 +381,7 @@ async function loadSkinCatalog(reset=true){
   skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
   skinCatalogPage=Number(d.page||0)+1;
-  $("skinPriceNote").textContent="Источник цен: Steam Community Market · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы. Фильтр цены показывает только скины, для которых Steam уже вернул цену.";
+  $("skinPriceNote").textContent="Источник цен: Lis-Skins → Market.CSGO · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы. Фильтр цены показывает только скины, для которых источник уже вернул цену.";
  }catch(e){if(reset)$("skinGrid").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
  finally{skinCatalogBusy=false;renderSkinCatalog();}
 }
@@ -422,7 +422,7 @@ function skinMetaTags(x){
  if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Steam уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
 async function openCase(){
  if(!initData){toast("Откройте приложение через Telegram.");return}
@@ -474,7 +474,7 @@ async function openCase(){
   }
   stage.classList.remove("rolling");
   // The result card and the centered reel card are rendered from the same server response object.
-  const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
+  const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется";
   const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
   $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
    (x.image_url?'<img class="case-result-image" src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'">':'')+
@@ -548,10 +548,10 @@ async function loadUpgradeView(){
 }
 function renderUpgradeSources(){
  const type=$("upgradeMode").value,list=upgradeInventory.filter(x=>x.item_type===type);
- $("upgradeSource").innerHTML=list.length?list.map(x=>'<option value="'+x.id+'">'+esc(x.item_name)+' · '+(x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется")+'</option>').join(""):'<option value="">Нет предметов этого типа в инвентаре</option>';
+ $("upgradeSource").innerHTML=list.length?list.map(x=>'<option value="'+x.id+'">'+esc(x.item_name)+' · '+(x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</option>').join(""):'<option value="">Нет предметов этого типа в инвентаре</option>';
  $("upgradeSource").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;renderUpgradeTargets();renderUpgradeChance()};
  const selected=list.find(x=>x.id===Number($("upgradeSource").value));
- $("upgradeSourceInfo").textContent=selected?'Ставка: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена Steam уточняется"):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Сначала откройте демо-кейс, чтобы получить скин.');
+ $("upgradeSourceInfo").textContent=selected?'Ставка: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена Lis-Skins / Market.CSGO уточняется"):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Сначала откройте демо-кейс, чтобы получить скин.');
 }
 async function applyUpgradePreset(mode,value){
  if($("upgradeMode").value!=="skin"){toast("Пресеты X и % доступны в режиме скинов");return}
@@ -559,7 +559,7 @@ async function applyUpgradePreset(mode,value){
  if(!Number.isFinite(value)||value<=0){toast("Укажи корректное значение");return}
  upgradePresetMode=mode;upgradePresetValue=value;
  document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.toggle("active",b.dataset.upgradeMult?mode==="multiplier"&&Number(b.dataset.upgradeMult)===value:mode==="chance"&&Number(b.dataset.upgradeChance)===value));
- $("upgradePresetStatus").textContent="Подбираем цель по Steam Market…";
+ $("upgradePresetStatus").textContent="Подбираем цель по Lis-Skins / Market.CSGO…";
  $("doUpgrade").disabled=true;
  try{
   const d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
@@ -596,7 +596,7 @@ async function loadUpgradeTargets(reset=true){
    const d=await api("/api/cs2/skins?"+params.toString());
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
    upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
-   $("upgradePriceNote").textContent="Steam Community Market · RUB. Кэш цен до 12 часов; неизвестные цены не используются для расчёта.";
+   $("upgradePriceNote").textContent="Lis-Skins / Market.CSGO · RUB. Кэш цен до 12 часов; неизвестные цены не используются для расчёта.";
   }
   renderUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
