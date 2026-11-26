@@ -309,7 +309,7 @@ function skinMetaTags(x){
  if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.value_minor?money(i.value_minor,"₽"):"Цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
 async function openCase(){
  if(!initData){toast("Откройте приложение через Telegram.");return}
