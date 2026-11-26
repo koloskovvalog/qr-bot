@@ -134,6 +134,34 @@ async def init_db():
                 WHERE o.product_id = p.id
                   AND o.product_title = '';
 
+                CREATE TABLE IF NOT EXISTS payment_providers (
+                    code TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'demo',
+                    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    public_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS payment_transactions (
+                    id BIGSERIAL PRIMARY KEY,
+                    order_id BIGINT NOT NULL REFERENCES orders(id),
+                    user_id BIGINT NOT NULL,
+                    provider_code TEXT NOT NULL REFERENCES payment_providers(code),
+                    amount_minor BIGINT NOT NULL,
+                    currency TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'demo_pending',
+                    external_reference TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                INSERT INTO payment_providers(code, title, mode, enabled, public_config)
+                VALUES
+                    ('demo', 'QR BOT PRO Demo Gateway', 'demo', TRUE, '{"description":"Тестовый провайдер без списания средств"}'::jsonb),
+                    ('antilopay', 'Antilopay', 'unconfigured', FALSE, '{"description":"Адаптер будет активирован после получения официальной документации и тестовых реквизитов"}'::jsonb)
+                ON CONFLICT (code) DO NOTHING;
+
                 CREATE TABLE IF NOT EXISTS cases (
                     id BIGSERIAL PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -786,6 +814,193 @@ async def admin_set_order_status(request):
         logger.exception("Could not notify customer")
 
     return web.json_response({"ok": True})
+
+
+
+# ============================================================
+# DEMO PAYMENT PROVIDER MANAGEMENT
+# ============================================================
+
+async def admin_get_payment_providers(request):
+    require_admin(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT code, title, mode, enabled, public_config, updated_at
+            FROM payment_providers ORDER BY code
+        """)
+        transactions = await conn.fetchval(
+            "SELECT COUNT(*) FROM payment_transactions"
+        )
+    return web.json_response({
+        "items": [{
+            "code": row["code"], "title": row["title"],
+            "mode": row["mode"], "enabled": row["enabled"],
+            "public_config": (json.loads(row["public_config"]) if isinstance(row["public_config"], str) else (row["public_config"] or {})),
+            "updated_at": row["updated_at"].isoformat()
+        } for row in rows],
+        "transaction_count": transactions,
+        "real_payments_enabled": False
+    })
+
+
+async def admin_configure_payment_provider(request):
+    user = require_admin(request)
+    code = request.match_info["provider_code"]
+    if code not in {"demo", "antilopay"}:
+        raise web.HTTPNotFound(text="Провайдер не найден")
+    try:
+        data = await request.json()
+        enabled = bool(data.get("enabled", False))
+        merchant_id = str(data.get("merchant_id", "")).strip()[:100]
+        api_url = str(data.get("api_url", "")).strip()[:300]
+    except (TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректные данные")
+    # No secret keys are accepted or persisted in this demo configuration.
+    if code == "antilopay":
+        if api_url and not api_url.startswith("https://"):
+            raise web.HTTPBadRequest(text="API URL должен начинаться с https://")
+        async with db.acquire() as conn:
+            await conn.execute("""
+                UPDATE payment_providers
+                SET enabled = FALSE, mode = 'unconfigured',
+                    public_config = jsonb_build_object(
+                        'description', 'Демо-профиль. Реальное подключение ещё не выполнено.',
+                        'merchant_id', $1,
+                        'api_url', $2,
+                        'credentials_saved', FALSE
+                    ),
+                    updated_at = NOW()
+                WHERE code = 'antilopay'
+            """, merchant_id, api_url)
+        await write_audit(user["id"], "payment_provider_demo_profile_saved", {
+            "provider": code, "merchant_id_present": bool(merchant_id),
+            "api_url_present": bool(api_url), "secrets_saved": False
+        })
+        return web.json_response({
+            "ok": True, "provider": code, "enabled": False,
+            "mode": "unconfigured",
+            "message": "Демо-профиль сохранён. API-ключ не запрашивался; реальная оплата не подключена."
+        })
+    async with db.acquire() as conn:
+        await conn.execute("""
+            UPDATE payment_providers
+            SET enabled = $1, mode = CASE WHEN $1 THEN 'demo' ELSE 'unconfigured' END,
+                updated_at = NOW()
+            WHERE code = 'demo'
+        """, enabled)
+    await write_audit(user["id"], "payment_provider_configured", {
+        "provider": code, "enabled": enabled, "mode": "demo"
+    })
+    return web.json_response({"ok": True, "provider": code,
+                              "enabled": enabled, "mode": "demo"})
+
+
+async def create_demo_payment(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        order_id = int(data.get("order_id"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректный ID заказа")
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            provider = await conn.fetchrow("""
+                SELECT code FROM payment_providers
+                WHERE code = 'demo' AND enabled = TRUE AND mode = 'demo'
+            """)
+            if not provider:
+                raise web.HTTPServiceUnavailable(text="Демо-платежи временно отключены")
+            order = await conn.fetchrow("""
+                SELECT id, user_id, amount_minor, currency, status
+                FROM orders WHERE id = $1 FOR UPDATE
+            """, order_id)
+            if not order or order["user_id"] != user["id"]:
+                raise web.HTTPNotFound(text="Заказ не найден")
+            if order["status"] in {"paid", "delivered", "refunded", "cancelled"}:
+                raise web.HTTPConflict(text="Для этого заказа нельзя создать платёж")
+            reference = "QRDEMO-" + secrets.token_hex(8).upper()
+            tx_id = await conn.fetchval("""
+                INSERT INTO payment_transactions(
+                    order_id, user_id, provider_code, amount_minor, currency,
+                    status, external_reference
+                ) VALUES($1, $2, 'demo', $3, $4, 'demo_pending', $5)
+                RETURNING id
+            """, order_id, user["id"], order["amount_minor"], order["currency"], reference)
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id, action, details)
+                VALUES($1, 'demo_payment_created', $2::jsonb)
+            """, user["id"], json.dumps({"transaction_id": tx_id, "order_id": order_id}))
+    return web.json_response({
+        "ok": True, "transaction_id": tx_id, "order_id": order_id,
+        "status": "demo_pending", "reference": reference,
+        "amount_minor": order["amount_minor"], "currency": order["currency"],
+        "demo_only": True,
+        "message": "Тестовая операция. Деньги не списываются, заказ не считается оплаченным."
+    })
+
+
+async def get_my_demo_payments(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, order_id, amount_minor, currency, status,
+                   external_reference, created_at
+            FROM payment_transactions
+            WHERE user_id = $1 ORDER BY id DESC LIMIT 50
+        """, user["id"])
+    return web.json_response({"items": [{
+        "id": r["id"], "order_id": r["order_id"],
+        "amount_minor": r["amount_minor"], "currency": r["currency"],
+        "status": r["status"], "reference": r["external_reference"],
+        "created_at": r["created_at"].isoformat()
+    } for r in rows], "demo_only": True})
+
+
+async def admin_simulate_demo_payment(request):
+    user = require_admin(request)
+    try:
+        tx_id = int(request.match_info["transaction_id"])
+        data = await request.json()
+        outcome = str(data.get("outcome", "success"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректные данные")
+    if outcome not in {"success", "failed", "cancelled"}:
+        raise web.HTTPBadRequest(text="Недопустимый результат")
+    status = "demo_" + outcome
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE payment_transactions
+            SET status = $1, updated_at = NOW()
+            WHERE id = $2 AND provider_code = 'demo' AND status = 'demo_pending'
+            RETURNING order_id
+        """, status, tx_id)
+    if not row:
+        raise web.HTTPNotFound(text="Ожидающая демо-транзакция не найдена")
+    await write_audit(user["id"], "demo_payment_simulated", {
+        "transaction_id": tx_id, "outcome": outcome,
+        "note": "Order status intentionally unchanged"
+    })
+    return web.json_response({
+        "ok": True, "status": status, "order_status_changed": False,
+        "message": "Демо-результат сохранён. Статус заказа не изменён."
+    })
+
+
+async def admin_get_payment_transactions(request):
+    require_admin(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, order_id, user_id, provider_code, amount_minor,
+                   currency, status, external_reference, created_at
+            FROM payment_transactions ORDER BY id DESC LIMIT 100
+        """)
+    return web.json_response({"items": [{
+        "id": r["id"], "order_id": r["order_id"], "user_id": r["user_id"],
+        "provider": r["provider_code"], "amount_minor": r["amount_minor"],
+        "currency": r["currency"], "status": r["status"],
+        "reference": r["external_reference"],
+        "created_at": r["created_at"].isoformat()
+    } for r in rows]})
 
 
 # ============================================================
