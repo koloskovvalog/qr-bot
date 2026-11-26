@@ -234,6 +234,14 @@ async def init_db():
 
                 ALTER TABLE case_items ADD COLUMN IF NOT EXISTS image_url TEXT;
                 ALTER TABLE case_items ADD COLUMN IF NOT EXISTS value_minor BIGINT NOT NULL DEFAULT 1000;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS market_hash_name TEXT;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS wear TEXT;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS stattrak BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS souvenir BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS phase TEXT;
+                CREATE UNIQUE INDEX IF NOT EXISTS case_items_market_hash_unique
+                    ON case_items(case_id, market_hash_name)
+                    WHERE market_hash_name IS NOT NULL;
 
                 CREATE TABLE IF NOT EXISTS user_inventory (
                     id BIGSERIAL PRIMARY KEY,
@@ -247,6 +255,11 @@ async def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     consumed_at TIMESTAMPTZ
                 );
+                ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS market_hash_name TEXT;
+                ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS wear TEXT;
+                ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS stattrak BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS souvenir BOOLEAN NOT NULL DEFAULT FALSE;
+                ALTER TABLE user_inventory ADD COLUMN IF NOT EXISTS phase TEXT;
                 CREATE INDEX IF NOT EXISTS idx_user_inventory_active
                     ON user_inventory(user_id, item_type, created_at DESC)
                     WHERE consumed_at IS NULL;
@@ -566,12 +579,17 @@ async def get_cases(request):
         skin_images = {}
         catalog_cases = []
         fallback_case_image = None
+    skins_by_crate = {}
+    for skin in catalog_skins:
+        for crate_id in skin.get("crate_ids", []):
+            skins_by_crate.setdefault(crate_id, []).append(skin)
+
     async with db.acquire() as conn:
         async with conn.transaction():
             for catalog_case in [
                 item for item in catalog_cases
                 if "case" in item["name"].lower()
-            ][:5]:
+            ][:8]:
                 catalog_case_id = await conn.fetchval("""
                     INSERT INTO cases(title, description, price_minor, currency, active, image_url)
                     SELECT $1, 'Демонстрационный кейс CS2 — виртуальные предметы',
@@ -588,17 +606,45 @@ async def get_cases(request):
                     UPDATE cases SET image_url=COALESCE(image_url, $2)
                     WHERE id=$1
                 """, catalog_case_id, catalog_case["image_url"])
-                await conn.execute("""
-                    INSERT INTO case_items(case_id, name, rarity, weight, image_url, value_minor)
-                    SELECT $1, ci.name, ci.rarity, ci.weight, ci.image_url, ci.value_minor
-                    FROM case_items ci
-                    WHERE ci.case_id = (
-                        SELECT id FROM cases WHERE title='Премиум кейс' ORDER BY id LIMIT 1
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1 FROM case_items existing WHERE existing.case_id=$1
-                    )
-                """, catalog_case_id)
+
+                # Add exact market variants for this crate without deleting old contents.
+                crate_skins = skins_by_crate.get(str(catalog_case["id"]), [])
+                if crate_skins:
+                    for skin in crate_skins:
+                        value_minor = int(skin["value_minor"])
+                        cached_price = await conn.fetchval("""
+                            SELECT lowest_price FROM cs2_steam_prices
+                            WHERE market_hash_name=$1
+                        """, skin["market_hash_name"])
+                        market_minor = steam_price_to_minor(cached_price)
+                        if market_minor:
+                            value_minor = market_minor
+                        await conn.execute("""
+                            INSERT INTO case_items(
+                                case_id, name, rarity, weight, image_url, value_minor,
+                                market_hash_name, wear, stattrak, souvenir, phase
+                            )
+                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                            ON CONFLICT (case_id, market_hash_name)
+                            WHERE market_hash_name IS NOT NULL DO NOTHING
+                        """, catalog_case_id, skin["name"], skin["rarity"],
+                             cs2_case_weight(skin["rarity"]), skin["image_url"],
+                             value_minor, skin["market_hash_name"], skin["wear"],
+                             skin["stattrak"], skin["souvenir"], skin["phase"])
+                else:
+                    # Fallback for crates without item membership in the upstream dataset.
+                    await conn.execute("""
+                        INSERT INTO case_items(case_id, name, rarity, weight, image_url, value_minor)
+                        SELECT $1, ci.name, ci.rarity, ci.weight, ci.image_url, ci.value_minor
+                        FROM case_items ci
+                        WHERE ci.case_id = (
+                            SELECT id FROM cases WHERE title='Премиум кейс' ORDER BY id LIMIT 1
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1 FROM case_items existing
+                            WHERE existing.case_id=$1 AND existing.name=ci.name
+                        )
+                    """, catalog_case_id)
         cases = await conn.fetch("""
             SELECT id, title, description, price_minor, currency, image_url
             FROM cases
@@ -607,7 +653,8 @@ async def get_cases(request):
         """)
         items = await conn.fetch("""
             SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight,
-                   ci.image_url, ci.value_minor
+                   ci.image_url, ci.value_minor, ci.market_hash_name, ci.wear,
+                   ci.stattrak, ci.souvenir, ci.phase
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
             WHERE c.active = TRUE
@@ -619,7 +666,11 @@ async def get_cases(request):
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
-            "image_url": item["image_url"] or skin_images.get(item["name"]), "value_minor": item["value_minor"],
+            "image_url": item["image_url"] or skin_images.get(item["name"]),
+            "value_minor": item["value_minor"],
+            "market_hash_name": item["market_hash_name"],
+            "wear": item["wear"], "stattrak": item["stattrak"],
+            "souvenir": item["souvenir"], "phase": item["phase"],
         })
     result = []
     for case in cases:
@@ -657,7 +708,8 @@ async def open_case(request):
             if case["price_minor"] != 0:
                 raise web.HTTPForbidden(text="Этот кейс пока недоступен для открытия")
             contents = await conn.fetch("""
-                SELECT id, name, rarity, weight, image_url, value_minor
+                SELECT id, name, rarity, weight, image_url, value_minor,
+                       market_hash_name, wear, stattrak, souvenir, phase
                 FROM case_items WHERE case_id = $1 ORDER BY id
             """, case_id)
             total = sum(row["weight"] for row in contents)
@@ -679,14 +731,26 @@ async def open_case(request):
                      if item["name"] == selected["name"]),
                     None,
                 )
+            if selected.get("market_hash_name"):
+                cached_price = await conn.fetchval("""
+                    SELECT lowest_price FROM cs2_steam_prices
+                    WHERE market_hash_name=$1
+                """, selected["market_hash_name"])
+                market_minor = steam_price_to_minor(cached_price)
+                if market_minor:
+                    selected["value_minor"] = market_minor
             await conn.execute("""
                 INSERT INTO user_inventory(
                     user_id, item_type, item_name, rarity, image_url,
-                    value_minor, source
+                    value_minor, source, market_hash_name, wear,
+                    stattrak, souvenir, phase
                 )
-                VALUES($1, 'skin', $2, $3, $4, $5, 'case')
+                VALUES($1, 'skin', $2, $3, $4, $5, 'case', $6, $7, $8, $9, $10)
             """, user["id"], selected["name"], selected["rarity"],
-                 selected["image_url"], selected["value_minor"])
+                 selected["image_url"], selected["value_minor"],
+                 selected.get("market_hash_name"), selected.get("wear"),
+                 selected.get("stattrak", False), selected.get("souvenir", False),
+                 selected.get("phase"))
 
             opening_id = await conn.fetchval("""
                 INSERT INTO case_openings(user_id, case_id, item_id, item_name, rarity)
@@ -705,6 +769,11 @@ async def open_case(request):
         "item": {
             "id": selected["id"], "name": selected["name"],
             "rarity": selected["rarity"],
+            "wear": selected.get("wear"),
+            "stattrak": selected.get("stattrak", False),
+            "souvenir": selected.get("souvenir", False),
+            "phase": selected.get("phase"),
+            "image_url": selected.get("image_url"),
             "chance_percent": round(selected["weight"] * 100 / total, 2),
         },
         "demo_only": True,
@@ -717,7 +786,8 @@ async def get_inventory(request):
     async with db.acquire() as conn:
         rows = await conn.fetch("""
             SELECT id, item_type, item_name, rarity, image_url,
-                   value_minor, source, created_at
+                   value_minor, source, created_at, market_hash_name,
+                   wear, stattrak, souvenir, phase
             FROM user_inventory
             WHERE user_id = $1 AND consumed_at IS NULL
             ORDER BY id DESC LIMIT 100
@@ -726,7 +796,10 @@ async def get_inventory(request):
         "id": row["id"], "item_type": row["item_type"],
         "item_name": row["item_name"], "rarity": row["rarity"],
         "image_url": row["image_url"], "value_minor": row["value_minor"],
-        "source": row["source"], "created_at": row["created_at"].isoformat()
+        "source": row["source"], "created_at": row["created_at"].isoformat(),
+        "market_hash_name": row["market_hash_name"], "wear": row["wear"],
+        "stattrak": row["stattrak"], "souvenir": row["souvenir"],
+        "phase": row["phase"]
     } for row in rows]})
 
 # ============================================================
@@ -751,6 +824,21 @@ def cs2_virtual_value(rarity) -> int:
     if any(x in label for x in ("industrial", "промышлен")):
         return 2500
     return 1500
+
+
+def cs2_case_weight(rarity) -> int:
+    label = str(rarity or "").lower()
+    if any(x in label for x in ("covert", "тайное", "extraordinary")):
+        return 2
+    if any(x in label for x in ("classified", "засекреч")):
+        return 8
+    if any(x in label for x in ("restricted", "запрещ")):
+        return 24
+    if any(x in label for x in ("mil-spec", "армейск")):
+        return 72
+    if any(x in label for x in ("industrial", "промышлен")):
+        return 150
+    return 220
 
 async def load_cs2_catalog(kind: str):
     if kind not in CS2_CATALOG_URLS:
@@ -795,6 +883,10 @@ async def load_cs2_catalog(kind: str):
                 "phase": str(entry.get("phase") or ""),
                 "float_min": entry.get("min_float"),
                 "float_max": entry.get("max_float"),
+                "crate_ids": [
+                    str(crate.get("id")) for crate in (entry.get("crates") or [])
+                    if isinstance(crate, dict) and crate.get("id") is not None
+                ],
                 "image_url": image_url,
                 "value_minor": cs2_virtual_value(rarity),
                 "item_type": "skin" if kind == "skins" else "case",
@@ -1133,11 +1225,15 @@ async def create_upgrade_attempt(request):
                 await conn.execute("""
                     INSERT INTO user_inventory(
                         user_id, item_type, item_name, rarity, image_url,
-                        value_minor, source
+                        value_minor, source, market_hash_name, wear,
+                        stattrak, souvenir, phase
                     )
-                    VALUES($1, $2, $3, $4, $5, $6, 'upgrade')
+                    VALUES($1, $2, $3, $4, $5, $6, 'upgrade', $7, $8, $9, $10, $11)
                 """, user["id"], item_type, target["name"], target["rarity"],
-                     target["image_url"], target_value)
+                     target["image_url"], target_value,
+                     target.get("market_hash_name"), target.get("wear"),
+                     target.get("stattrak", False), target.get("souvenir", False),
+                     target.get("phase"))
             attempt_id = await conn.fetchval("""
                 INSERT INTO upgrade_attempts(
                     user_id, item_type, source_inventory_id, source_name,
