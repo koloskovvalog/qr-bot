@@ -238,8 +238,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
   <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
   <select id="skinPhase"><option value="">Любая фаза</option><option>Phase 1</option><option>Phase 2</option><option>Phase 3</option><option>Phase 4</option><option>Ruby</option><option>Sapphire</option><option>Black Pearl</option><option>Emerald</option></select>
-  <input id="skinMinPrice" type="number" min="0" step="1" placeholder="Цена от, ₽">
-  <input id="skinMaxPrice" type="number" min="0" step="1" placeholder="Цена до, ₽">
+  <input id="skinMinPrice" type="number" min="2" max="100000" step="1" value="2" placeholder="Цена от, ₽">
+  <input id="skinMaxPrice" type="number" min="2" max="100000" step="1" value="100000" placeholder="Цена до, ₽">
   <label class="skin-check"><input id="skinStatTrak" type="checkbox"> Только StatTrak™</label>
   <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
@@ -351,11 +351,11 @@ async function checkout(){if(!initData){toast("Откройте магазин �
 async function loadProducts(){try{const d=await api("/api/products");products=d.items||[];renderFilters();renderProducts();updateCart()}catch(e){$("products").innerHTML='<div class="empty">Не удалось загрузить каталог. Откройте Mini App через Telegram.</div>'}}
 
 let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=false,skinCatalogBusy=false;
-let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="",skinCatalogMaxPrice="",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinSearchTimer=null;
+let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="2",skinCatalogMaxPrice="100000",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinCatalogPending=0,skinSearchTimer=null;
 function renderSkinCatalog(){
  const grid=$("skinGrid");
  if(!skinCatalogQuery || skinCatalogQuery.length<2){grid.innerHTML='<div class="empty">Введи минимум 2 символа для поиска по всему каталогу CS2.</div>';}
- else if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">По запросу ничего не найдено. Попробуй другое название или английское написание.</div>';}
+ else if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">'+(skinCatalogPending>0?'Цены для найденных скинов загружаются пакетами из API Skins. Подожди немного и нажми «Проверить цены».':'По запросу ничего не найдено в диапазоне 2–100 000 ₽. Попробуй другое название или английское написание.')+'</div>';}
  else grid.innerHTML=skinCatalogItems.map(x=>'<article class="skin-card">'+
   '<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">'+
   '<strong>'+esc(x.name)+'</strong><div class="muted">'+esc(x.weapon||"CS2")+' · '+esc(x.rarity||"Редкость не указана")+'</div>'+
@@ -368,7 +368,8 @@ function renderSkinCatalog(){
   (x.steam_fetched_at?'<div class="muted">Источник обновлён: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
   '</article>').join("");
  $("skinsCount").textContent=skinCatalogQuery.length>=2?skinCatalogTotal.toLocaleString("ru-RU")+" результатов":skinCatalogTotal.toLocaleString("ru-RU")+" в каталоге";
- $("loadMoreSkins").hidden=!skinCatalogHasMore;
+ $("loadMoreSkins").hidden=!(skinCatalogHasMore||skinCatalogPending>0);
+ $("loadMoreSkins").textContent=skinCatalogPending>0?"Проверить цены":"Загрузить ещё";
  $("loadMoreSkins").disabled=skinCatalogBusy;
 }
 async function loadSkinCatalog(reset=true){
@@ -380,8 +381,9 @@ async function loadSkinCatalog(reset=true){
   const d=await api("/api/cs2/skins?"+params.toString());
   skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
+  skinCatalogPending=Number(d.price_pending_count||0);
   skinCatalogPage=Number(d.page||0)+1;
-  $("skinPriceNote").textContent="Источник цен: Lis-Skins → Market.CSGO · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы. Фильтр цены показывает только скины, для которых источник уже вернул цену.";
+  $("skinPriceNote").textContent="Рыночный диапазон: 2–100 000 ₽. Источник: Lis-Skins → Market.CSGO. Цены кэшируются на 12 часов; отсутствующие цены запрашиваются пакетами до 100 скинов. В результатах — только предметы с подтверждённой актуальной ценой.";
  }catch(e){if(reset)$("skinGrid").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
  finally{skinCatalogBusy=false;renderSkinCatalog();}
 }
@@ -395,7 +397,7 @@ function initSkinCatalog(){
  $("skinMaxPrice").onchange=()=>{skinCatalogMaxPrice=$("skinMaxPrice").value;loadSkinCatalog(true)};
  $("skinStatTrak").onchange=()=>{skinCatalogStatTrak=$("skinStatTrak").checked;loadSkinCatalog(true)};
  $("skinSouvenir").onchange=()=>{skinCatalogSouvenir=$("skinSouvenir").checked;loadSkinCatalog(true)};
- $("loadMoreSkins").onclick=()=>loadSkinCatalog(false);
+ $("loadMoreSkins").onclick=()=>loadSkinCatalog(skinCatalogPending>0);
 }
 
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
