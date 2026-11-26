@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl
 
 import asyncpg
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -44,6 +45,8 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 db: asyncpg.Pool | None = None
+CS2_CATALOG_CACHE = {}
+CS2_CATALOG_CACHE_AT = {}
 
 
 # ============================================================
@@ -172,12 +175,16 @@ async def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
 
+                ALTER TABLE cases ADD COLUMN IF NOT EXISTS image_url TEXT;
+
                 CREATE TABLE IF NOT EXISTS case_items (
                     id BIGSERIAL PRIMARY KEY,
                     case_id BIGINT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
                     name TEXT NOT NULL,
                     rarity TEXT NOT NULL DEFAULT 'Обычный',
                     weight INTEGER NOT NULL CHECK (weight > 0),
+                    image_url TEXT,
+                    value_minor BIGINT NOT NULL DEFAULT 1000,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
 
@@ -189,6 +196,62 @@ async def init_db():
                     item_name TEXT NOT NULL,
                     rarity TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS value_minor BIGINT NOT NULL DEFAULT 1000;
+
+                CREATE TABLE IF NOT EXISTS user_inventory (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    item_type TEXT NOT NULL DEFAULT 'skin',
+                    item_name TEXT NOT NULL,
+                    rarity TEXT NOT NULL DEFAULT 'Обычный',
+                    image_url TEXT,
+                    value_minor BIGINT NOT NULL DEFAULT 1000,
+                    source TEXT NOT NULL DEFAULT 'case',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    consumed_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_user_inventory_active
+                    ON user_inventory(user_id, item_type, created_at DESC)
+                    WHERE consumed_at IS NULL;
+
+                CREATE TABLE IF NOT EXISTS upgrade_attempts (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    item_type TEXT NOT NULL DEFAULT 'skin',
+                    source_inventory_id BIGINT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    target_image_url TEXT,
+                    source_value_minor BIGINT NOT NULL,
+                    target_value_minor BIGINT NOT NULL,
+                    chance_percent NUMERIC(6,2) NOT NULL,
+                    roll_value INTEGER NOT NULL,
+                    success BOOLEAN NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS demo_case_claims (
+                    user_id BIGINT NOT NULL,
+                    claim_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                    PRIMARY KEY(user_id, claim_date)
+                );
+
+                INSERT INTO user_inventory(user_id, item_type, item_name, rarity, value_minor, source, created_at)
+                SELECT co.user_id, 'skin', co.item_name, co.rarity,
+                    CASE
+                      WHEN lower(co.rarity) LIKE '%тайн%' OR lower(co.rarity) LIKE '%covert%' THEN 80000
+                      WHEN lower(co.rarity) LIKE '%засекр%' OR lower(co.rarity) LIKE '%classified%' THEN 30000
+                      WHEN lower(co.rarity) LIKE '%запрещ%' OR lower(co.rarity) LIKE '%restricted%' THEN 12000
+                      ELSE 3000
+                    END,
+                    'case', co.created_at
+                FROM case_openings co
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM user_inventory ui
+                    WHERE ui.user_id = co.user_id AND ui.item_name = co.item_name
+                      AND ui.created_at = co.created_at
                 );
 
                 INSERT INTO cases(title, description, price_minor, currency, active)
@@ -451,13 +514,14 @@ async def create_order(request):
 async def get_cases(request):
     async with db.acquire() as conn:
         cases = await conn.fetch("""
-            SELECT id, title, description, price_minor, currency
+            SELECT id, title, description, price_minor, currency, image_url
             FROM cases
             WHERE active = TRUE
             ORDER BY id
         """)
         items = await conn.fetch("""
-            SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight
+            SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight,
+                   ci.image_url, ci.value_minor
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
             WHERE c.active = TRUE
@@ -469,6 +533,7 @@ async def get_cases(request):
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
+            "image_url": item["image_url"], "value_minor": item["value_minor"],
         })
     result = []
     for case in cases:
@@ -478,14 +543,15 @@ async def get_cases(request):
             "id": case["id"], "title": case["title"],
             "description": case["description"],
             "price_minor": case["price_minor"],
-            "currency": case["currency"], "demo_only": True,
+            "currency": case["currency"],
+            "image_url": case["image_url"],
+            "demo_only": True,
             "items": [{
                 **item,
                 "chance_percent": round(item["weight"] * 100 / total, 2) if total else 0
             } for item in contents],
         })
     return web.json_response({"items": result})
-
 
 async def open_case(request):
     user = verify_telegram_user(request)
@@ -519,6 +585,15 @@ async def open_case(request):
                 if roll < cursor:
                     selected = item
                     break
+            await conn.execute("""
+                INSERT INTO user_inventory(
+                    user_id, item_type, item_name, rarity, image_url,
+                    value_minor, source
+                )
+                VALUES($1, 'skin', $2, $3, $4, $5, 'case')
+            """, user["id"], selected["name"], selected["rarity"],
+                 selected["image_url"], selected["value_minor"])
+
             opening_id = await conn.fetchval("""
                 INSERT INTO case_openings(user_id, case_id, item_id, item_name, rarity)
                 VALUES($1, $2, $3, $4, $5) RETURNING id
@@ -547,14 +622,211 @@ async def get_inventory(request):
     user = verify_telegram_user(request)
     async with db.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, case_id, item_name, rarity, created_at
-            FROM case_openings
-            WHERE user_id = $1 ORDER BY id DESC LIMIT 100
+            SELECT id, item_type, item_name, rarity, image_url,
+                   value_minor, source, created_at
+            FROM user_inventory
+            WHERE user_id = $1 AND consumed_at IS NULL
+            ORDER BY id DESC LIMIT 100
         """, user["id"])
     return web.json_response({"items": [{
-        "id": row["id"], "case_id": row["case_id"],
+        "id": row["id"], "item_type": row["item_type"],
         "item_name": row["item_name"], "rarity": row["rarity"],
-        "created_at": row["created_at"].isoformat()
+        "image_url": row["image_url"], "value_minor": row["value_minor"],
+        "source": row["source"], "created_at": row["created_at"].isoformat()
+    } for row in rows]})
+
+# ============================================================
+# CS2 PUBLIC CATALOG AND VIRTUAL UPGRADER
+# ============================================================
+
+CS2_CATALOG_URLS = {
+    "skins": "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json",
+    "cases": "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/crates.json",
+}
+
+def cs2_virtual_value(rarity) -> int:
+    label = str((rarity or {}).get("name", rarity or "")).lower() if isinstance(rarity, dict) else str(rarity or "").lower()
+    if any(x in label for x in ("extraordinary", "covert", "тайное", "контрабанд")):
+        return 80000
+    if any(x in label for x in ("classified", "засекреч")):
+        return 30000
+    if any(x in label for x in ("restricted", "запрещ")):
+        return 12000
+    if any(x in label for x in ("mil-spec", "армейское", "армейск")):
+        return 5000
+    if any(x in label for x in ("industrial", "промышлен")):
+        return 2500
+    return 1500
+
+async def load_cs2_catalog(kind: str):
+    if kind not in CS2_CATALOG_URLS:
+        raise web.HTTPBadRequest(text="Неизвестный тип каталога")
+    now = time.time()
+    if kind in CS2_CATALOG_CACHE and now - CS2_CATALOG_CACHE_AT.get(kind, 0) < 21600:
+        return CS2_CATALOG_CACHE[kind]
+    timeout = aiohttp.ClientTimeout(total=18)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(CS2_CATALOG_URLS[kind], headers={"User-Agent": "QR-BOT-PRO/1.0"}) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"catalog upstream returned {response.status}")
+                raw = await response.json(content_type=None)
+        if not isinstance(raw, list):
+            raise RuntimeError("catalog payload is not a list")
+        normalized = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            image_url = str(entry.get("image") or "").strip()
+            if not name or not image_url.startswith("https://"):
+                continue
+            rarity = entry.get("rarity") or {}
+            rarity_name = rarity.get("name", "Неизвестно") if isinstance(rarity, dict) else str(rarity)
+            item = {
+                "id": str(entry.get("id") or name),
+                "name": name,
+                "rarity": rarity_name,
+                "image_url": image_url,
+                "value_minor": cs2_virtual_value(rarity),
+                "item_type": "skin" if kind == "skins" else "case",
+            }
+            normalized.append(item)
+        normalized.sort(key=lambda x: (x["value_minor"], x["name"]))
+        CS2_CATALOG_CACHE[kind] = normalized
+        CS2_CATALOG_CACHE_AT[kind] = now
+        return normalized
+    except web.HTTPException:
+        raise
+    except Exception:
+        logger.exception("Could not load CS2 %s catalog", kind)
+        if kind in CS2_CATALOG_CACHE:
+            return CS2_CATALOG_CACHE[kind]
+        raise web.HTTPServiceUnavailable(text="Каталог CS2 временно недоступен")
+
+async def get_cs2_catalog(request):
+    kind = request.query.get("kind", "skins")
+    items = await load_cs2_catalog(kind)
+    try:
+        limit = min(max(int(request.query.get("limit", "120")), 1), 200)
+    except ValueError:
+        limit = 120
+    return web.json_response({
+        "items": items[:limit],
+        "source": "ByMykel/CSGO-API",
+        "demo_only": True,
+    })
+
+async def claim_demo_case(request):
+    user = verify_telegram_user(request)
+    try:
+        case_id = int(request.match_info["case_id"])
+    except ValueError:
+        raise web.HTTPBadRequest(text="Некорректный ID кейса")
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            case = await conn.fetchrow(
+                "SELECT id, title, image_url FROM cases WHERE id=$1 AND active=TRUE",
+                case_id,
+            )
+            if not case:
+                raise web.HTTPNotFound(text="Кейс не найден")
+            claimed = await conn.fetchval("""
+                INSERT INTO demo_case_claims(user_id, claim_date)
+                VALUES($1, CURRENT_DATE)
+                ON CONFLICT DO NOTHING
+                RETURNING user_id
+            """, user["id"])
+            if not claimed:
+                raise web.HTTPConflict(text="Бесплатный тестовый кейс уже получен сегодня")
+            inventory_id = await conn.fetchval("""
+                INSERT INTO user_inventory(
+                    user_id, item_type, item_name, rarity, image_url,
+                    value_minor, source
+                )
+                VALUES($1, 'case', $2, 'Тестовый кейс', $3, 1000, 'daily_demo')
+                RETURNING id
+            """, user["id"], case["title"], case["image_url"])
+    return web.json_response({"ok": True, "inventory_id": inventory_id, "message": "Тестовый кейс добавлен в инвентарь"})
+
+async def create_upgrade_attempt(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        source_id = int(data.get("source_inventory_id"))
+        item_type = str(data.get("item_type", "skin"))
+        target_id = str(data.get("target_id", ""))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректные данные апгрейда")
+    if item_type not in {"skin", "case"} or not target_id:
+        raise web.HTTPBadRequest(text="Некорректный тип или цель апгрейда")
+    catalog = await load_cs2_catalog("skins" if item_type == "skin" else "cases")
+    target = next((x for x in catalog if x["id"] == target_id), None)
+    if not target:
+        raise web.HTTPNotFound(text="Целевой предмет не найден в каталоге")
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            source = await conn.fetchrow("""
+                SELECT id, item_type, item_name, rarity, value_minor
+                FROM user_inventory
+                WHERE id=$1 AND user_id=$2 AND item_type=$3 AND consumed_at IS NULL
+                FOR UPDATE
+            """, source_id, user["id"], item_type)
+            if not source:
+                raise web.HTTPNotFound(text="Предмет уже использован или не найден")
+            source_value = int(source["value_minor"])
+            target_value = int(target["value_minor"])
+            if target_value <= source_value:
+                raise web.HTTPBadRequest(text="Выберите предмет дороже исходного")
+            chance = min(90.0, max(1.0, round(source_value / target_value * 75, 2)))
+            roll = secrets.randbelow(10000)
+            success = roll < int(chance * 100)
+            await conn.execute("""
+                UPDATE user_inventory SET consumed_at=NOW() WHERE id=$1
+            """, source_id)
+            if success:
+                await conn.execute("""
+                    INSERT INTO user_inventory(
+                        user_id, item_type, item_name, rarity, image_url,
+                        value_minor, source
+                    )
+                    VALUES($1, $2, $3, $4, $5, $6, 'upgrade')
+                """, user["id"], item_type, target["name"], target["rarity"],
+                     target["image_url"], target_value)
+            attempt_id = await conn.fetchval("""
+                INSERT INTO upgrade_attempts(
+                    user_id, item_type, source_inventory_id, source_name,
+                    target_name, target_image_url, source_value_minor,
+                    target_value_minor, chance_percent, roll_value, success
+                )
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                RETURNING id
+            """, user["id"], item_type, source_id, source["item_name"],
+                 target["name"], target["image_url"], source_value,
+                 target_value, chance, roll, success)
+    return web.json_response({
+        "ok": True, "attempt_id": attempt_id, "success": success,
+        "chance_percent": chance, "source_name": source["item_name"],
+        "target": target, "demo_only": True,
+        "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
+    })
+
+async def get_upgrade_history(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, item_type, source_name, target_name, source_value_minor,
+                   target_value_minor, chance_percent, success, created_at
+            FROM upgrade_attempts
+            WHERE user_id=$1 ORDER BY id DESC LIMIT 50
+        """, user["id"])
+    return web.json_response({"items": [{
+        "id": row["id"], "item_type": row["item_type"],
+        "source_name": row["source_name"], "target_name": row["target_name"],
+        "source_value_minor": row["source_value_minor"],
+        "target_value_minor": row["target_value_minor"],
+        "chance_percent": float(row["chance_percent"]),
+        "success": row["success"], "created_at": row["created_at"].isoformat(),
     } for row in rows]})
 
 
@@ -1234,6 +1506,10 @@ def create_app():
     app.router.add_get("/api/cases", get_cases)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
+    app.router.add_get("/api/cs2/catalog", get_cs2_catalog)
+    app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
+    app.router.add_post("/api/upgrades/attempt", create_upgrade_attempt)
+    app.router.add_get("/api/upgrades/history", get_upgrade_history)
 
     # Admin endpoints
     app.router.add_post("/api/admin/products", admin_add_product)
