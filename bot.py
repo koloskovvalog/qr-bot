@@ -1648,18 +1648,33 @@ async def create_upgrade_attempt(request):
             source_value = int(source["value_minor"])
             target_value = int(target["value_minor"])
             if item_type == "skin":
-                if not source.get("market_hash_name"):
-                    raise web.HTTPConflict(text="Для исходного скина пока нет точного Steam Market имени")
+                source_market_name = source["market_hash_name"]
+                if not source_market_name:
+                    source_label = str(source["item_name"] or "").strip().casefold()
+                    matches = [
+                        x for x in catalog
+                        if str(x.get("name") or "").strip().casefold() == source_label
+                        or str(x.get("base_name") or "").strip().casefold() == source_label
+                    ]
+                    if len(matches) == 1:
+                        source_market_name = matches[0].get("market_hash_name")
+                        if source_market_name:
+                            await conn.execute(
+                                "UPDATE user_inventory SET market_hash_name=$1 WHERE id=$2 AND user_id=$3 AND market_hash_name IS NULL",
+                                source_market_name, source_id, user["id"]
+                            )
+                if not source_market_name:
+                    raise web.HTTPBadRequest(text="Не удалось сопоставить исходный скин с каталогом CS2. Выберите другой предмет.")
                 source_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
                     WHERE market_hash_name=$1 AND price_source <> 'steam'
-                """, source["market_hash_name"])
+                """, source_market_name)
                 source_fresh = bool(source_price and
                     (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= 43200)
                 source_market_minor = steam_price_to_minor(source_price["lowest_price"]) if source_fresh else None
                 if not source_market_minor:
-                    queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
-                    raise web.HTTPConflict(text="Цена исходного скина ещё загружается с Lis-Skins / Market.CSGO. Повторите апгрейд через минуту.")
+                    queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
+                    return web.json_response({"pending": True, "message": "Обновляем цену исходного скина. Повторите через несколько секунд."}, status=202)
                 source_value = source_market_minor
                 target_price = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
@@ -1670,7 +1685,7 @@ async def create_upgrade_attempt(request):
                 target_market_minor = steam_price_to_minor(target_price["lowest_price"]) if target_fresh else None
                 if not target_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
-                    raise web.HTTPConflict(text="Цена цели ещё не получена с Lis-Skins / Market.CSGO. Выберите другой скин или попробуйте позже.")
+                    return web.json_response({"pending": True, "message": "Обновляем цену целевого скина. Повторите через несколько секунд."}, status=202)
                 if target_market_minor < 200 or target_market_minor > 10000000:
                     raise web.HTTPBadRequest(text="Для апгрейда доступны цели стоимостью от 2 до 100 000 ₽ по Lis-Skins / Market.CSGO.")
                 target_value = target_market_minor
