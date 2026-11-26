@@ -785,10 +785,10 @@ def create_app():
 
     # Static Mini App
     async def index_handler(request):
-    return web.FileResponse("static/index.html")
+        return web.FileResponse("static/index.html")
 
-app.router.add_get("/", index_handler)
-app.router.add_static("/", path="static", show_index=False)
+    app.router.add_get("/", index_handler)
+    app.router.add_static("/", path="static", show_index=False)
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
