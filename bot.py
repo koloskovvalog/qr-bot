@@ -1235,6 +1235,22 @@ def create_app():
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
 
+    # Demo payment endpoints
+    app.router.add_post("/api/payments/demo/create", create_demo_payment)
+    app.router.add_get("/api/payments", get_my_demo_payments)
+
+    # Payment administration endpoints
+    app.router.add_get("/api/admin/payment-providers", admin_get_payment_providers)
+    app.router.add_post(
+        "/api/admin/payment-providers/{provider_code}",
+        admin_configure_payment_provider,
+    )
+    app.router.add_get("/api/admin/payment-transactions", admin_get_payment_transactions)
+    app.router.add_post(
+        "/api/admin/payment-transactions/{transaction_id}/simulate",
+        admin_simulate_demo_payment,
+    )
+
     # Admin endpoints
     app.router.add_post("/api/admin/products", admin_add_product)
     app.router.add_post(
