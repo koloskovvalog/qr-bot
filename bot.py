@@ -1547,9 +1547,16 @@ async def suggest_upgrade_target(request):
             (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
         source_value = steam_price_to_minor(source_price["lowest_price"]) if fresh_source else None
         if not source_value:
-            if source.get("market_hash_name"):
-                queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
-            raise web.HTTPConflict(text="Цена скина ещё загружается с Lis-Skins / Market.CSGO. Повторите через минуту.")
+            if not source.get("market_hash_name"):
+                raise web.HTTPBadRequest(text="У этого предмета нет точного Market Hash Name. Выберите другой скин из инвентаря.")
+            if not APISKINS_API_KEY:
+                raise web.HTTPServiceUnavailable(text="Цены временно недоступны: не настроен ключ API Skins на сервере.")
+            queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
+            return web.json_response({
+                "pending": True,
+                "stage": "source_price",
+                "message": "Получаем актуальную цену исходного скина. Это может занять несколько секунд."
+            }, status=202)
         desired = source_value * raw_value if mode == "multiplier" else source_value * 75.0 / raw_value
         names = [x.get("market_hash_name") for x in catalog if x.get("market_hash_name")]
         rows = await conn.fetch("""
@@ -1570,8 +1577,20 @@ async def suggest_upgrade_target(request):
             stale_names.add(row["market_hash_name"])
     candidates = [x for x in catalog if x.get("market_hash_name") in prices]
     if not candidates:
-        queue_cs2_price_refresh([x for x in catalog if x.get("market_hash_name")][:8])
-        raise web.HTTPConflict(text="Цены каталога ещё загружаются с Lis-Skins / Market.CSGO. Повторите через минуту или выберите цель вручную.")
+        if not APISKINS_API_KEY:
+            raise web.HTTPServiceUnavailable(text="Цены каталога недоступны: проверьте APISKINS_API_KEY в настройках Render.")
+        # Queue a useful sample around the requested price instead of the first
+        # eight alphabetic entries; one batch can contain up to 100 names.
+        ranked = sorted(
+            (x for x in catalog if x.get("market_hash_name")),
+            key=lambda x: abs(cs2_virtual_value({"name": x.get("rarity", "")}) - desired) / max(desired, 1)
+        )
+        queue_cs2_price_refresh(ranked[:100])
+        return web.json_response({
+            "pending": True,
+            "stage": "target_prices",
+            "message": "Подбираем предметы по актуальным ценам. Подождите несколько секунд."
+        }, status=202)
     candidates.sort(key=lambda x: abs(prices[x["market_hash_name"]]-desired)/max(desired,1))
     chosen = dict(candidates[0])
     chosen["market_price_minor"] = prices[chosen["market_hash_name"]]
