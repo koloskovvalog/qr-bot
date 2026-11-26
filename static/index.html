@@ -28,7 +28,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .case-caption{font-size:11px;letter-spacing:3px;color:var(--gold2);font-weight:900;margin:10px}.case-sub{font-size:12px;color:#c6bead;margin:0 0 18px}
 .case-stage.rolling .case-emblem{animation:casePulse .22s infinite alternate}.case-stage.rolling{box-shadow:0 0 34px #d8b45a22}
 @keyframes casePulse{from{transform:scale(.94) rotate(-3deg);filter:brightness(.8)}to{transform:scale(1.08) rotate(3deg);filter:brightness(1.5)}}
-.case-reel{display:none;position:relative;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning,.case-reel.stopping{display:block}.case-reel::after{content:"";position:absolute;z-index:5;top:0;bottom:0;left:50%;width:3px;transform:translateX(-50%);background:var(--gold2);box-shadow:0 0 12px var(--gold);pointer-events:none}.reel-track{display:flex;gap:8px;width:max-content;transform:translateX(0)}.case-reel.spinning .reel-track{animation:reelPreview .42s linear infinite}.case-reel.stopping .reel-track{transform:translateX(var(--reel-stop));transition:transform 2.45s cubic-bezier(.08,.72,.12,1)}.reel-card{width:128px;height:116px;flex:0 0 128px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;text-align:center;padding:8px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800;overflow:hidden}.reel-card strong{font-size:9px;line-height:1.2;max-height:2.4em;overflow:hidden}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}.reel-card img{width:100%;height:62px;object-fit:contain;display:block}@keyframes reelPreview{from{transform:translateX(0)}to{transform:translateX(-272px)}}
+.case-reel{display:none;position:relative;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning,.case-reel.stopping{display:block}.case-reel::after{content:"";position:absolute;z-index:5;top:0;bottom:0;left:50%;width:3px;transform:translateX(-50%);background:var(--gold2);box-shadow:0 0 12px var(--gold);pointer-events:none}.reel-track{display:flex;gap:8px;width:max-content;transform:translateX(0)}.case-reel.spinning .reel-track{animation:reelPreview .24s linear infinite}.case-reel.stopping .reel-track{will-change:transform}.reel-card{width:128px;height:116px;flex:0 0 128px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;text-align:center;padding:8px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800;overflow:hidden}.reel-card strong{font-size:9px;line-height:1.2;max-height:2.4em;overflow:hidden}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}.reel-card img{width:100%;height:62px;object-fit:contain;display:block}@keyframes reelPreview{from{transform:translateX(0)}to{transform:translateX(-272px)}}
 .case-result{border:1px solid var(--gold);border-radius:15px;background:#16130d;padding:16px;margin-top:14px;animation:reveal .45s ease-out}.case-result strong{display:block;color:var(--gold2);font-size:17px;margin:7px}.case-result small{color:var(--muted)}
 .case-result-image{width:100%;max-width:250px;height:150px;object-fit:contain;display:block;margin:8px auto;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:12px}
 .case-result-price{font-size:22px;font-weight:900;color:var(--gold2);margin:10px 0}
@@ -318,26 +318,49 @@ async function openCase(){
  button.disabled=true;stage.classList.add("rolling");
  const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
  if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
+ const spinStartedAt=performance.now();
  const cardHtml=item=>'<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="">':'')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span></div>';
  reel.classList.remove("stopping");
- reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>cardHtml(pool[n%pool.length])).join("")+'</div>';
+ reel.innerHTML='<div class="reel-track">'+Array.from({length:24},(_,n)=>cardHtml(pool[n%pool.length])).join("")+'</div>';
  reel.classList.add("spinning");
  $("caseResult").innerHTML='<div class="case-result">Открываем кейс…</div>';
  try{
   const d=await api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
   const x=d.item;
-  // The server-selected item is inserted at a fixed stop position; the animation is visual only.
-  const winnerIndex=26;
-  const reelItems=Array.from({length:31},(_,n)=>pool[(n*7+Math.floor(Math.random()*pool.length))%pool.length]);
+  if(!x||!x.name)throw new Error("Сервер не вернул выигрышный предмет");
+  // Keep the preview moving briefly, then build a long reel with the authoritative server result.
+  const previewElapsed=performance.now()-spinStartedAt;
+  if(previewElapsed<750)await new Promise(resolve=>setTimeout(resolve,750-previewElapsed));
+  const winnerIndex=60;
+  const reelItems=Array.from({length:69},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
   reelItems[winnerIndex]=x;
   reel.innerHTML='<div class="reel-track">'+reelItems.map(cardHtml).join("")+'</div>';
   reel.classList.remove("spinning");
-  const track=reel.querySelector(".reel-track"),winnerCard=track.children[winnerIndex];
-  const stopX=Math.round(reel.clientWidth/2-winnerCard.offsetLeft-winnerCard.offsetWidth/2);
-  track.style.setProperty("--reel-stop",stopX+"px");
   reel.classList.add("stopping");
-  await new Promise(resolve=>setTimeout(resolve,2550));
+  const track=reel.querySelector(".reel-track");
+  const winnerCard=track.children[winnerIndex];
+  // Measure actual rendered geometry; offsetLeft is relative to different offset parents on iOS WebView.
+  const reelRect=reel.getBoundingClientRect();
+  const winnerRect=winnerCard.getBoundingClientRect();
+  const stopX=Math.round(reelRect.left+reel.clientWidth/2-(winnerRect.left+winnerRect.width/2));
+  const targetTransform="translateX("+stopX+"px)";
+  if(typeof track.animate==="function"){
+   const animation=track.animate(
+    [{transform:"translateX(0px)"},{transform:targetTransform}],
+    {duration:6200,easing:"cubic-bezier(0.10,0.72,0.12,1)",fill:"forwards"}
+   );
+   await animation.finished;
+   track.style.transform=targetTransform;
+   animation.cancel();
+  }else{
+   track.style.transition="transform 6.2s cubic-bezier(0.10,0.72,0.12,1)";
+   track.style.transform="translateX(0px)";
+   void track.offsetWidth;
+   requestAnimationFrame(()=>{track.style.transform=targetTransform});
+   await new Promise(resolve=>setTimeout(resolve,6300));
+  }
   stage.classList.remove("rolling");
+  // The result card and the centered reel card are rendered from the same server response object.
   const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
   const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
   $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
