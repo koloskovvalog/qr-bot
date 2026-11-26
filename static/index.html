@@ -489,7 +489,8 @@ function renderUpgradeTargets(){
   const price=Number(x.market_price_minor||0);
   const targetValue=$("upgradeMode").value==="skin"?price:Number(x.value_minor||0);
   const sourceValue=Number($("upgradeMode").value==="skin"?(source?.market_price_minor||0):(source?.value_minor||0));
-  return (!source||(!sourceValue?false:targetValue>sourceValue))&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
+  const inSteamRange=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);
+  return inSteamRange&&(!source||(!sourceValue?false:targetValue>sourceValue))&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
  });
  $("upgradeTargetCount").textContent=list.length+" на этой странице";
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=true;return}
