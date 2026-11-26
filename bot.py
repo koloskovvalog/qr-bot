@@ -50,6 +50,7 @@ db: asyncpg.Pool | None = None
 # DATABASE
 # ============================================================
 
+
 async def init_db():
     global db
 
@@ -61,40 +62,77 @@ async def init_db():
     )
 
     async with db.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                id BIGSERIAL PRIMARY KEY,
-                title TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                price_minor BIGINT NOT NULL CHECK (price_minor > 0),
-                currency TEXT NOT NULL DEFAULT 'RUB',
-                active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
+        async with conn.transaction():
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS products (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    price_minor BIGINT NOT NULL DEFAULT 100,
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
 
-            CREATE TABLE IF NOT EXISTS orders (
-                id BIGSERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                username TEXT,
-                product_id BIGINT REFERENCES products(id),
-                product_title TEXT NOT NULL,
-                amount_minor BIGINT NOT NULL,
-                currency TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'new',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
+                CREATE TABLE IF NOT EXISTS orders (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    username TEXT,
+                    product_id BIGINT REFERENCES products(id),
+                    product_title TEXT NOT NULL DEFAULT '',
+                    amount_minor BIGINT NOT NULL DEFAULT 100,
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    status TEXT NOT NULL DEFAULT 'new',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
 
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id BIGSERIAL PRIMARY KEY,
-                actor_id BIGINT,
-                action TEXT NOT NULL,
-                details JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    actor_id BIGINT,
+                    action TEXT NOT NULL,
+                    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
 
-    logger.info("Database initialized")
+                ALTER TABLE products
+                    ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS price_minor BIGINT NOT NULL DEFAULT 100,
+                    ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB',
+                    ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE,
+                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+                ALTER TABLE orders
+                    ADD COLUMN IF NOT EXISTS product_title TEXT NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS amount_minor BIGINT NOT NULL DEFAULT 100,
+                    ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'RUB',
+                    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new',
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'products'
+                        AND column_name = 'name'
+                    ) THEN
+                        EXECUTE '
+                            UPDATE products
+                            SET title = name
+                            WHERE title = ''''
+                        ';
+                    END IF;
+                END $$;
+
+                UPDATE orders o
+                SET product_title = p.title
+                FROM products p
+                WHERE o.product_id = p.id
+                  AND o.product_title = '';
+            """)
+
+    logger.info("Database initialized and migrated")
 
 
 # ============================================================
