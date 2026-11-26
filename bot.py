@@ -772,7 +772,7 @@ async def get_cs2_catalog(request):
     except ValueError:
         limit = 120
     return web.json_response({
-        "items": items[:limit],
+        "items": items[-limit:],
         "source": "ByMykel/CSGO-API",
         "demo_only": True,
     })
