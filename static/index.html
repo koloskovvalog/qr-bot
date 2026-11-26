@@ -441,6 +441,7 @@ async function openCase(){
  $("caseResult").innerHTML='<div class="case-result">Открываем кейс…</div>';
  try{
   const d=await api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
+  if(Number(d.case_id)!==Number(id))throw new Error("Сервер вернул результат другого кейса. Открытие остановлено.");
   const x=d.item;
   if(!x||!x.name)throw new Error("Сервер не вернул выигрышный предмет");
   // Keep the preview moving briefly, then build a long reel with the authoritative server result.
@@ -483,7 +484,7 @@ async function openCase(){
    '<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · шанс '+Number(x.chance_percent).toFixed(2)+'%</small>'+
    skinMetaTags(x)+'<div class="case-result-price">'+price+'</div>'+
    '<div class="case-result-actions"><button class="goldbtn" onclick="upgradeInventoryItem('+x.inventory_id+',&quot;skin&quot;)">В апгрейд</button>'+sell+'</div>'+
-   '<small>Цена Steam · RUB. Продажа начисляет виртуальный баланс.</small></div>';
+   '<small>Цена внешнего маркетплейса · RUB. Продажа начисляет виртуальный баланс.</small></div>';
   toast("Скин добавлен в инвентарь");
   await showInventory();await refreshWalletBalance();
  }catch(e){
