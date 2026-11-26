@@ -475,7 +475,7 @@ async def open_case(request):
             if not case or not case["active"]:
                 raise web.HTTPNotFound(text="Кейс не найден")
             if case["price_minor"] != 0:
-                raise web.HTTPPaymentRequired(text="Этот кейс пока недоступен для открытия")
+                raise web.HTTPForbidden(text="Этот кейс пока недоступен для открытия")
             contents = await conn.fetch("""
                 SELECT id, name, rarity, weight
                 FROM case_items WHERE case_id = $1 ORDER BY id
@@ -812,7 +812,7 @@ async def cmd_start(message: types.Message):
     await message.answer(
         "Добро пожаловать в QR BOT PRO!\n\n"
         "Здесь вы можете посмотреть каталог цифровых товаров и услуг, "
-        "оформить заказ и отслеживать его статус.\n\n"
+        "оформить заказ, отслеживать его статус и открыть демо-кейсы CS2.\n\n"
         "Для начала нажмите кнопку ниже.",
         reply_markup=keyboard,
     )
