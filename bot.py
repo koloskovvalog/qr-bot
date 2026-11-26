@@ -601,6 +601,13 @@ async def open_case(request):
                 if roll < cursor:
                     selected = item
                     break
+            if not selected["image_url"]:
+                cached_skins = CS2_CATALOG_CACHE.get("skins", [])
+                selected["image_url"] = next(
+                    (item["image_url"] for item in cached_skins
+                     if item["name"] == selected["name"]),
+                    None,
+                )
             await conn.execute("""
                 INSERT INTO user_inventory(
                     user_id, item_type, item_name, rarity, image_url,
@@ -739,6 +746,11 @@ async def claim_demo_case(request):
         case_id = int(request.match_info["case_id"])
     except ValueError:
         raise web.HTTPBadRequest(text="Некорректный ID кейса")
+    try:
+        catalog_cases = await load_cs2_catalog("cases")
+        fallback_image = catalog_cases[0]["image_url"] if catalog_cases else None
+    except Exception:
+        fallback_image = None
     async with db.acquire() as conn:
         async with conn.transaction():
             case = await conn.fetchrow(
