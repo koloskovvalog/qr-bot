@@ -565,8 +565,8 @@ function renderCaseCards(){
   const count=Number(c.items_total||c.items?.length||0);
   return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
    '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
-   '<div class="case-card-info"><div class="case-card-kicker"><span>QR CASE SERIES</span><span>DEMO</span></div><strong>'+esc(c.title)+'</strong>'+
-   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>0 ₽</b></div></div></button>';
+   '<div class="case-card-info"><div class="case-card-kicker"><span>QR CASE SERIES</span><span>'+(Number(c.price_minor||0)===0?'DEMO':'COMING SOON')+'</span></div><strong>'+esc(c.title)+'</strong>'+
+   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.price_minor||0)===0?'0 ₽':'СКОРО')+'</b></div></div></button>';
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
 }
@@ -575,11 +575,11 @@ function selectCase(caseId){
  $("caseStage").dataset.caseId=c.id;
  renderCaseCards();
  $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true">':'<div class="case-emblem">CS<span>2</span></div>')+
-  '<div class="case-stage-kicker"><span>SELECTED CASE</span><span>DEMO · 0 ₽</span></div>'+
+  '<div class="case-stage-kicker"><span>SELECTED CASE</span><span>'+(Number(c.price_minor||0)===0?'DEMO · 0 ₽':'СКОРО')+'</span></div>'+
   '<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</div>'+
   '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов в составе</span><span>Результат фиксируется сервером</span></div>'+
-  '<div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть кейс</button><div id="caseResult"></div>';
- $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;
+  '<div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">'+(Number(c.price_minor||0)===0?'✦ Открыть кейс':'Скоро будет доступно')+'</button><div id="caseResult"></div>';
+ $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length||Number(c.price_minor||0)!==0;$("claimDemoCase").onclick=claimDemoCase;
  renderCaseItems(c.items);
  if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
 }
