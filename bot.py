@@ -607,31 +607,44 @@ async def get_cases(request):
                     WHERE id=$1
                 """, catalog_case_id, catalog_case["image_url"])
 
-                # Add exact market variants for this crate without deleting old contents.
+                # Seed each crate once; preserve all legacy contents and avoid repeated bulk inserts.
                 crate_skins = skins_by_crate.get(str(catalog_case["id"]), [])
-                if crate_skins:
+                already_seeded = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM case_items
+                        WHERE case_id=$1 AND market_hash_name IS NOT NULL
+                    )
+                """, catalog_case_id)
+                if crate_skins and not already_seeded:
+                    market_names = [skin["market_hash_name"] for skin in crate_skins]
+                    cached_rows = await conn.fetch("""
+                        SELECT market_hash_name, lowest_price
+                        FROM cs2_steam_prices
+                        WHERE market_hash_name = ANY($1::text[])
+                    """, market_names)
+                    cached_prices = {
+                        row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
+                        for row in cached_rows
+                    }
+                    records = []
                     for skin in crate_skins:
-                        value_minor = int(skin["value_minor"])
-                        cached_price = await conn.fetchval("""
-                            SELECT lowest_price FROM cs2_steam_prices
-                            WHERE market_hash_name=$1
-                        """, skin["market_hash_name"])
-                        market_minor = steam_price_to_minor(cached_price)
-                        if market_minor:
-                            value_minor = market_minor
-                        await conn.execute("""
-                            INSERT INTO case_items(
-                                case_id, name, rarity, weight, image_url, value_minor,
-                                market_hash_name, wear, stattrak, souvenir, phase
-                            )
-                            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-                            ON CONFLICT (case_id, market_hash_name)
-                            WHERE market_hash_name IS NOT NULL DO NOTHING
-                        """, catalog_case_id, skin["name"], skin["rarity"],
-                             cs2_case_weight(skin["rarity"]), skin["image_url"],
-                             value_minor, skin["market_hash_name"], skin["wear"],
-                             skin["stattrak"], skin["souvenir"], skin["phase"])
-                else:
+                        value_minor = cached_prices.get(skin["market_hash_name"]) or int(skin["value_minor"])
+                        records.append((
+                            catalog_case_id, skin["name"], skin["rarity"],
+                            cs2_case_weight(skin["rarity"]), skin["image_url"],
+                            value_minor, skin["market_hash_name"], skin["wear"],
+                            skin["stattrak"], skin["souvenir"], skin["phase"],
+                        ))
+                    await conn.executemany("""
+                        INSERT INTO case_items(
+                            case_id, name, rarity, weight, image_url, value_minor,
+                            market_hash_name, wear, stattrak, souvenir, phase
+                        )
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        ON CONFLICT (case_id, market_hash_name)
+                        WHERE market_hash_name IS NOT NULL DO NOTHING
+                    """, records)
+                elif not crate_skins:
                     # Fallback for crates without item membership in the upstream dataset.
                     await conn.execute("""
                         INSERT INTO case_items(case_id, name, rarity, weight, image_url, value_minor)
