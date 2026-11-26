@@ -31,6 +31,20 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .case-result{border:1px solid var(--gold);border-radius:15px;background:#16130d;padding:16px;margin-top:14px;animation:reveal .45s ease-out}.case-result strong{display:block;color:var(--gold2);font-size:17px;margin:7px}.case-result small{color:var(--muted)}
 @keyframes reveal{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
 .case-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.case-item,.inventory-item{border:1px solid var(--line);background:#171510;border-radius:13px;padding:12px}.case-item strong,.inventory-item strong{display:block;font-size:12px;margin:6px 0}.case-item small,.inventory-item small{font-size:10px;color:var(--muted)}.case-chance{color:var(--gold2);font-size:11px;font-weight:800}.inventory{display:grid;gap:8px}.inventory-item{display:flex;align-items:center;justify-content:space-between;gap:10px}.rarity{font-size:10px;color:var(--gold2)}
+.item-thumb{width:76px;height:58px;object-fit:contain;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:9px;flex-shrink:0}
+.case-cover{width:100%;height:100px;object-fit:contain;background:radial-gradient(circle,#55401e,#17130d);border-radius:12px;margin-bottom:10px}
+.upgrade-panel{border:1px solid var(--line);border-radius:16px;background:#14120e;padding:14px;margin:12px 0}
+.upgrade-target{background:linear-gradient(155deg,#211c12,#11110f);border:1px solid var(--line);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.upgrade-target.selected{border-color:var(--gold);box-shadow:0 0 0 1px #d8b45a55}
+.upgrade-target img{height:88px;width:100%;object-fit:contain}
+.upgrade-target strong{font-size:11px;line-height:1.35}
+.upgrade-target small{color:var(--muted);font-size:10px}
+.upgrade-chance{font-size:26px;font-weight:950;color:var(--gold2);text-align:center;margin:10px}
+.upgrade-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.upgrade-actions>*{flex:1}
+.upgrade-history{display:grid;gap:8px;margin-top:12px}
+.upgrade-result{padding:14px;border:1px solid var(--gold);border-radius:14px;background:#19150d;margin-top:12px}
+
 @media(max-width:420px){.case-items{grid-template-columns:1fr}.tabs{gap:5px}.tab{padding:9px 10px;font-size:11px}}
 @media(max-width:420px){.grid{grid-template-columns:1fr}.hero h1{font-size:25px}.art{height:66px}}
 </style>
@@ -38,17 +52,39 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 <body><main>
 <header class="top"><div class="brand">QR <span>BOT</span> PRO</div><div class="pill">✦ PREMIUM STORE</div></header>
 <section class="hero"><div class="eyebrow">EXCLUSIVE DIGITAL GOODS</div><h1>Покупки<br>в премиальном стиле</h1><p>Выбирайте цифровые товары, добавляйте их в корзину и отслеживайте заказы в личном кабинете.</p></section>
-<div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
+<div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
 <section id="catalogView"><div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
 <div class="case-intro">Открывай виртуальные кейсы, смотри вероятности и собирай коллекцию. Все предметы — демонстрационные, не передаются в Steam и не имеют денежной стоимости.</div>
+<div id="caseCards" class="grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 <div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
+<button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
+<div class="muted" style="margin-top:7px">Один виртуальный кейс в день для режима «Апгрейд кейсов».</div>
 <div class="section"><h2>Содержимое кейса</h2><span class="count">Вероятности</span></div><div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
 </section>
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
+<section id="upgradeView" hidden>
+<div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
+<div class="case-intro">Выбирай виртуальный предмет из инвентаря и цель дороже. Шанс рассчитывается сервером по условной стоимости. При неудаче виртуальный предмет ставки расходуется. Реальные деньги и Steam-предметы не используются.</div>
+<div class="upgrade-panel">
+<label class="muted">Режим улучшения</label>
+<select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
+<label class="muted">Предмет для ставки</label>
+<select id="upgradeSource" class="search"><option value="">Загрузка инвентаря…</option></select>
+<div id="upgradeSourceInfo" class="muted">Выбери предмет из инвентаря.</div>
+<div class="upgrade-chance" id="upgradeChance">—%</div>
+<div class="muted" id="upgradeTargetInfo" style="text-align:center">Выбери цель улучшения</div>
+</div>
+<input class="search" id="upgradeSearch" type="search" placeholder="Поиск оружия или кейса…">
+<div class="section"><h2>Что получить</h2><span class="count" id="upgradeTargetCount"></span></div>
+<div id="upgradeTargets" class="grid"><div class="empty">Загрузка каталога…</div></div>
+<div class="upgrade-actions"><button class="goldbtn" id="doUpgrade" disabled>✦ Улучшить</button></div>
+<div id="upgradeResult"></div>
+<div class="section"><h2>История апгрейдов</h2></div><div id="upgradeHistory" class="upgrade-history"></div>
+</section>
 <div class="cartbar" id="cartbar" hidden><div><div class="cartmeta" id="cartCount">Корзина · 0</div><div class="muted" id="cartTotal"></div></div><button class="goldbtn" id="checkout">Оформить заказ</button></div>
 <div class="notice">Важно: оформление заказа не означает оплату. Оплата считается подтверждённой только после фактической проверки поступления средств. Перед запуском продаж укажите достоверные сведения о продавце, товарах, условиях оплаты, сроках исполнения, контактах и возвратах.</div>
 <section class="admin" id="adminPanel"><h3>Панель администратора</h3><label>Название товара<input id="pTitle" maxlength="120"></label><label>Описание<textarea id="pDesc" rows="2" maxlength="1500"></textarea></label><label>Цена<input id="pPrice" type="number" min=".01" step=".01"></label><label>Валюта<select id="pCurrency"><option>RUB</option><option>EUR</option><option>USD</option></select></label><button id="addProduct">Добавить товар</button><div class="section"><h3>Последние заказы</h3></div><div id="adminOrders" class="orders"></div>
@@ -80,12 +116,83 @@ async function checkout(){if(!initData){toast("Откройте магазин �
 async function loadProducts(){try{const d=await api("/api/products");products=d.items||[];renderFilters();renderProducts();updateCart()}catch(e){$("products").innerHTML='<div class="empty">Не удалось загрузить каталог. Откройте Mini App через Telegram.</div>'}}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(o.status)+'</div><div class="muted">'+new Date(o.created_at).toLocaleString("ru-RU")+'</div>'+((["paid","delivered","cancelled","refunded"].includes(o.status))?"":'<button class="buy" data-demo-pay="'+o.id+'">Создать демо-платёж</button>')+'</div>').join("");document.querySelectorAll("[data-demo-pay]").forEach(b=>b.onclick=()=>createDemoPayment(Number(b.dataset.demoPay)))}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
-async function loadCases(){try{const d=await api("/api/cases");casesData=d.items||[];if(!casesData.length){$("caseStage").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';return}const c=casesData[0];$("caseStage").dataset.caseId=c.id;$("caseStage").innerHTML='<div class="case-emblem">CS<span>2</span></div><div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description)+'</div><div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть демо-кейс</button><div id="caseResult"></div>';$("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;renderCaseItems(c.items)}catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item"><span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong><span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
-async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const pool=casesData[0]?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small></div>';toast("Предмет добавлен в виртуальный инвентарь");}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
-async function showInventory(){try{const d=await api("/api/inventory");if(!d.items.length){$("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс!</div>';return}$("inventory").innerHTML=d.items.map(i=>'<div class="inventory-item"><div><strong>'+esc(i.item_name)+'</strong><small>'+new Date(i.created_at).toLocaleString("ru-RU")+'</small></div><span class="rarity">'+esc(i.rarity)+'</span></div>').join("")}catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}}
-function switchTab(t){$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";["catalog","cases","orders","inventory"].forEach(x=>$(x+"Tab").classList.toggle("active",t===x));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="cases")loadCases();if(t==="inventory")showInventory()}
-$("catalogTab").onclick=()=>switchTab("catalog");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
+function selectCase(caseId){
+ const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
+ $("caseStage").dataset.caseId=c.id;
+ $("caseCards").querySelectorAll("[data-case-select]").forEach(b=>b.classList.toggle("selected",Number(b.dataset.caseSelect)===c.id));
+ $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS<span>2</span></div>')+'<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description)+'</div><div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть демо-кейс</button><div id="caseResult"></div>';
+ $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;renderCaseItems(c.items);
+}
+async function loadCases(){try{const d=await api("/api/cases");casesData=d.items||[];if(!casesData.length){$("caseStage").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';return}
+ $("caseCards").innerHTML=casesData.map(c=>'<button class="upgrade-target '+(c.id===casesData[0].id?'selected':'')+'" data-case-select="'+c.id+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Виртуальный кейс · бесплатно</small></button>').join("");
+ document.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
+ selectCase(casesData[0].id);
+ }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong><span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
+async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
+async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small></div>';toast("Предмет добавлен в виртуальный инвентарь");}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
+async function showInventory(){try{const d=await api("/api/inventory");if(!d.items.length){$("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс или получи тестовый кейс.</div>';return}$("inventory").innerHTML=d.items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small></div><span class="rarity">'+esc(i.rarity)+'</span></div>').join("")}catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}}
+
+let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null;
+async function loadUpgradeView(){
+ if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте Mini App через Telegram.</div>';return}
+ $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;$("upgradeResult").innerHTML="";loadUpgradeView()};
+ $("upgradeSearch").oninput=renderUpgradeTargets;
+ try{
+  const [inv,hist]=await Promise.all([api("/api/inventory"),api("/api/upgrades/history")]);
+  upgradeInventory=inv.items||[];
+  renderUpgradeSources();
+  $("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("")||'<div class="empty">Попыток пока нет.</div>';
+  await loadUpgradeTargets();
+ }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
+}
+function renderUpgradeSources(){
+ const type=$("upgradeMode").value;
+ const list=upgradeInventory.filter(x=>x.item_type===type);
+ $("upgradeSource").innerHTML=list.length?list.map(x=>'<option value="'+x.id+'">'+esc(x.item_name)+' · '+money(x.value_minor,"V")+'</option>').join(""):'<option value="">Нет предметов этого типа в инвентаре</option>';
+ $("upgradeSource").onchange=()=>{selectedUpgradeTarget=null;renderUpgradeTargets();renderUpgradeChance()};
+ const selected=list.find(x=>x.id===Number($("upgradeSource").value));
+ $("upgradeSourceInfo").textContent=selected?'Ставка: '+selected.item_name+' · условная стоимость '+money(selected.value_minor,'V'):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Сначала откройте демо-кейс, чтобы получить скин.');
+}
+async function loadUpgradeTargets(){
+ const type=$("upgradeMode").value;
+ $("upgradeTargets").innerHTML='<div class="empty">Загружаем каталог CS2…</div>';
+ const d=await api("/api/cs2/catalog?kind="+(type==="case"?"cases":"skins")+"&limit=160");
+ upgradeTargets=d.items||[];selectedUpgradeTarget=null;renderUpgradeTargets();
+}
+function currentUpgradeSource(){return upgradeInventory.find(x=>x.id===Number($("upgradeSource").value))}
+function renderUpgradeTargets(){
+ const source=currentUpgradeSource(),q=$("upgradeSearch").value.toLowerCase().trim();
+ const list=upgradeTargets.filter(x=>(!source||x.value_minor>source.value_minor)&&(x.name+" "+x.rarity).toLowerCase().includes(q));
+ $("upgradeTargetCount").textContent=list.length+" предметов";
+ if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">Нет подходящих целей дороже выбранного предмета.</div>';$("doUpgrade").disabled=true;return}
+ $("upgradeTargets").innerHTML=list.slice(0,80).map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'"><img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'"><strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.value_minor,'V')+'</small></button>').join("");
+ document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);renderUpgradeTargets();renderUpgradeChance()});
+ if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
+}
+function renderUpgradeChance(){
+ const source=currentUpgradeSource();
+ if(!source||!selectedUpgradeTarget){$("upgradeChance").textContent="—%";$("upgradeTargetInfo").textContent="Выбери цель улучшения";$("doUpgrade").disabled=true;return}
+ const chance=Math.min(90,Math.max(1,Math.round(source.value_minor/selectedUpgradeTarget.value_minor*7500)/100));
+ $("upgradeChance").textContent=chance.toFixed(2)+"%";
+ $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
+ $("doUpgrade").disabled=false;
+}
+async function doUpgrade(){
+ const source=currentUpgradeSource(),target=selectedUpgradeTarget,type=$("upgradeMode").value;
+ if(!source||!target)return;
+ $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';
+ try{
+  const [_,d]=await Promise.all([new Promise(r=>setTimeout(r,1400)),api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})})]);
+  $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
+  const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
+  const hist=await api("/api/upgrades/history");$("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("");
+  await showInventory();
+  await loadUpgradeTargets();
+ }catch(e){$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
+}
+function switchTab(t){$("catalogView").hidden=t!=="catalog";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","cases","upgrade","orders","inventory"].forEach(x=>$(x+"Tab").classList.toggle("active",t===x));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView()}
+$("catalogTab").onclick=()=>switchTab("catalog");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 async function adminInit(){try{const d=await api("/api/admin/orders");$("adminPanel").style.display="block";if(!d.items.length){$("adminOrders").innerHTML="Заказов пока нет."}else{$("adminOrders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(o.status)+' · user '+o.user_id+'</div><select id="st'+o.id+'"><option value="invoice_sent">Счёт отправлен</option><option value="paid">Оплата подтверждена</option><option value="delivered">Выдано</option><option value="cancelled">Отменён</option><option value="refunded">Возвращён</option></select><button onclick="setStatus('+o.id+')">Сохранить</button></div>').join("")}await loadPaymentAdmin()}catch(e){}}
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}
 async function loadPaymentAdmin(){try{const [p,t]=await Promise.all([api("/api/admin/payment-providers"),api("/api/admin/payment-transactions")]);$("paymentProviders").innerHTML=(p.items||[]).map(x=>'<div class="order"><strong>'+esc(x.title)+'</strong><div>'+esc(x.code)+' · '+esc(x.mode)+' · '+(x.enabled?"включён":"выключен")+'</div><div class="muted">'+esc(x.public_config?.description||"")+'</div>'+(x.code==="demo"?'<button onclick="toggleDemoProvider('+(!x.enabled)+')">'+(x.enabled?"Отключить тестовый шлюз":"Включить тестовый шлюз")+'</button>':'<label>Demo Merchant ID<input id="antiMerchant" maxlength="100" value="'+esc(x.public_config?.merchant_id||"")+'" placeholder="demo_merchant_001"></label><label>API URL (пример)<input id="antiApiUrl" maxlength="300" value="'+esc(x.public_config?.api_url||"")+'" placeholder="https://sandbox.example-pay.test"></label><div class="muted">API-ключ в демо-режиме не вводится и не сохраняется.</div><button onclick="saveAntilopayDemoProfile()">Сохранить демо-профиль</button>')+'</div>').join("");if(!t.items.length){$("paymentTransactions").innerHTML='<div class="empty">Тестовых транзакций пока нет.</div>';return}$("paymentTransactions").innerHTML=t.items.map(x=>'<div class="order"><strong>Транзакция #'+x.id+' · заказ #'+x.order_id+'</strong><div>'+money(x.amount_minor,x.currency)+' · '+esc(x.status)+'</div><div class="muted">'+esc(x.reference)+' · пользователь '+x.user_id+'</div>'+(x.status==="demo_pending"?'<button onclick="simulateDemoPayment('+x.id+',\'success\')">Симулировать успех</button> <button onclick="simulateDemoPayment('+x.id+',\'failed\')">Симулировать отказ</button>':'')+'</div>').join("")}catch(e){$("paymentProviders").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
