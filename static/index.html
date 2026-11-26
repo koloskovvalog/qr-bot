@@ -337,6 +337,21 @@ main{max-width:1180px;padding:22px 22px 62px}
  #caseItems{grid-template-columns:1fr 1fr}
 }
 
+
+/* Caser-inspired refinement: compact premium controls and clearer upgrade stage */
+#upgradeView .upgrade-panel{background:linear-gradient(145deg,#191c23,#101216);border:1px solid #343943;border-radius:20px;padding:18px;box-shadow:0 16px 42px #0005}
+#upgradeView .upgrade-preset-panel{background:linear-gradient(145deg,#1b1e25,#111318);border:1px solid #343943;border-radius:16px;padding:15px;margin-top:14px}
+#upgradeView .preset-row button{background:#20242c;border:1px solid #3b414c;color:#f0f1f4;border-radius:10px;font-weight:800;min-height:42px}
+#upgradeView .preset-row button.active{background:linear-gradient(135deg,#f3d37c,#c28d35);border-color:#f5d98e;color:#17130a;box-shadow:0 0 0 2px #e6b94f24,0 8px 20px #0005}
+#upgradeView .preset-row button:disabled{opacity:.55;cursor:wait}
+#upgradeView #upgradePresetStatus{padding:10px 12px;border:1px solid #343943;border-radius:11px;background:#0d0f13;color:#c5cad3;min-height:42px}
+#upgradeView .upgrade-live-panel{border:1px solid #454b57;background:radial-gradient(circle at 50% 40%,#272b34,#15181e 65%,#101216);border-radius:20px;box-shadow:0 18px 45px #0006}
+#upgradeView .upgrade-wheel-box{filter:drop-shadow(0 10px 24px #0008)}
+#upgradeView .upgrade-target{background:linear-gradient(160deg,#222630,#13161c 75%);border:1px solid #363d49;border-radius:14px}
+#upgradeView .upgrade-target:hover{border-color:#b28b42;transform:translateY(-2px)}
+#upgradeView .upgrade-target.selected{background:linear-gradient(160deg,#342b19,#17191e 78%);border-color:#e6b94f;box-shadow:0 0 0 1px #e6b94f66,0 12px 26px #0006}
+#casesView .case-card,#casesView .case-gallery-card{border-radius:16px;background:linear-gradient(155deg,#20242d,#12151a);border:1px solid #363c47}
+@media(max-width:600px){#upgradeView .upgrade-panel{padding:13px;border-radius:15px}#upgradeView .upgrade-preset-panel{padding:11px}#upgradeView .preset-row{gap:6px}#upgradeView .preset-row button{min-height:38px;font-size:11px}}
 </style>
 </head>
 <body><main>
@@ -741,18 +756,36 @@ async function applyUpgradePreset(mode,value){
  if(!Number.isFinite(value)||value<=0){toast("Укажи корректное значение");return}
  upgradePresetMode=mode;upgradePresetValue=value;
  document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.toggle("active",b.dataset.upgradeMult?mode==="multiplier"&&Number(b.dataset.upgradeMult)===value:mode==="chance"&&Number(b.dataset.upgradeChance)===value));
- $("upgradePresetStatus").textContent="Подбираем цель по Lis-Skins / Market.CSGO…";
+ $("upgradePresetStatus").textContent="Подключаемся к рынку и загружаем цены…";
  $("doUpgrade").disabled=true;
+ const presetButtons=[...document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]")];
+ presetButtons.forEach(b=>b.disabled=true);
  try{
-  const d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
+  let d=null;
+  for(let attempt=0;attempt<15;attempt++){
+   d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
+   if(!d.pending)break;
+   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" ("+(attempt+1)+"/15)";
+   await new Promise(resolve=>setTimeout(resolve,2000));
+  }
+  if(!d||d.pending){
+   $("upgradePresetStatus").textContent="Цены ещё обновляются. Не нужно нажимать повторно — попробуй снова через 20–30 секунд.";
+   toast("Цены CS2 ещё загружаются");
+   return;
+  }
   selectedUpgradeTarget=d.item;
   upgradeTargets=[d.item,...upgradeTargets.filter(x=>x.id!==d.item.id)];
   $("upgradeSearch").value="";
-  $("upgradePresetStatus").textContent="Подобран ближайший предмет · X"+Number(d.item.suggested_multiplier).toFixed(2)+" · шанс "+Number(d.item.suggested_chance_percent).toFixed(2)+"% · Steam RUB";
+  $("upgradePresetStatus").textContent="Цель найдена · X"+Number(d.item.suggested_multiplier).toFixed(2)+" · шанс "+Number(d.item.suggested_chance_percent).toFixed(2)+"% · актуальная цена рынка";
   $("upgradeTargetCount").textContent="Автоподбор по "+(mode==="multiplier"?"X"+value:value+"%");
   renderUpgradeTargets();renderUpgradeChance();
   $("upgradeTargetInfo").textContent=source.item_name+" → "+d.item.name+" · X"+Number(d.item.suggested_multiplier).toFixed(2);
- }catch(e){$("upgradePresetStatus").textContent=e.message;toast(e.message)}
+ }catch(e){
+  $("upgradePresetStatus").textContent=e.message;
+  toast(e.message);
+ }finally{
+  presetButtons.forEach(b=>b.disabled=false);
+ }
 }
 async function loadUpgradeTargets(reset=true){
  if(upgradeTargetBusy)return;
