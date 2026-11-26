@@ -1550,8 +1550,16 @@ async def suggest_upgrade_target(request):
                 if str(x.get("name") or "").strip().casefold() == source_label
                 or str(x.get("base_name") or "").strip().casefold() == source_label
             ]
-            if len(matches) == 1:
-                source_market_name = matches[0].get("market_hash_name")
+            if matches:
+                exact = [x for x in matches if str(x.get("name") or "").strip().casefold() == source_label]
+                candidates = exact or matches
+                candidate_names = [x.get("market_hash_name") for x in candidates if x.get("market_hash_name")]
+                cached_match = await conn.fetchval("""
+                    SELECT market_hash_name FROM cs2_steam_prices
+                    WHERE market_hash_name = ANY($1::text[]) AND price_source <> 'steam'
+                    ORDER BY fetched_at DESC LIMIT 1
+                """, candidate_names) if candidate_names else None
+                source_market_name = cached_match or (candidate_names[0] if candidate_names else None)
                 if source_market_name:
                     await conn.execute(
                         "UPDATE user_inventory SET market_hash_name=$1 WHERE id=$2 AND user_id=$3 AND market_hash_name IS NULL",
@@ -1656,8 +1664,16 @@ async def create_upgrade_attempt(request):
                         if str(x.get("name") or "").strip().casefold() == source_label
                         or str(x.get("base_name") or "").strip().casefold() == source_label
                     ]
-                    if len(matches) == 1:
-                        source_market_name = matches[0].get("market_hash_name")
+                    if matches:
+                        exact = [x for x in matches if str(x.get("name") or "").strip().casefold() == source_label]
+                        candidates = exact or matches
+                        candidate_names = [x.get("market_hash_name") for x in candidates if x.get("market_hash_name")]
+                        cached_match = await conn.fetchval("""
+                            SELECT market_hash_name FROM cs2_steam_prices
+                            WHERE market_hash_name = ANY($1::text[]) AND price_source <> 'steam'
+                            ORDER BY fetched_at DESC LIMIT 1
+                        """, candidate_names) if candidate_names else None
+                        source_market_name = cached_match or (candidate_names[0] if candidate_names else None)
                         if source_market_name:
                             await conn.execute(
                                 "UPDATE user_inventory SET market_hash_name=$1 WHERE id=$2 AND user_id=$3 AND market_hash_name IS NULL",
