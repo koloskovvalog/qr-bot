@@ -246,6 +246,97 @@ main{max-width:1180px;padding:22px 22px 62px}
 @media(max-width:760px){main{padding:14px 12px 70px}.top{margin:0 -12px 14px;padding:12px}.hero{padding:20px}.ux-home{grid-template-columns:1fr}.home-case-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.home-case-card{padding:9px}.home-case-card img,.home-case-art{height:92px}.home-case-card strong{font-size:11px}.section h2{font-size:16px}}
 @media(min-width:761px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.case-items{grid-template-columns:repeat(4,minmax(0,1fr))}.inventory{grid-template-columns:repeat(2,minmax(0,1fr))}.upgrade-live-panel{max-width:900px;margin-left:auto!important;margin-right:auto!important}}
 
+
+/* QR BOT PRO · Caser-style case gallery and upgrader polish */
+#casesView{padding-bottom:30px}
+#casesView>.section:first-child h2{font-size:23px;letter-spacing:-.5px}
+#casesView>.case-intro{border:1px solid #373c47;background:linear-gradient(115deg,#1b2029,#11141a);color:#b9c0cb;border-radius:15px}
+.case-catalog-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:10px;margin:16px 0 8px}
+.case-catalog-toolbar .search{background:#11151c;border-color:#343b47}
+.case-catalog-caption{display:flex;justify-content:space-between;gap:8px;margin:12px 2px;color:#929aa8;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
+.case-catalog-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.case-card{min-width:0;overflow:hidden;padding:0;text-align:left;border:1px solid #343a46;border-radius:17px;background:linear-gradient(155deg,#202631,#11151b 78%);color:#f5f6f8;transition:transform .18s,border-color .18s,box-shadow .18s}
+.case-card:hover{transform:translateY(-3px);border-color:#a9863f;box-shadow:0 12px 28px #0007}
+.case-card.selected{border-color:#e4bd64;box-shadow:0 0 0 1px #e4bd6466,0 12px 28px #0008}
+.case-card-art{height:142px;position:relative;display:grid;place-items:center;overflow:hidden;background:radial-gradient(ellipse at 50% 70%,#66502b 0,#2b2b30 42%,#161a21 76%)}
+.case-card-art:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,#ffffff08,transparent 55%,#090b10a8)}
+.case-card-art img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;padding:12px;filter:drop-shadow(0 10px 12px #0009);transition:transform .25s}
+.case-card:hover .case-card-art img{transform:scale(1.06)}
+.case-card-art span{font-size:36px;font-weight:1000;letter-spacing:-3px;color:#f1d48b;text-shadow:0 4px 25px #e1b54a66}
+.case-card-art.no-image:after{content:"CS2";position:absolute;font-size:36px;font-weight:1000;color:#e8c879;letter-spacing:-3px}
+.case-card-info{padding:12px}
+.case-card-kicker{display:flex;justify-content:space-between;gap:5px;color:#b9a16d;font-size:8px;font-weight:900;letter-spacing:1px;margin-bottom:8px}
+.case-card-info>strong{display:block;font-size:13px;line-height:1.35;min-height:35px;overflow-wrap:anywhere}
+.case-card-bottom{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid #343a45}
+.case-card-bottom span{font-size:10px;color:#aab1bd}
+.case-card-bottom b{font-size:12px;color:#f0d48a}
+#caseStage{margin-top:20px;padding:24px 18px;border-color:#66532f;background:radial-gradient(ellipse at 50% 12%,#594525 0,#24252b 48%,#10141a 100%);box-shadow:0 18px 48px #0006}
+#caseStage:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 20%,#f0d48a14,transparent 48%)}
+#caseStage>*{position:relative}
+#caseStage .case-cover{height:180px;max-width:320px;object-fit:contain;background:transparent;filter:drop-shadow(0 15px 20px #0009)}
+.case-stage-kicker{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;color:#d0b77d;font-size:9px;font-weight:900;letter-spacing:1.4px;margin:8px 0}
+#caseStage .case-caption{font-size:clamp(17px,3vw,23px);letter-spacing:1.4px;color:#ffe4a0;text-shadow:0 2px 18px #e3b95a44}
+#caseStage .case-sub{max-width:620px;margin:0 auto 12px;color:#c5cbd4;line-height:1.55}
+.case-stage-meta{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:0 auto 14px}
+.case-stage-meta span{padding:7px 10px;border:1px solid #655333;border-radius:30px;background:#171a20;color:#d6c49c;font-size:9px}
+#caseStage .case-reel{border-color:#8e713a;background:linear-gradient(180deg,#0d1016,#191b20);box-shadow:inset 0 0 25px #0008,0 0 25px #e3b95a16;padding:10px}
+#caseStage .case-reel:before,#caseStage .case-reel:after{content:"";position:absolute;z-index:6;top:0;bottom:0;width:54px;pointer-events:none}
+#caseStage .case-reel:before{left:0;background:linear-gradient(90deg,#0d1016,transparent)}
+#caseStage .case-reel:after{left:50%;width:3px;transform:translateX(-50%);background:linear-gradient(180deg,#fff1b8,#e6b94f,#fff1b8);box-shadow:0 0 18px #f2d98c}
+#caseStage .reel-card{width:142px;height:138px;flex-basis:142px;border-color:#4b505b;background:linear-gradient(145deg,#2b3039,#151920);color:#f4dfaa}
+#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:76px}
+#caseStage .reel-card strong{font-size:10px}
+#caseStage #openCase{min-width:min(100%,290px);margin-top:8px;min-height:50px;border-radius:13px;font-size:14px;letter-spacing:.3px}
+#caseStage.rolling{box-shadow:0 0 0 1px #e4bd6455,0 0 55px #e4bd6428}
+#caseStage .case-result{max-width:560px;margin:18px auto 0;background:linear-gradient(145deg,#252219,#14171d);border-color:#d5ae59;box-shadow:0 14px 35px #0008}
+#caseStage .case-result-image{background:radial-gradient(circle,#51432a,#151820)}
+#caseItems{grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-top:12px}
+#caseItems .case-item{border-color:#363d49;background:linear-gradient(155deg,#20242c,#12161c);padding:11px;min-width:0}
+#caseItems .item-thumb,#caseItems .item-thumb-placeholder{height:92px;background:radial-gradient(circle,#41404a,#171a20)}
+#caseItems .case-item strong{font-size:11px;line-height:1.35;min-height:30px;overflow-wrap:anywhere}
+#caseItems .rarity{color:#d7c08d}
+#caseItems .case-chance{font-size:10px;color:#c4cbd5}
+#upgradeView>.section:first-child h2{font-size:23px;letter-spacing:-.5px}
+#upgradeView>.case-intro{border-color:#383d48;background:linear-gradient(115deg,#1b2029,#11141a);color:#b9c0cb}
+#upgradeView .upgrade-live-panel{border-color:#695632;background:radial-gradient(ellipse at 50% 0%,#3b3324 0,#1a1d24 58%,#101319 100%);box-shadow:0 18px 48px #0007}
+#upgradeView .upgrade-wheel-box{filter:drop-shadow(0 12px 20px #0009)}
+#upgradeView .upgrade-wheel{box-shadow:0 0 0 5px #292d35,0 0 38px #e4bd6430}
+#upgradeView .upgrade-wheel-pointer:before{background:linear-gradient(180deg,#fff9e7,#e2b64f);box-shadow:0 0 13px #f4d98a88}
+#upgradeView .upgrade-wheel-pointer:after{border-bottom-color:#fff1b9}
+#upgradeView .upgrade-live-controls .goldbtn{min-height:50px;font-size:14px;letter-spacing:.2px}
+#upgradeView #upgradeSourceInfo{border-color:#3b424d;background:linear-gradient(120deg,#1e222b,#12161c);border-radius:12px;padding:12px;color:#d2c49f}
+#upgradeView .upgrade-preset-panel{border-color:#3c414c;background:linear-gradient(145deg,#1b2028,#11151b)}
+#upgradeView .preset-row button{border-color:#434957;background:#222731;color:#e4d4ad}
+#upgradeView .preset-row button.active{background:linear-gradient(135deg,#f3dc98,#b98732);color:#171208;border-color:#f3dc98}
+#upgradeView .upgrade-target{border-color:#363d49;background:linear-gradient(155deg,#222832,#12161d);min-height:196px}
+#upgradeView .upgrade-target.selected{border-color:#e5bf68;box-shadow:0 0 0 1px #e5bf6866,0 10px 24px #e5bf6818}
+#upgradeView .upgrade-target img,#upgradeView .upgrade-image-fallback{height:104px;width:100%;object-fit:contain}
+#upgradeView .upgrade-image-fallback{display:grid;place-items:center;border-radius:10px;background:radial-gradient(circle,#44404a,#181b22);color:#e4c47d;font-size:25px;font-weight:1000;letter-spacing:-2px}
+#upgradeView .upgrade-target strong{min-height:32px;font-size:11px;line-height:1.35}
+#upgradeView .upgrade-target small{color:#d5c9ad}
+#upgradeView .upgrade-target-tools{border-color:#3a414c;background:linear-gradient(145deg,#1a1e26,#11151a)}
+#upgradeView .upgrade-target-tools .search,#upgradeView .skin-tools input,#upgradeView .skin-tools select{background:#10141a;border-color:#3b424d}
+#upgradeView .upgrade-result{background:linear-gradient(145deg,#252219,#14171d);border-color:#b9954e}
+@media(max-width:760px){
+ .case-catalog-toolbar{grid-template-columns:1fr}
+ .case-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+ .case-card-art{height:108px}
+ .case-card-info{padding:9px}
+ .case-card-info>strong{font-size:11px;min-height:31px}
+ #caseItems{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #caseStage{padding:18px 10px}
+ #caseStage .case-cover{height:145px}
+ #caseStage .reel-card{width:116px;height:124px;flex-basis:116px}
+ #caseStage .reel-card img,#caseStage .reel-image-placeholder{height:66px}
+ #upgradeView .upgrade-live-panel{position:relative;top:auto}
+}
+@media(max-width:390px){
+ .case-card-art{height:92px}
+ .case-card-kicker{font-size:7px;letter-spacing:.6px}
+ .case-card-info>strong{font-size:10px}
+ #caseItems{grid-template-columns:1fr 1fr}
+}
+
 </style>
 </head>
 <body><main>
@@ -290,8 +381,13 @@ main{max-width:1180px;padding:22px 22px 62px}
 </section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Открывай кейсы, получай предметы с изображением и рыночной ценой Lis-Skins / Market.CSGO в ₽. Их можно направить в апгрейд или обменять на виртуальный баланс. Предметы и баланс не являются реальными активами и не выводятся на карту.</div>
-<div id="caseCards" class="grid"><div class="empty">Загрузка каталога кейсов…</div></div>
+<div class="case-intro">Выбирай кейс, изучай содержимое и запускай открытие. Результат определяется сервером, а анимация показывает уже зафиксированный выигрыш. Все открытия сейчас виртуальные и бесплатные.</div>
+<div class="case-catalog-toolbar">
+ <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
+ <select id="caseSort" class="search" aria-label="Сортировка кейсов"><option value="featured">Рекомендуемые</option><option value="name">По названию</option><option value="items">Больше предметов</option><option value="newest">Сначала новые</option></select>
+</div>
+<div class="case-catalog-caption"><span id="caseCatalogCount">Загружаем кейсы…</span><span>CS2 · DEMO COLLECTION</span></div>
+<div id="caseCards" class="case-catalog-grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 <div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
 <button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
 <div class="muted" style="margin-top:7px">Один виртуальный кейс в день для режима «Апгрейд кейсов».</div>
@@ -454,19 +550,50 @@ async function loadHomeCaseHighlights(){
   host.querySelectorAll("[data-home-case]").forEach(b=>b.onclick=()=>{homeCasePendingId=Number(b.dataset.homeCase);switchTab("cases")});
  }catch(e){host.innerHTML='<div class="empty">Не удалось загрузить кейсы.</div>'}
 }
+let caseSearchTimer=null;
+function renderCaseCards(){
+ const host=$("caseCards");if(!host)return;
+ const q=($("caseSearch")?.value||"").trim().toLowerCase();
+ const sort=$("caseSort")?.value||"featured";
+ let list=casesData.filter(c=>!q||(c.title+" "+(c.description||"")).toLowerCase().includes(q));
+ if(sort==="name")list.sort((a,b)=>a.title.localeCompare(b.title,"ru"));
+ if(sort==="items")list.sort((a,b)=>(b.items_total||b.items?.length||0)-(a.items_total||a.items?.length||0));
+ if(sort==="newest")list.sort((a,b)=>Number(b.id)-Number(a.id));
+ $("caseCatalogCount").textContent=list.length+" из "+casesData.length+" кейсов";
+ if(!list.length){host.innerHTML='<div class="empty">По запросу ничего не найдено. Попробуй другое название.</div>';return}
+ host.innerHTML=list.map(c=>{
+  const count=Number(c.items_total||c.items?.length||0);
+  return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
+   '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
+   '<div class="case-card-info"><div class="case-card-kicker"><span>QR CASE SERIES</span><span>DEMO</span></div><strong>'+esc(c.title)+'</strong>'+
+   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>0 ₽</b></div></div></button>';
+ }).join("");
+ host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
+}
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
  $("caseStage").dataset.caseId=c.id;
- $("caseCards").querySelectorAll("[data-case-select]").forEach(b=>b.classList.toggle("selected",Number(b.dataset.caseSelect)===c.id));
- $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS<span>2</span></div>')+'<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description)+'</div><div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть демо-кейс</button><div id="caseResult"></div>';
- $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;renderCaseItems(c.items);if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
+ renderCaseCards();
+ $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true">':'<div class="case-emblem">CS<span>2</span></div>')+
+  '<div class="case-stage-kicker"><span>SELECTED CASE</span><span>DEMO · 0 ₽</span></div>'+
+  '<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</div>'+
+  '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов в составе</span><span>Результат фиксируется сервером</span></div>'+
+  '<div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть кейс</button><div id="caseResult"></div>';
+ $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;
+ renderCaseItems(c.items);
+ if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
 }
-async function loadCases(){try{const d=await api("/api/cases");casesData=d.items||[];if(!casesData.length){$("caseStage").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';return}
- $("caseCards").innerHTML=casesData.map(c=>'<button class="upgrade-target '+(c.id===casesData[0].id?'selected':'')+'" data-case-select="'+c.id+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Виртуальный кейс · бесплатно</small></button>').join("");
- document.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
- const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));
- selectCase((preferred||casesData[0]).id);homeCasePendingId=null;
- }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
+async function loadCases(){
+ try{
+  const d=await api("/api/cases");casesData=d.items||[];
+  $("caseSearch").oninput=()=>{clearTimeout(caseSearchTimer);caseSearchTimer=setTimeout(renderCaseCards,120)};
+  $("caseSort").onchange=renderCaseCards;
+  if(!casesData.length){$("caseCatalogCount").textContent="0 кейсов";$("caseCards").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';$("caseStage").innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
+  renderCaseCards();
+  const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));
+  selectCase((preferred||casesData[0]).id);homeCasePendingId=null;
+ }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}
+}
 
 function skinMetaTags(x){
  const tags=[];
@@ -668,7 +795,7 @@ function renderUpgradeTargets(){
  });
  $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":list.length+" на странице";
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=!selectedUpgradeTarget;return}
- $("upgradeTargets").innerHTML=list.map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'"><img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy"><strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.market_price_minor||x.value_minor,$("upgradeMode").value==="skin"?"₽":"V")+'</small>'+skinMetaTags(x)+'</button>').join("");
+ $("upgradeTargets").innerHTML=list.map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.market_price_minor||x.value_minor,$("upgradeMode").value==="skin"?"₽":"V")+'</small>'+skinMetaTags(x)+'</button>').join("");
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
