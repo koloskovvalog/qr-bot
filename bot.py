@@ -182,6 +182,23 @@ async def init_db():
                     ON loyalty_ledger(user_id, order_id, reason)
                     WHERE order_id IS NOT NULL;
 
+                CREATE TABLE IF NOT EXISTS wallet_accounts (
+                    user_id BIGINT PRIMARY KEY,
+                    balance_minor BIGINT NOT NULL DEFAULT 0 CHECK (balance_minor >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS wallet_ledger (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    inventory_id BIGINT NOT NULL UNIQUE,
+                    amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    reason TEXT NOT NULL DEFAULT 'virtual_skin_sale',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user
+                    ON wallet_ledger(user_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS cs2_steam_prices (
                     market_hash_name TEXT PRIMARY KEY,
                     lowest_price TEXT,
@@ -1027,19 +1044,29 @@ async def get_cs2_skins(request):
     sort = request.query.get("sort", "name")
     try:
         page = max(0, min(int(request.query.get("page", "0")), 10000))
-        limit = max(1, min(int(request.query.get("limit", "48")), 60))
+        limit = max(1, min(int(request.query.get("limit", "24")), 40))
     except ValueError:
         page, limit = 0, 48
 
-    items = catalog
-    if query:
-        items = [x for x in items if query in (
-            x["name"] + " " + x.get("weapon", "") + " " +
-            x.get("rarity", "") + " " + x.get("wear", "") + " " +
-            x.get("phase", "") +
-            (" StatTrak" if x.get("stattrak") else "") +
-            (" Souvenir" if x.get("souvenir") else "")
-        ).casefold()]
+    # Search-first UX: never dump the full 10k+ catalogue into the scrolling UI.
+    if len(query) < 2:
+        return web.json_response({
+            "items": [], "total": len(catalog), "matched": 0,
+            "page": 0, "limit": 24, "has_more": False,
+            "search_required": True, "price_currency": "RUB",
+            "price_source": "Steam Community Market",
+        })
+    terms = [term for term in query.split() if term]
+    items = [
+        item for item in catalog
+        if all(term in (
+            item["name"] + " " + item.get("base_name", "") + " " +
+            item.get("weapon", "") + " " + item.get("rarity", "") + " " +
+            item.get("wear", "") + " " + item.get("phase", "") +
+            (" StatTrak" if item.get("stattrak") else "") +
+            (" Souvenir" if item.get("souvenir") else "")
+        ).casefold() for term in terms)
+    ]
     if wear_filter:
         items = [x for x in items if x.get("wear", "").casefold() == wear_filter]
     if rarity_filter:
@@ -1133,6 +1160,7 @@ async def get_cs2_skins(request):
     return web.json_response({
         "items": enriched,
         "total": total,
+        "matched": total,
         "page": page,
         "limit": limit,
         "has_more": start + len(page_items) < total,
