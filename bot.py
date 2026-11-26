@@ -1539,19 +1539,37 @@ async def suggest_upgrade_target(request):
         """, source_id, user["id"])
         if not source:
             raise web.HTTPNotFound(text="Исходный скин не найден в инвентаре")
+        # Older case drops and inventory rows may predate market_hash_name.
+        # Resolve them against the canonical CS2 catalog using the exact item label,
+        # then persist the match additively so the user does not need to re-open a case.
+        source_market_name = source["market_hash_name"]
+        if not source_market_name:
+            source_label = str(source["item_name"] or "").strip().casefold()
+            matches = [
+                x for x in catalog
+                if str(x.get("name") or "").strip().casefold() == source_label
+                or str(x.get("base_name") or "").strip().casefold() == source_label
+            ]
+            if len(matches) == 1:
+                source_market_name = matches[0].get("market_hash_name")
+                if source_market_name:
+                    await conn.execute(
+                        "UPDATE user_inventory SET market_hash_name=$1 WHERE id=$2 AND user_id=$3 AND market_hash_name IS NULL",
+                        source_market_name, source_id, user["id"]
+                    )
         source_price = await conn.fetchrow("""
             SELECT lowest_price, fetched_at FROM cs2_steam_prices
             WHERE market_hash_name=$1 AND price_source <> 'steam'
-        """, source["market_hash_name"]) if source["market_hash_name"] else None
+        """, source_market_name) if source_market_name else None
         fresh_source = bool(source_price and
             (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
         source_value = steam_price_to_minor(source_price["lowest_price"]) if fresh_source else None
         if not source_value:
-            if not source.get("market_hash_name"):
-                raise web.HTTPBadRequest(text="У этого предмета нет точного Market Hash Name. Выберите другой скин из инвентаря.")
+            if not source_market_name:
+                raise web.HTTPBadRequest(text="Не удалось однозначно сопоставить этот предмет с каталогом CS2. Выберите другой скин.")
             if not APISKINS_API_KEY:
                 raise web.HTTPServiceUnavailable(text="Цены временно недоступны: не настроен ключ API Skins на сервере.")
-            queue_cs2_price_refresh([{"market_hash_name": source["market_hash_name"]}])
+            queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
             return web.json_response({
                 "pending": True,
                 "stage": "source_price",
@@ -1826,6 +1844,15 @@ async def get_my_profile(request):
             SELECT points_delta, reason, created_at FROM loyalty_ledger
             WHERE user_id=$1 ORDER BY id DESC LIMIT 30
         """, user["id"])
+        case_drops = await conn.fetch("""
+            SELECT co.id, co.item_name, co.rarity, co.created_at,
+                   c.title AS case_title, ci.image_url, ci.value_minor
+            FROM case_openings co
+            JOIN cases c ON c.id=co.case_id
+            LEFT JOIN case_items ci ON ci.id=co.item_id
+            WHERE co.user_id=$1
+            ORDER BY co.id DESC LIMIT 50
+        """, user["id"])
     return web.json_response({
         "user_id": user["id"], "referral_code": profile["referral_code"],
         "has_referrer": profile["referred_by"] is not None,
@@ -1833,6 +1860,12 @@ async def get_my_profile(request):
         "paid_orders_count": stats["paid_orders_count"], "referrals_count": referrals,
         "ledger": [{"points_delta": r["points_delta"], "reason": r["reason"],
                     "created_at": r["created_at"].isoformat()} for r in ledger],
+        "case_drops": [{
+            "id": r["id"], "item_name": r["item_name"], "rarity": r["rarity"],
+            "case_title": r["case_title"], "image_url": r["image_url"],
+            "value_minor": r["value_minor"],
+            "created_at": r["created_at"].isoformat()
+        } for r in case_drops],
         "points_rule": "1 балл за каждые 100 ₽ подтверждённого заказа."
     })
 
