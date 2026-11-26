@@ -858,7 +858,7 @@ async def open_case(request):
             }))
 
     return web.json_response({
-        "ok": True, "opening_id": opening_id, "case_title": case["title"],
+        "ok": True, "opening_id": opening_id, "case_id": case_id, "case_title": case["title"],
         "item": {
             "id": selected["id"], "name": selected["name"],
             "rarity": selected["rarity"],
