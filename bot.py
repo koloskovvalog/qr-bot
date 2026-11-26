@@ -269,6 +269,14 @@ async def init_db():
                 ) AS v(name, rarity, weight)
                 WHERE c.title = 'Премиум кейс'
                   AND NOT EXISTS (SELECT 1 FROM case_items ci WHERE ci.case_id = c.id);
+
+                UPDATE case_items SET value_minor = CASE
+                    WHEN lower(rarity) LIKE '%тайн%' OR lower(rarity) LIKE '%covert%' THEN 80000
+                    WHEN lower(rarity) LIKE '%засекр%' OR lower(rarity) LIKE '%classified%' THEN 30000
+                    WHEN lower(rarity) LIKE '%запрещ%' OR lower(rarity) LIKE '%restricted%' THEN 12000
+                    ELSE 5000
+                END
+                WHERE value_minor = 1000;
             """)
 
     logger.info("Database initialized and migrated")
@@ -512,6 +520,14 @@ async def create_order(request):
 
 
 async def get_cases(request):
+    try:
+        catalog_skins = await load_cs2_catalog("skins")
+        skin_images = {item["name"]: item["image_url"] for item in catalog_skins}
+        catalog_cases = await load_cs2_catalog("cases")
+        fallback_case_image = catalog_cases[0]["image_url"] if catalog_cases else None
+    except Exception:
+        skin_images = {}
+        fallback_case_image = None
     async with db.acquire() as conn:
         cases = await conn.fetch("""
             SELECT id, title, description, price_minor, currency, image_url
@@ -533,7 +549,7 @@ async def get_cases(request):
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
-            "image_url": item["image_url"], "value_minor": item["value_minor"],
+            "image_url": item["image_url"] or skin_images.get(item["name"]), "value_minor": item["value_minor"],
         })
     result = []
     for case in cases:
@@ -544,7 +560,7 @@ async def get_cases(request):
             "description": case["description"],
             "price_minor": case["price_minor"],
             "currency": case["currency"],
-            "image_url": case["image_url"],
+            "image_url": case["image_url"] or fallback_case_image,
             "demo_only": True,
             "items": [{
                 **item,
@@ -571,7 +587,7 @@ async def open_case(request):
             if case["price_minor"] != 0:
                 raise web.HTTPForbidden(text="Этот кейс пока недоступен для открытия")
             contents = await conn.fetch("""
-                SELECT id, name, rarity, weight
+                SELECT id, name, rarity, weight, image_url, value_minor
                 FROM case_items WHERE case_id = $1 ORDER BY id
             """, case_id)
             total = sum(row["weight"] for row in contents)
