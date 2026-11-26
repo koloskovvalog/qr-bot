@@ -530,6 +530,7 @@ async def get_cases(request):
         )
     except Exception:
         skin_images = {}
+        catalog_cases = []
         fallback_case_image = None
     async with db.acquire() as conn:
         async with conn.transaction():
