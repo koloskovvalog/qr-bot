@@ -694,11 +694,12 @@ async def get_cases(request):
             WHERE c.active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
-    # Warm a tiny first batch for visible case-content prices without flooding Steam.
+    # Gradually warm Steam RUB prices for every skin in the active cases.
+    # The worker remains throttled (~one request per 3.2s); the queue is bounded.
     queue_cs2_price_refresh([
         {"market_hash_name": item["market_hash_name"]}
         for item in items if item["market_hash_name"]
-    ][:8])
+    ])
 
     grouped = {}
     for item in items:
@@ -1144,9 +1145,9 @@ async def cs2_steam_price_worker():
 
 
 def queue_cs2_price_refresh(items):
-    """Queue only a small page-sized batch; duplicate names are coalesced."""
+    """Queue a bounded batch of missing/stale prices; duplicates are coalesced."""
     for item in items:
-        if CS2_PRICE_QUEUE.qsize() >= 250:
+        if CS2_PRICE_QUEUE.qsize() >= 1000:
             break
         market_name = item.get("market_hash_name")
         if market_name and market_name not in CS2_PRICE_QUEUED:
