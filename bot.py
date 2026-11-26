@@ -931,6 +931,26 @@ async def get_cs2_skins(request):
     if rarity_filter:
         items = [x for x in items if x.get("rarity", "").casefold() == rarity_filter]
 
+    if sort in {"price_asc", "price_desc"} and items:
+        all_names = [x["market_hash_name"] for x in items]
+        async with db.acquire() as conn:
+            all_price_rows = await conn.fetch("""
+                SELECT market_hash_name, lowest_price
+                FROM cs2_steam_prices
+                WHERE market_hash_name = ANY($1::text[])
+            """, all_names)
+        all_prices = {
+            r["market_hash_name"]: steam_price_to_minor(r["lowest_price"])
+            for r in all_price_rows
+        }
+        items.sort(
+            key=lambda x: (
+                all_prices.get(x["market_hash_name"]) is None,
+                all_prices.get(x["market_hash_name"]) or 0,
+            ),
+            reverse=(sort == "price_desc"),
+        )
+
     total = len(items)
     start = page * limit
     page_items = items[start:start + limit]
