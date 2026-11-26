@@ -1245,19 +1245,49 @@ async def admin_set_order_status(request):
         raise web.HTTPBadRequest(text="Недопустимый статус")
 
     async with db.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE orders
-            SET status = $1, updated_at = NOW()
-            WHERE id = $2
-            RETURNING user_id
-            """,
-            status,
-            order_id,
-        )
+        async with conn.transaction():
+            current = await conn.fetchrow("""
+                SELECT user_id, amount_minor, currency, status
+                FROM orders WHERE id=$1 FOR UPDATE
+            """, order_id)
+            if not current:
+                raise web.HTTPNotFound(text="Заказ не найден")
+            row = await conn.fetchrow("""
+                UPDATE orders SET status=$1, updated_at=NOW()
+                WHERE id=$2 RETURNING user_id
+            """, status, order_id)
 
-    if not row:
-        raise web.HTTPNotFound(text="Заказ не найден")
+            # Баллы начисляются только при первом ручном переводе заказа в paid.
+            if status == "paid" and current["status"] != "paid":
+                await ensure_customer_profile(conn, current["user_id"])
+                if current["currency"] == "RUB":
+                    points = int(current["amount_minor"]) // 10000
+                    if points > 0:
+                        await conn.execute("""
+                            INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                            VALUES($1, $2, $3, 'purchase_reward')
+                            ON CONFLICT DO NOTHING
+                        """, current["user_id"], order_id, points)
+                referred_by = await conn.fetchval(
+                    "SELECT referred_by FROM customer_profiles WHERE user_id=$1",
+                    current["user_id"],
+                )
+                if referred_by:
+                    paid_count = await conn.fetchval("""
+                        SELECT COUNT(*) FROM orders
+                        WHERE user_id=$1 AND status IN ('paid','delivered')
+                    """, current["user_id"])
+                    if paid_count == 1:
+                        await conn.execute("""
+                            INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                            VALUES($1, $2, 50, 'referral_reward')
+                            ON CONFLICT DO NOTHING
+                        """, current["user_id"], order_id)
+                        await conn.execute("""
+                            INSERT INTO loyalty_ledger(user_id, order_id, points_delta, reason)
+                            VALUES($1, $2, 100, 'referral_reward')
+                            ON CONFLICT DO NOTHING
+                        """, referred_by, order_id)
 
     await write_audit(
         user["id"],
