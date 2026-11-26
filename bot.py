@@ -576,6 +576,7 @@ async def get_cases(request):
             catalog_cases[0]["image_url"] if catalog_cases else None,
         )
     except Exception:
+        catalog_skins = []
         skin_images = {}
         catalog_cases = []
         fallback_case_image = None
