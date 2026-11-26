@@ -694,6 +694,11 @@ async def get_cases(request):
             WHERE c.active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
+    # Warm a tiny first batch for visible case-content prices without flooding Steam.
+    queue_cs2_price_refresh([
+        {"market_hash_name": item["market_hash_name"]}
+        for item in items if item["market_hash_name"]
+    ][:8])
 
     grouped = {}
     for item in items:
