@@ -784,7 +784,11 @@ def create_app():
     setup_application(app, dp, bot=bot)
 
     # Static Mini App
-    app.router.add_static("/", path="static", show_index=True)
+    async def index_handler(request):
+    return web.FileResponse("static/index.html")
+
+app.router.add_get("/", index_handler)
+app.router.add_static("/", path="static", show_index=False)
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
