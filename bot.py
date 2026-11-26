@@ -262,6 +262,7 @@ async def init_db():
                 ALTER TABLE case_items ADD COLUMN IF NOT EXISTS stattrak BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE case_items ADD COLUMN IF NOT EXISTS souvenir BOOLEAN NOT NULL DEFAULT FALSE;
                 ALTER TABLE case_items ADD COLUMN IF NOT EXISTS phase TEXT;
+                ALTER TABLE case_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
                 CREATE UNIQUE INDEX IF NOT EXISTS case_items_market_hash_unique
                     ON case_items(case_id, market_hash_name)
                     WHERE market_hash_name IS NOT NULL;
@@ -605,8 +606,10 @@ async def get_cases(request):
         fallback_case_image = None
     skins_by_crate = {}
     for skin in catalog_skins:
-        for crate_id in skin.get("crate_ids", []):
-            skins_by_crate.setdefault(crate_id, []).append(skin)
+        crate_keys = set(skin.get("crate_ids", []))
+        crate_keys.update(skin.get("crate_names", []))
+        for crate_key in crate_keys:
+            skins_by_crate.setdefault(str(crate_key).strip().casefold(), []).append(skin)
 
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -633,8 +636,34 @@ async def get_cases(request):
                     WHERE id=$1
                 """, catalog_case_id, catalog_case["image_url"])
 
-                # Seed each crate once; preserve all legacy contents and avoid repeated bulk inserts.
-                crate_skins = skins_by_crate.get(str(catalog_case["id"]), [])
+                # Match source crate relationships by stable ID and display name.
+                # Earlier builds copied Premium items into crates with missing relationships;
+                # deactivate those incorrect rows without deleting opening history.
+                case_keys = {
+                    str(catalog_case.get("id") or "").strip().casefold(),
+                    str(catalog_case.get("name") or "").strip().casefold(),
+                }
+                crate_skins_by_key = [
+                    skins_by_crate.get(key, []) for key in case_keys if key
+                ]
+                crate_skins_map = {}
+                for group in crate_skins_by_key:
+                    for skin in group:
+                        crate_skins_map[skin["market_hash_name"]] = skin
+                crate_skins = list(crate_skins_map.values())
+                if catalog_case["name"].casefold() != "премиум кейс":
+                    await conn.execute("""
+                        UPDATE case_items ci
+                        SET is_active=FALSE
+                        WHERE ci.case_id=$1
+                          AND ci.market_hash_name IS NULL
+                          AND EXISTS (
+                              SELECT 1 FROM cases premium
+                              JOIN case_items pi ON pi.case_id=premium.id
+                              WHERE premium.title='Премиум кейс'
+                                AND pi.name=ci.name
+                          )
+                    """, catalog_case_id)
                 already_seeded = await conn.fetchval("""
                     SELECT EXISTS(
                         SELECT 1 FROM case_items
@@ -672,19 +701,12 @@ async def get_cases(request):
                         WHERE market_hash_name IS NOT NULL DO NOTHING
                     """, records)
                 elif not crate_skins:
-                    # Fallback for crates without item membership in the upstream dataset.
-                    await conn.execute("""
-                        INSERT INTO case_items(case_id, name, rarity, weight, image_url, value_minor)
-                        SELECT $1, ci.name, ci.rarity, ci.weight, ci.image_url, ci.value_minor
-                        FROM case_items ci
-                        WHERE ci.case_id = (
-                            SELECT id FROM cases WHERE title='Премиум кейс' ORDER BY id LIMIT 1
-                        )
-                        AND NOT EXISTS (
-                            SELECT 1 FROM case_items existing
-                            WHERE existing.case_id=$1 AND existing.name=ci.name
-                        )
-                    """, catalog_case_id)
+                    # Never borrow Premium contents: an empty source mapping must stay empty
+                    # until the real crate-to-skin relationship is resolved.
+                    logger.warning(
+                        "No source skin membership found for CS2 crate %s (%s)",
+                        catalog_case.get("name"), catalog_case.get("id")
+                    )
         cases = await conn.fetch("""
             SELECT id, title, description, price_minor, currency, image_url
             FROM cases
@@ -699,8 +721,8 @@ async def get_cases(request):
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=ci.market_hash_name
-                AND p.price_source IN ('lis_skins','market_csgo')
-            WHERE c.active = TRUE
+                AND p.price_source <> 'steam'
+            WHERE c.active = TRUE AND ci.is_active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
     # Gradually warm Steam RUB prices for every skin in the active cases.
@@ -764,7 +786,7 @@ async def open_case(request):
             contents = await conn.fetch("""
                 SELECT id, name, rarity, weight, image_url, value_minor,
                        market_hash_name, wear, stattrak, souvenir, phase
-                FROM case_items WHERE case_id = $1 ORDER BY id
+                FROM case_items WHERE case_id = $1 AND is_active = TRUE ORDER BY id
             """, case_id)
             total = sum(row["weight"] for row in contents)
             if total <= 0:
@@ -782,14 +804,15 @@ async def open_case(request):
                 cached_skins = CS2_CATALOG_CACHE.get("skins", [])
                 selected["image_url"] = next(
                     (item["image_url"] for item in cached_skins
-                     if item["name"] == selected["name"]),
+                     if item["market_hash_name"] == selected.get("market_hash_name")
+                     or item["name"].casefold() == selected["name"].casefold()),
                     None,
                 )
             market_minor = None
             if selected.get("market_hash_name"):
                 price_row = await conn.fetchrow("""
                     SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1 AND price_source IN ('lis_skins','market_csgo')
+                    WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, selected["market_hash_name"])
                 fresh = bool(price_row and
                     (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
@@ -1052,6 +1075,11 @@ async def load_cs2_catalog(kind: str):
                     str(crate.get("id")) for crate in (entry.get("crates") or [])
                     if isinstance(crate, dict) and crate.get("id") is not None
                 ],
+                "crate_names": [
+                    str(crate.get("name")).strip().casefold()
+                    for crate in (entry.get("crates") or [])
+                    if isinstance(crate, dict) and crate.get("name")
+                ],
                 "image_url": image_url,
                 "value_minor": cs2_virtual_value(rarity),
                 "item_type": "skin" if kind == "skins" else "case",
@@ -1130,7 +1158,7 @@ async def cs2_steam_price_worker():
                 else:
                     payload = {
                         "market_hash_names": batch,
-                        "providers": ["lis_skins", "market_csgo"],
+                        "providers": ["lis_skins", "market_csgo", "cs_float", "skinport", "dmarket", "waxpeer"],
                     }
                     async with session.post(
                         "https://api.apiskins.com/v1/offers/batch",
@@ -1150,8 +1178,13 @@ async def cs2_steam_price_worker():
                                     for offer in item.get("offers", [])
                                     if isinstance(offer, dict)
                                 }
-                                provider = "lis_skins" if by_provider.get("lis_skins") else (
-                                    "market_csgo" if by_provider.get("market_csgo") else None
+                                provider_priority = (
+                                    "lis_skins", "market_csgo", "cs_float",
+                                    "skinport", "dmarket", "waxpeer"
+                                )
+                                provider = next(
+                                    (name for name in provider_priority if by_provider.get(name) is not None),
+                                    None,
                                 )
                                 usd_price = by_provider.get(provider) if provider else None
                                 if not usd_price:
@@ -1328,7 +1361,7 @@ async def get_cs2_skins(request):
             SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
-              AND price_source IN ('lis_skins','market_csgo')
+              AND price_source <> 'steam'
         """, names) if names else []
     prices = {row["market_hash_name"]: row for row in price_rows}
 
