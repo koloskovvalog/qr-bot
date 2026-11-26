@@ -524,7 +524,10 @@ async def get_cases(request):
         catalog_skins = await load_cs2_catalog("skins")
         skin_images = {item["name"]: item["image_url"] for item in catalog_skins}
         catalog_cases = await load_cs2_catalog("cases")
-        fallback_case_image = catalog_cases[0]["image_url"] if catalog_cases else None
+        fallback_case_image = next(
+            (item["image_url"] for item in catalog_cases if "case" in item["name"].lower()),
+            catalog_cases[0]["image_url"] if catalog_cases else None,
+        )
     except Exception:
         skin_images = {}
         fallback_case_image = None
@@ -748,7 +751,10 @@ async def claim_demo_case(request):
         raise web.HTTPBadRequest(text="Некорректный ID кейса")
     try:
         catalog_cases = await load_cs2_catalog("cases")
-        fallback_image = catalog_cases[0]["image_url"] if catalog_cases else None
+        fallback_image = next(
+            (item["image_url"] for item in catalog_cases if "case" in item["name"].lower()),
+            catalog_cases[0]["image_url"] if catalog_cases else None,
+        )
     except Exception:
         fallback_image = None
     async with db.acquire() as conn:
