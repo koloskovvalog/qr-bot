@@ -637,6 +637,7 @@ async def open_case(request):
                 if roll < cursor:
                     selected = item
                     break
+            selected = dict(selected)
             if not selected["image_url"]:
                 cached_skins = CS2_CATALOG_CACHE.get("skins", [])
                 selected["image_url"] = next(
