@@ -1,0 +1,49 @@
+name: Validate QR BOT PRO
+
+on:
+  push:
+    branches:
+      - qr-bot-pro-premium
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  python-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python source
+        run: python -m py_compile bot.py
+
+  miniapp-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validate HTML and inline JavaScript
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+
+          html = Path("static/index.html").read_text(encoding="utf-8")
+          class Validator(HTMLParser):
+              pass
+          Validator().feed(html)
+          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+          if not scripts:
+              raise SystemExit("No inline application script found")
+          Path("/tmp/miniapp.js").write_text(scripts[-1], encoding="utf-8")
+          print("HTML parsed; inline JavaScript extracted")
+          PY
+          node --check /tmp/miniapp.js
