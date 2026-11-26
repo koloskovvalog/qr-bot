@@ -488,8 +488,8 @@ function renderUpgradeTargets(){
  const list=upgradeTargets.filter(x=>{
   const price=Number(x.market_price_minor||0);
   const targetValue=$("upgradeMode").value==="skin"?price:Number(x.value_minor||0);
-  const sourceValue=Number(source?.market_price_minor||source?.value_minor||0);
-  return (!source||targetValue>sourceValue)&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
+  const sourceValue=Number($("upgradeMode").value==="skin"?(source?.market_price_minor||0):(source?.value_minor||0));
+  return (!source||(!sourceValue?false:targetValue>sourceValue))&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
  });
  $("upgradeTargetCount").textContent=list.length+" на этой странице";
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=true;return}
@@ -504,7 +504,7 @@ function renderUpgradeTargets(){
 function renderUpgradeChance(){
  const source=currentUpgradeSource();
  if(!source||!selectedUpgradeTarget){$("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";$("upgradeWheel").style.setProperty("--chance","0%");$("upgradeWheelStatus").textContent="Выбери предмет и цель — колесо покажет шанс";$("upgradeTargetInfo").textContent="Выбери цель улучшения";$("doUpgrade").disabled=true;return}
- const sourceValue=Number(source.market_price_minor||source.value_minor||0);
+ const sourceValue=Number($("upgradeMode").value==="skin"?source.market_price_minor:source.value_minor);
  const targetValue=Number($("upgradeMode").value==="skin"?selectedUpgradeTarget.market_price_minor:selectedUpgradeTarget.value_minor);
  if(!sourceValue||!targetValue){$("upgradeChance").textContent="Цена уточняется";$("doUpgrade").disabled=true;return}
  const chance=Math.min(90,Math.max(1,Math.round(sourceValue/targetValue*7500)/100));
