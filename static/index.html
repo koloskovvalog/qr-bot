@@ -209,6 +209,43 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
  #upgradeView #upgradeTargets{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 
+
+/* QR BOT PRO · Caser-inspired storefront phase 1 */
+:root{--bg:#090a0d;--panel:#14161b;--panel2:#1b1e25;--line:#30343d;--gold:#e6b94f;--gold2:#ffda78;--muted:#9ba2af;--white:#f5f6f8}
+body{background:radial-gradient(ellipse at 50% -18%,#252a36 0,#111319 38%,#090a0d 78%);color:var(--white)}
+main{max-width:1180px;padding:22px 22px 62px}
+.top{position:sticky;top:0;z-index:10;margin:0 -22px 20px;padding:14px 22px;background:#0b0c10eF;border-bottom:1px solid #282c34;backdrop-filter:blur(18px)}
+.brand{font-size:21px;letter-spacing:1.6px}
+.pill{border-color:#5a4827;background:#1c1912}
+.hero{border-color:#393d47;border-radius:20px;background:linear-gradient(112deg,#222631,#151820 58%,#17140e);padding:30px 32px;margin-bottom:18px}
+.hero:after{content:"";width:240px;height:240px;right:4%;top:-65px;border-radius:50%;background:radial-gradient(circle,#e6b94f22,transparent 68%);font-size:0}
+.hero h1{max-width:580px;font-size:clamp(28px,4vw,42px);letter-spacing:-.8px}
+.hero p{max-width:560px}
+.ux-home{grid-template-columns:1.35fr .65fr;gap:14px}
+.ux-welcome,.ux-shortcuts{border-color:#30343d;background:linear-gradient(145deg,#1b1e25,#111319);border-radius:16px}
+.ux-shortcut{border-color:#383d48;background:#171a21;color:#e9d39c}
+.home-cases-section{margin:22px 0 18px}
+.home-case-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.home-case-card{min-width:0;text-align:left;border:1px solid #343943;border-radius:16px;padding:12px;background:linear-gradient(155deg,#20232b,#121419 82%);color:var(--white);display:flex;flex-direction:column;gap:8px;transition:transform .18s,border-color .18s,box-shadow .18s}
+.home-case-card:hover{border-color:#a9863f;transform:translateY(-2px);box-shadow:0 12px 28px #0006}
+.home-case-card img,.home-case-art{width:100%;height:118px;object-fit:contain;border-radius:11px;background:radial-gradient(circle at 50% 45%,#3b3426,#17191f 72%)}
+.home-case-art{display:grid;place-items:center;color:#e9c66e;font-weight:1000;font-size:30px;letter-spacing:-2px}
+.home-case-card strong{font-size:13px;line-height:1.35;min-height:34px}
+.home-case-card small{display:flex;justify-content:space-between;color:#c5a75f;font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
+.text-link{border:0;background:transparent;color:#e9c66e;font-size:11px;font-weight:900;padding:8px}
+.section h2{font-size:19px;letter-spacing:-.2px}
+.search,.skin-tools input,.skin-tools select{background:#101218;border-color:#343943}
+.product,.skin-card,.case-item,.inventory-item{border-color:#30343d;background:linear-gradient(155deg,#1b1e25,#111319 85%)}
+.product .art{background:radial-gradient(circle at 75% 20%,#826a32,#302617 48%,#17191f)}
+.bottom-nav{background:#0b0c10f2;border-color:#30343d}
+.bottom-nav button.active{background:#29251b;color:#ffda78}
+.case-stage{border-color:#766039;background:radial-gradient(circle at 50% 20%,#3d3320,#1b1d24 58%,#101217)}
+.upgrade-panel,.upgrade-target-tools{border-color:#343943;background:linear-gradient(145deg,#191c23,#101217)}
+.upgrade-target{border-color:#343943;background:linear-gradient(155deg,#22252d,#12151a 80%)}
+.notice{border-color:#363a43;background:#12151a}
+@media(max-width:760px){main{padding:14px 12px 70px}.top{margin:0 -12px 14px;padding:12px}.hero{padding:20px}.ux-home{grid-template-columns:1fr}.home-case-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.home-case-card{padding:9px}.home-case-card img,.home-case-art{height:92px}.home-case-card strong{font-size:11px}.section h2{font-size:16px}}
+@media(min-width:761px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.case-items{grid-template-columns:repeat(4,minmax(0,1fr))}.inventory{grid-template-columns:repeat(2,minmax(0,1fr))}.upgrade-live-panel{max-width:900px;margin-left:auto!important;margin-right:auto!important}}
+
 </style>
 </head>
 <body><main>
@@ -225,6 +262,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <button class="ux-shortcut" data-go="orders"><span>▤</span>Заказы</button>
  </div>
 </div>
+<section class="home-cases-section">
+ <div class="section"><h2>Популярные CS2-кейсы</h2><button class="text-link" type="button" data-go="cases">Все кейсы →</button></div>
+ <div id="homeCaseGrid" class="home-case-grid"><div class="empty">Загружаем кейсы…</div></div>
+</section>
 <div class="ux-hint"><strong>Как начать:</strong> выбери товар в каталоге или открой бесплатный демо-кейс, затем попробуй апгрейд в отдельной вкладке.</div>
 <div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
@@ -403,6 +444,16 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(orderStatusLabel(o.status))+'</div><div class="muted">'+new Date(o.created_at).toLocaleString("ru-RU")+'</div>'+((["paid","delivered","cancelled","refunded"].includes(o.status))?"":'<button class="buy" data-demo-pay="'+o.id+'">Создать демо-платёж</button>')+'</div>').join("");document.querySelectorAll("[data-demo-pay]").forEach(b=>b.onclick=()=>createDemoPayment(Number(b.dataset.demoPay)))}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
+let homeCasePendingId=null;
+async function loadHomeCaseHighlights(){
+ const host=$("homeCaseGrid");if(!host)return;
+ try{
+  const d=await api("/api/cases");casesData=d.items||[];
+  if(!casesData.length){host.innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
+  host.innerHTML=casesData.slice(0,8).map(c=>'<button class="home-case-card" type="button" data-home-case="'+esc(c.id)+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy">':'<div class="home-case-art">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Открыть кейс <span>→</span></small></button>').join("");
+  host.querySelectorAll("[data-home-case]").forEach(b=>b.onclick=()=>{homeCasePendingId=Number(b.dataset.homeCase);switchTab("cases")});
+ }catch(e){host.innerHTML='<div class="empty">Не удалось загрузить кейсы.</div>'}
+}
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
  $("caseStage").dataset.caseId=c.id;
@@ -413,7 +464,8 @@ function selectCase(caseId){
 async function loadCases(){try{const d=await api("/api/cases");casesData=d.items||[];if(!casesData.length){$("caseStage").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';return}
  $("caseCards").innerHTML=casesData.map(c=>'<button class="upgrade-target '+(c.id===casesData[0].id?'selected':'')+'" data-case-select="'+c.id+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Виртуальный кейс · бесплатно</small></button>').join("");
  document.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
- selectCase(casesData[0].id);
+ const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));
+ selectCase((preferred||casesData[0]).id);homeCasePendingId=null;
  }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
 
 function skinMetaTags(x){
@@ -664,5 +716,5 @@ window.simulateDemoPayment=async(id,outcome)=>{try{const d=await api("/api/admin
 window.setStatus=async id=>{try{const status=$("st"+id).value;if(status==="paid"&&!confirm("Вы лично проверили фактическое поступление оплаты?"))return;await api("/api/admin/orders/"+id+"/status",{method:"POST",body:JSON.stringify({status})});toast("Статус изменён.");adminInit()}catch(e){toast(e.message)}};
 $("addProduct").onclick=async()=>{try{await api("/api/admin/products",{method:"POST",body:JSON.stringify({title:$("pTitle").value,description:$("pDesc").value,price:$("pPrice").value,currency:$("pCurrency").value})});$("pTitle").value="";$("pDesc").value="";$("pPrice").value="";toast("Товар добавлен.");loadProducts()}catch(e){toast(e.message)}};
 document.querySelectorAll("[data-nav],[data-go]").forEach(b=>b.onclick=()=>switchTab(b.dataset.nav||b.dataset.go));
-loadProducts();if(initData){showOrders();adminInit()}
+loadProducts();loadHomeCaseHighlights();if(initData){showOrders();adminInit()}
 </script></body></html>
