@@ -8,6 +8,7 @@ import time
 import secrets
 import re
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl
 
 import asyncpg
@@ -685,20 +686,27 @@ async def get_cases(request):
         items = await conn.fetch("""
             SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight,
                    ci.image_url, ci.value_minor, ci.market_hash_name, ci.wear,
-                   ci.stattrak, ci.souvenir, ci.phase
+                   ci.stattrak, ci.souvenir, ci.phase,
+                   p.lowest_price, p.fetched_at
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
+            LEFT JOIN cs2_steam_prices p ON p.market_hash_name=ci.market_hash_name
             WHERE c.active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
 
     grouped = {}
     for item in items:
+        fresh = bool(item["fetched_at"] and
+                     (datetime.now(timezone.utc) - item["fetched_at"]).total_seconds() <= 43200)
+        market_minor = steam_price_to_minor(item["lowest_price"]) if fresh else None
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
             "image_url": item["image_url"] or skin_images.get(item["name"]),
             "value_minor": item["value_minor"],
+            "market_price_minor": market_minor,
+            "market_price": item["lowest_price"] if fresh else None,
             "market_hash_name": item["market_hash_name"],
             "wear": item["wear"], "stattrak": item["stattrak"],
             "souvenir": item["souvenir"], "phase": item["phase"],
