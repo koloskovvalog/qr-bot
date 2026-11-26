@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+import secrets
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl
 
@@ -132,6 +133,51 @@ async def init_db():
                 FROM products p
                 WHERE o.product_id = p.id
                   AND o.product_title = '';
+
+                CREATE TABLE IF NOT EXISTS cases (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    price_minor BIGINT NOT NULL DEFAULT 0,
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS case_items (
+                    id BIGSERIAL PRIMARY KEY,
+                    case_id BIGINT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    rarity TEXT NOT NULL DEFAULT 'Обычный',
+                    weight INTEGER NOT NULL CHECK (weight > 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS case_openings (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    case_id BIGINT NOT NULL REFERENCES cases(id),
+                    item_id BIGINT NOT NULL REFERENCES case_items(id),
+                    item_name TEXT NOT NULL,
+                    rarity TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                INSERT INTO cases(title, description, price_minor, currency, active)
+                SELECT 'Премиум кейс', 'Демонстрационное открытие CS2 — только виртуальные предметы', 0, 'RUB', TRUE
+                WHERE NOT EXISTS (SELECT 1 FROM cases);
+
+                INSERT INTO case_items(case_id, name, rarity, weight)
+                SELECT c.id, v.name, v.rarity, v.weight
+                FROM cases c
+                CROSS JOIN (VALUES
+                    ('AK-47 | Slate', 'Армейское качество', 6000),
+                    ('AWP | Atheris', 'Запрещённое', 2500),
+                    ('USP-S | Cortex', 'Засекреченное', 1200),
+                    ('Karambit | Doppler', 'Тайное', 300)
+                ) AS v(name, rarity, weight)
+                WHERE c.title = 'Премиум кейс'
+                  AND NOT EXISTS (SELECT 1 FROM case_items ci WHERE ci.case_id = c.id);
             """)
 
     logger.info("Database initialized and migrated")
@@ -374,6 +420,174 @@ async def create_order(request):
     })
 
 
+async def get_cases(request):
+    async with db.acquire() as conn:
+        cases = await conn.fetch("""
+            SELECT id, title, description, price_minor, currency
+            FROM cases
+            WHERE active = TRUE
+            ORDER BY id
+        """)
+        items = await conn.fetch("""
+            SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight
+            FROM case_items ci
+            JOIN cases c ON c.id = ci.case_id
+            WHERE c.active = TRUE
+            ORDER BY ci.case_id, ci.weight DESC
+        """)
+
+    grouped = {}
+    for item in items:
+        grouped.setdefault(item["case_id"], []).append({
+            "id": item["id"], "name": item["name"],
+            "rarity": item["rarity"], "weight": item["weight"],
+        })
+    result = []
+    for case in cases:
+        contents = grouped.get(case["id"], [])
+        total = sum(x["weight"] for x in contents)
+        result.append({
+            "id": case["id"], "title": case["title"],
+            "description": case["description"],
+            "price_minor": case["price_minor"],
+            "currency": case["currency"], "demo_only": True,
+            "items": [{
+                **item,
+                "chance_percent": round(item["weight"] * 100 / total, 2) if total else 0
+            } for item in contents],
+        })
+    return web.json_response({"items": result})
+
+
+async def open_case(request):
+    user = verify_telegram_user(request)
+    try:
+        case_id = int(request.match_info["case_id"])
+    except ValueError:
+        raise web.HTTPBadRequest(text="Некорректный ID кейса")
+
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            case = await conn.fetchrow("""
+                SELECT id, title, price_minor, active
+                FROM cases WHERE id = $1 FOR SHARE
+            """, case_id)
+            if not case or not case["active"]:
+                raise web.HTTPNotFound(text="Кейс не найден")
+            if case["price_minor"] != 0:
+                raise web.HTTPForbidden(text="Этот кейс пока недоступен для открытия")
+            contents = await conn.fetch("""
+                SELECT id, name, rarity, weight
+                FROM case_items WHERE case_id = $1 ORDER BY id
+            """, case_id)
+            total = sum(row["weight"] for row in contents)
+            if total <= 0:
+                raise web.HTTPConflict(text="В кейсе пока нет предметов")
+            roll = secrets.randbelow(total)
+            cursor = 0
+            selected = contents[-1]
+            for item in contents:
+                cursor += item["weight"]
+                if roll < cursor:
+                    selected = item
+                    break
+            opening_id = await conn.fetchval("""
+                INSERT INTO case_openings(user_id, case_id, item_id, item_name, rarity)
+                VALUES($1, $2, $3, $4, $5) RETURNING id
+            """, user["id"], case_id, selected["id"], selected["name"], selected["rarity"])
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id, action, details)
+                VALUES($1, 'case_opened', $2::jsonb)
+            """, user["id"], json.dumps({
+                "opening_id": opening_id, "case_id": case_id,
+                "item_id": selected["id"], "roll": roll, "total_weight": total
+            }))
+
+    return web.json_response({
+        "ok": True, "opening_id": opening_id, "case_title": case["title"],
+        "item": {
+            "id": selected["id"], "name": selected["name"],
+            "rarity": selected["rarity"],
+            "chance_percent": round(selected["weight"] * 100 / total, 2),
+        },
+        "demo_only": True,
+        "message": "Виртуальный предмет симуляции; не является предметом Steam."
+    })
+
+
+async def get_inventory(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, case_id, item_name, rarity, created_at
+            FROM case_openings
+            WHERE user_id = $1 ORDER BY id DESC LIMIT 100
+        """, user["id"])
+    return web.json_response({"items": [{
+        "id": row["id"], "case_id": row["case_id"],
+        "item_name": row["item_name"], "rarity": row["rarity"],
+        "created_at": row["created_at"].isoformat()
+    } for row in rows]})
+
+
+async def create_bulk_orders(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        raw_ids = data.get("product_ids")
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 20:
+            raise ValueError()
+        product_ids = [int(value) for value in raw_ids]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Передайте от 1 до 20 корректных product_ids")
+
+    created = []
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            for product_id in product_ids:
+                product = await conn.fetchrow("""
+                    SELECT id, title, price_minor, currency
+                    FROM products
+                    WHERE id = $1 AND active = TRUE
+                    FOR SHARE
+                """, product_id)
+                if not product:
+                    raise web.HTTPNotFound(text=f"Товар {product_id} не найден или отключён")
+                order_id = await conn.fetchval("""
+                    INSERT INTO orders(user_id, username, product_id, product_title, amount_minor, currency)
+                    VALUES($1, $2, $3, $4, $5, $6)
+                    RETURNING id
+                """, user["id"], user.get("username"), product["id"],
+                     product["title"], product["price_minor"], product["currency"])
+                created.append({
+                    "order_id": order_id, "title": product["title"],
+                    "amount_minor": product["price_minor"], "currency": product["currency"]
+                })
+                await conn.execute("""
+                    INSERT INTO audit_log(actor_id, action, details)
+                    VALUES($1, 'order_created', $2::jsonb)
+                """, user["id"], json.dumps({
+                    "order_id": order_id, "product_id": product_id, "source": "cart"
+                }))
+
+    summary = "\n".join(
+        f"#{x['order_id']} — {x['title']} ({format_price(x['amount_minor'], x['currency'])})"
+        for x in created
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🛒 Новые заказы из корзины ({len(created)})\n"
+                f"Покупатель: {user.get('first_name', '')} (@{user.get('username') or 'не указан'})\n"
+                f"Telegram ID: {user['id']}\n\n{summary}"
+            )
+        except Exception:
+            logger.exception("Could not notify admin %s", admin_id)
+
+    return web.json_response({"ok": True, "orders": created, "count": len(created)})
+
+
 async def get_my_orders(request):
     user = verify_telegram_user(request)
 
@@ -598,7 +812,7 @@ async def cmd_start(message: types.Message):
     await message.answer(
         "Добро пожаловать в QR BOT PRO!\n\n"
         "Здесь вы можете посмотреть каталог цифровых товаров и услуг, "
-        "оформить заказ и отслеживать его статус.\n\n"
+        "оформить заказ, отслеживать его статус и открыть демо-кейсы CS2.\n\n"
         "Для начала нажмите кнопку ниже.",
         reply_markup=keyboard,
     )
@@ -800,7 +1014,11 @@ def create_app():
     app.router.add_get("/health", health)
     app.router.add_get("/api/products", get_products)
     app.router.add_post("/api/orders", create_order)
+    app.router.add_post("/api/orders/bulk", create_bulk_orders)
     app.router.add_get("/api/orders", get_my_orders)
+    app.router.add_get("/api/cases", get_cases)
+    app.router.add_post("/api/cases/{case_id}/open", open_case)
+    app.router.add_get("/api/inventory", get_inventory)
 
     # Admin endpoints
     app.router.add_post("/api/admin/products", admin_add_product)
