@@ -259,7 +259,7 @@ function renderSkinCatalog(){
  $("loadMoreSkins").disabled=skinCatalogBusy;
 }
 async function loadSkinCatalog(reset=true){
- if(skinCatalogBusy)return;
+ if(skinCatalogBusy){clearTimeout(skinSearchTimer);skinSearchTimer=setTimeout(()=>loadSkinCatalog(reset),120);return;}
  if(reset){skinCatalogPage=0;skinCatalogItems=[];}
  skinCatalogBusy=true;renderSkinCatalog();
  try{
