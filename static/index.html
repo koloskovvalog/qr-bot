@@ -408,7 +408,7 @@ function selectCase(caseId){
  $("caseStage").dataset.caseId=c.id;
  $("caseCards").querySelectorAll("[data-case-select]").forEach(b=>b.classList.toggle("selected",Number(b.dataset.caseSelect)===c.id));
  $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS<span>2</span></div>')+'<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description)+'</div><div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">✦ Открыть демо-кейс</button><div id="caseResult"></div>';
- $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;renderCaseItems(c.items);
+ $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length;$("claimDemoCase").onclick=claimDemoCase;renderCaseItems(c.items);if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
 }
 async function loadCases(){try{const d=await api("/api/cases");casesData=d.items||[];if(!casesData.length){$("caseStage").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';return}
  $("caseCards").innerHTML=casesData.map(c=>'<button class="upgrade-target '+(c.id===casesData[0].id?'selected':'')+'" data-case-select="'+c.id+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'">':'<div class="case-emblem">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Виртуальный кейс · бесплатно</small></button>').join("");
