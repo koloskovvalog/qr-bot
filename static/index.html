@@ -28,7 +28,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .case-caption{font-size:11px;letter-spacing:3px;color:var(--gold2);font-weight:900;margin:10px}.case-sub{font-size:12px;color:#c6bead;margin:0 0 18px}
 .case-stage.rolling .case-emblem{animation:casePulse .22s infinite alternate}.case-stage.rolling{box-shadow:0 0 34px #d8b45a22}
 @keyframes casePulse{from{transform:scale(.94) rotate(-3deg);filter:brightness(.8)}to{transform:scale(1.08) rotate(3deg);filter:brightness(1.5)}}
-.case-reel{display:none;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning{display:block}.reel-track{display:flex;gap:8px;width:max-content;animation:reelSlide 1.55s cubic-bezier(.12,.72,.2,1) forwards}.reel-card{width:128px;min-height:62px;display:grid;place-items:center;text-align:center;padding:9px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}@keyframes reelSlide{from{transform:translateX(0)}to{transform:translateX(-720px)}}
+.case-reel{display:none;position:relative;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning,.case-reel.stopping{display:block}.case-reel::after{content:"";position:absolute;z-index:5;top:0;bottom:0;left:50%;width:3px;transform:translateX(-50%);background:var(--gold2);box-shadow:0 0 12px var(--gold);pointer-events:none}.reel-track{display:flex;gap:8px;width:max-content;transform:translateX(0)}.case-reel.spinning .reel-track{animation:reelPreview .42s linear infinite}.case-reel.stopping .reel-track{transform:translateX(var(--reel-stop));transition:transform 2.45s cubic-bezier(.08,.72,.12,1)}.reel-card{width:128px;height:116px;flex:0 0 128px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px;text-align:center;padding:8px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800;overflow:hidden}.reel-card strong{font-size:9px;line-height:1.2;max-height:2.4em;overflow:hidden}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}.reel-card img{width:100%;height:62px;object-fit:contain;display:block}@keyframes reelPreview{from{transform:translateX(0)}to{transform:translateX(-272px)}}
 .case-result{border:1px solid var(--gold);border-radius:15px;background:#16130d;padding:16px;margin-top:14px;animation:reveal .45s ease-out}.case-result strong{display:block;color:var(--gold2);font-size:17px;margin:7px}.case-result small{color:var(--muted)}
 .case-result-image{width:100%;max-width:250px;height:150px;object-fit:contain;display:block;margin:8px auto;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:12px}
 .case-result-price{font-size:22px;font-weight:900;color:var(--gold2);margin:10px 0}
@@ -318,17 +318,27 @@ async function openCase(){
  button.disabled=true;stage.classList.add("rolling");
  const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
  if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
- reel.innerHTML='<div class="reel-track">'+Array.from({length:18},(_,n)=>{
-  const item=pool[n%pool.length];
-  return '<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="">':'')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span></div>';
- }).join("")+'</div>';
+ const cardHtml=item=>'<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="">':'')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span></div>';
+ reel.classList.remove("stopping");
+ reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>cardHtml(pool[n%pool.length])).join("")+'</div>';
  reel.classList.add("spinning");
- $("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';
+ $("caseResult").innerHTML='<div class="case-result">Открываем кейс…</div>';
  try{
-  const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
-  const [,d]=await Promise.all([new Promise(r=>setTimeout(r,2100)),request]);
-  stage.classList.remove("rolling");reel.classList.remove("spinning");
-  const x=d.item,price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
+  const d=await api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
+  const x=d.item;
+  // The server-selected item is inserted at a fixed stop position; the animation is visual only.
+  const winnerIndex=26;
+  const reelItems=Array.from({length:31},(_,n)=>pool[(n*7+Math.floor(Math.random()*pool.length))%pool.length]);
+  reelItems[winnerIndex]=x;
+  reel.innerHTML='<div class="reel-track">'+reelItems.map(cardHtml).join("")+'</div>';
+  reel.classList.remove("spinning");
+  const track=reel.querySelector(".reel-track"),winnerCard=track.children[winnerIndex];
+  const stopX=Math.round(reel.clientWidth/2-winnerCard.offsetLeft-winnerCard.offsetWidth/2);
+  track.style.setProperty("--reel-stop",stopX+"px");
+  reel.classList.add("stopping");
+  await new Promise(resolve=>setTimeout(resolve,2550));
+  stage.classList.remove("rolling");
+  const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
   const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
   $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
    (x.image_url?'<img class="case-result-image" src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'">':'')+
@@ -339,11 +349,10 @@ async function openCase(){
   toast("Скин добавлен в инвентарь");
   await showInventory();await refreshWalletBalance();
  }catch(e){
-  stage.classList.remove("rolling");reel.classList.remove("spinning");
+  stage.classList.remove("rolling");reel.classList.remove("spinning");reel.classList.remove("stopping");
   $("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>';
  }finally{button.disabled=false}
 }
-
 async function refreshWalletBalance(){
  try{const d=await api("/api/wallet");$("walletBalance").textContent=money(d.balance_minor||0,"₽");}
  catch(e){if($("walletBalance"))$("walletBalance").textContent="—";}
