@@ -201,9 +201,26 @@ async function loadCases(){try{const d=await api("/api/cases");casesData=d.items
  }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}}
 function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong><span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
-async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small></div>';toast("Предмет добавлен в виртуальный инвентарь");}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
-async function showInventory(){try{const d=await api("/api/inventory");if(!d.items.length){$("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс или получи тестовый кейс.</div>';return}$("inventory").innerHTML=d.items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small></div><span class="rarity">'+esc(i.rarity)+'</span></div>').join("")}catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}}
+async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small></div>';toast("Предмет добавлен в виртуальный инвентарь");await showInventory();}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
+async function showInventory(){
+ try{
+  const d=await api("/api/inventory");
+  const items=(d.items||[]).slice().sort((a,b)=>Number(b.value_minor||0)-Number(a.value_minor||0));
+  if(!items.length){
+   $("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс, чтобы получить первый предмет.<div class="ux-empty-action"><button class="goldbtn" onclick="switchTab(\'cases\')">✦ Перейти к кейсам</button></div></div>';
+   return;
+  }
+  $("inventory").innerHTML=items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1;min-width:0"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small><div class="rarity">'+esc(i.rarity)+'</div></div><button class="buy" data-inv-upgrade="'+i.id+'" data-item-type="'+esc(i.item_type)+'">Апгрейд</button></div>').join("");
+  document.querySelectorAll("[data-inv-upgrade]").forEach(b=>b.onclick=()=>upgradeInventoryItem(Number(b.dataset.invUpgrade),b.dataset.itemType));
+ }catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}
+}
+function upgradeInventoryItem(id,type){
+ pendingUpgradeSourceId=id;
+ $("upgradeMode").value=type==="case"?"case":"skin";
+ switchTab("upgrade");
+}
 
+let pendingUpgradeSourceId=null;
 let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null;
 async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте Mini App через Telegram.</div>';return}
@@ -213,6 +230,12 @@ async function loadUpgradeView(){
   const [inv,hist]=await Promise.all([api("/api/inventory"),api("/api/upgrades/history")]);
   upgradeInventory=inv.items||[];
   renderUpgradeSources();
+  if(pendingUpgradeSourceId!==null){
+   $("upgradeSource").value=String(pendingUpgradeSourceId);
+   pendingUpgradeSourceId=null;
+   renderUpgradeTargets();
+   renderUpgradeChance();
+  }
   $("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("")||'<div class="empty">Попыток пока нет.</div>';
   await loadUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
@@ -252,6 +275,7 @@ function renderUpgradeChance(){
 async function doUpgrade(){
  const source=currentUpgradeSource(),target=selectedUpgradeTarget,type=$("upgradeMode").value;
  if(!source||!target)return;
+ if(!confirm("Подтвердить демо-апгрейд? При неудаче предмет «"+source.item_name+"» будет списан из виртуального инвентаря. Это действие нельзя отменить."))return;
  $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';
  try{
   const d=await api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})});
