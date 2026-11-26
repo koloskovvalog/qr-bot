@@ -554,7 +554,8 @@ function renderUpgradeChance(){
  if(!sourceValue||!targetValue){$("upgradeChance").textContent="Цена уточняется";$("doUpgrade").disabled=true;return}
  const chance=Math.min(75,Math.max(.01,Math.round(sourceValue/targetValue*7500)/100));
  $("upgradeChance").textContent=chance.toFixed(2)+"%";$("upgradeWheelPercent").textContent=chance.toFixed(1)+"%";$("upgradeWheel").style.setProperty("--chance",chance+"%");$("upgradeWheelStatus").textContent="Сектор успеха подсвечен золотым";
- $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
+ const multiplier=targetValue/sourceValue;
+ $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name+" · X"+multiplier.toFixed(2);
  $("doUpgrade").disabled=false;
 }
 async function doUpgrade(){
@@ -568,7 +569,7 @@ async function doUpgrade(){
   const stopAngle=Number(d.roll_percent||0)*3.6;const finalAngle=2160+stopAngle;
   if(typeof pointer.animate==="function"){const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:4200,easing:"cubic-bezier(.10,.72,.12,1)",fill:"forwards"});await spin.finished;pointer.style.transform="rotate("+stopAngle+"deg)";spin.cancel();}
   else{pointer.style.transition="transform 4.2s cubic-bezier(.10,.72,.12,1)";requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");await new Promise(r=>setTimeout(r,4300));pointer.style.transition="none";pointer.style.transform="rotate("+stopAngle+"deg)";}
-  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — стрелка остановилась в секторе":"✕ НЕУДАЧА — стрелка остановилась вне сектора";$("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — сектор выиграл":"✕ НЕУДАЧА — сектор не совпал";
+  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — стрелка остановилась в секторе":"✕ НЕУДАЧА — стрелка остановилась вне сектора";
   $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
   const hist=await api("/api/upgrades/history");$("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("");
