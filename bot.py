@@ -1266,10 +1266,10 @@ async def get_cs2_skins(request):
             item["steam_median_price"] = price["median_price"]
             item["steam_volume"] = price["volume"]
             item["steam_fetched_at"] = price["fetched_at"].isoformat()
-            item["market_price_minor"] = steam_price_to_minor(price["lowest_price"])
+            is_stale = (now - price["fetched_at"].timestamp()) > 43200
+            item["market_price_minor"] = None if is_stale else steam_price_to_minor(price["lowest_price"])
             if item["market_price_minor"]:
                 item["value_minor"] = item["market_price_minor"]
-            is_stale = (now - price["fetched_at"].timestamp()) > 43200
         else:
             item["steam_lowest_price"] = None
             item["steam_median_price"] = None
