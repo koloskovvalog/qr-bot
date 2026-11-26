@@ -101,6 +101,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(min-width:700px){.bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:min(720px,calc(100% - 32px));border:1px solid #4b3c20;border-bottom:0;border-radius:16px 16px 0 0}.tabs{display:none}.ux-home{grid-template-columns:1.2fr .8fr}}
  .skin-tools{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}
 .skin-tools input,.skin-tools select{width:100%;min-width:0;background:#111;border:1px solid #333;color:#eee;border-radius:11px;padding:12px;font:inherit}
+.skin-check{display:flex;align-items:center;gap:8px;background:#111;border:1px solid #333;border-radius:11px;padding:10px;font-size:12px;color:#ddd}
+.skin-check input{width:auto;accent-color:#d6b66e;padding:0;margin:0}
 .skin-meta{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}
 .skin-tag{font-size:10px;color:#d9bd7a;border:1px solid #594a2d;border-radius:20px;padding:4px 7px}
 .skin-price{font-size:14px;font-weight:800;color:#e8c879;margin-top:8px}
@@ -140,6 +142,11 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
   <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
   <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
+  <select id="skinPhase"><option value="">Любая фаза</option><option>Phase 1</option><option>Phase 2</option><option>Phase 3</option><option>Phase 4</option><option>Ruby</option><option>Sapphire</option><option>Black Pearl</option><option>Emerald</option></select>
+  <input id="skinMinPrice" type="number" min="0" step="1" placeholder="Цена от, ₽">
+  <input id="skinMaxPrice" type="number" min="0" step="1" placeholder="Цена до, ₽">
+  <label class="skin-check"><input id="skinStatTrak" type="checkbox"> Только StatTrak™</label>
+  <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
  <div class="muted" id="skinPriceNote">Цены Steam обновляются постепенно в фоновом режиме. Необновлённая цена не заменяется выдуманной.</div>
  <div class="grid" id="skinGrid"><div class="empty">Загрузка каталога скинов…</div></div>
@@ -223,7 +230,7 @@ async function checkout(){if(!initData){toast("Откройте магазин �
 async function loadProducts(){try{const d=await api("/api/products");products=d.items||[];renderFilters();renderProducts();updateCart()}catch(e){$("products").innerHTML='<div class="empty">Не удалось загрузить каталог. Откройте Mini App через Telegram.</div>'}}
 
 let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=false,skinCatalogBusy=false;
-let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinSearchTimer=null;
+let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="",skinCatalogMaxPrice="",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinSearchTimer=null;
 function renderSkinCatalog(){
  const grid=$("skinGrid");
  if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">Ничего не найдено. Измени фильтры.</div>';}
@@ -247,12 +254,12 @@ async function loadSkinCatalog(reset=true){
  if(reset){skinCatalogPage=0;skinCatalogItems=[];}
  skinCatalogBusy=true;renderSkinCatalog();
  try{
-  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"48",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort});
+  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"48",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort,phase:skinCatalogPhase,min_price:skinCatalogMinPrice,max_price:skinCatalogMaxPrice,stattrak:skinCatalogStatTrak?"1":"0",souvenir:skinCatalogSouvenir?"1":"0"});
   const d=await api("/api/cs2/skins?"+params.toString());
   skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
   skinCatalogPage=Number(d.page||0)+1;
-  $("skinPriceNote").textContent="Источник цен: Steam Community Market · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы.";
+  $("skinPriceNote").textContent="Источник цен: Steam Community Market · RUB. Кэш до 12 часов; обновление выполняется постепенно, не более 8 новых запросов за загрузку страницы. Фильтр цены показывает только скины, для которых Steam уже вернул цену.";
  }catch(e){if(reset)$("skinGrid").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
  finally{skinCatalogBusy=false;renderSkinCatalog();}
 }
@@ -261,6 +268,11 @@ function initSkinCatalog(){
  $("skinWear").onchange=()=>{skinCatalogWear=$("skinWear").value;loadSkinCatalog(true)};
  $("skinRarity").onchange=()=>{skinCatalogRarity=$("skinRarity").value;loadSkinCatalog(true)};
  $("skinSort").onchange=()=>{skinCatalogSort=$("skinSort").value;loadSkinCatalog(true)};
+ $("skinPhase").onchange=()=>{skinCatalogPhase=$("skinPhase").value;loadSkinCatalog(true)};
+ $("skinMinPrice").onchange=()=>{skinCatalogMinPrice=$("skinMinPrice").value;loadSkinCatalog(true)};
+ $("skinMaxPrice").onchange=()=>{skinCatalogMaxPrice=$("skinMaxPrice").value;loadSkinCatalog(true)};
+ $("skinStatTrak").onchange=()=>{skinCatalogStatTrak=$("skinStatTrak").checked;loadSkinCatalog(true)};
+ $("skinSouvenir").onchange=()=>{skinCatalogSouvenir=$("skinSouvenir").checked;loadSkinCatalog(true)};
  $("loadMoreSkins").onclick=()=>loadSkinCatalog(false);
 }
 
