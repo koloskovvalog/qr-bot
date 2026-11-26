@@ -900,6 +900,8 @@ async def cs2_steam_price_worker():
 def queue_cs2_price_refresh(items):
     """Queue only a small page-sized batch; duplicate names are coalesced."""
     for item in items:
+        if CS2_PRICE_QUEUE.qsize() >= 250:
+            break
         market_name = item.get("market_hash_name")
         if market_name and market_name not in CS2_PRICE_QUEUED:
             CS2_PRICE_QUEUED.add(market_name)
