@@ -946,9 +946,10 @@ async def get_cs2_skins(request):
         items.sort(
             key=lambda x: (
                 all_prices.get(x["market_hash_name"]) is None,
-                all_prices.get(x["market_hash_name"]) or 0,
-            ),
-            reverse=(sort == "price_desc"),
+                -(all_prices.get(x["market_hash_name"]) or 0)
+                if sort == "price_desc"
+                else (all_prices.get(x["market_hash_name"]) or 0),
+            )
         )
 
     total = len(items)
