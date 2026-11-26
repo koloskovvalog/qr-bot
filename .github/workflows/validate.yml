@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - qr-bot-pro-premium
+      - qr-bot-pro-phase3
   pull_request:
     branches:
       - main
