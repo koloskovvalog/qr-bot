@@ -610,10 +610,12 @@ async def get_cases(request):
 
     async with db.acquire() as conn:
         async with conn.transaction():
+            # Import a broad set of real CS2 cases from the public catalog.
+            # Existing case rows and opening history are never deleted or rewritten.
             for catalog_case in [
                 item for item in catalog_cases
                 if "case" in item["name"].lower()
-            ][:8]:
+            ][:24]:
                 catalog_case_id = await conn.fetchval("""
                     INSERT INTO cases(title, description, price_minor, currency, active, image_url)
                     SELECT $1, 'Демонстрационный кейс CS2 — виртуальные предметы',
@@ -1219,8 +1221,14 @@ async def get_cs2_skins(request):
     phase_filter = request.query.get("phase", "").strip().casefold()
     stattrak_only = request.query.get("stattrak") == "1"
     souvenir_only = request.query.get("souvenir") == "1"
-    min_price_minor = steam_price_to_minor(request.query.get("min_price"))
-    max_price_minor = steam_price_to_minor(request.query.get("max_price"))
+    # The public skin catalog is intentionally bounded to the requested
+    # market-price range. Defaults include both endpoints: 2 RUB .. 100,000 RUB.
+    min_price_minor = steam_price_to_minor(request.query.get("min_price") or "2")
+    max_price_minor = steam_price_to_minor(request.query.get("max_price") or "100000")
+    min_price_minor = max(200, min_price_minor or 200)
+    max_price_minor = min(10000000, max_price_minor or 10000000)
+    if min_price_minor > max_price_minor:
+        raise web.HTTPBadRequest(text="Минимальная цена не может быть выше максимальной")
     sort = request.query.get("sort", "name")
     try:
         page = max(0, min(int(request.query.get("page", "0")), 10000))
@@ -1267,15 +1275,24 @@ async def get_cs2_skins(request):
         all_names = [x["market_hash_name"] for x in items]
         async with db.acquire() as conn:
             all_price_rows = await conn.fetch("""
-                SELECT market_hash_name, lowest_price
+                SELECT market_hash_name, lowest_price, fetched_at
                 FROM cs2_steam_prices
                 WHERE market_hash_name = ANY($1::text[])
                   AND price_source IN ('lis_skins','market_csgo')
             """, all_names)
+        now_utc = datetime.now(timezone.utc)
         all_prices = {
             row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
             for row in all_price_rows
+            if (now_utc - row["fetched_at"]).total_seconds() <= 43200
+            and steam_price_to_minor(row["lowest_price"]) is not None
         }
+        # If the user applies a price filter, request prices for the next
+        # 100 matching skins in one API Skins batch. Never fabricate a price.
+        missing_price_items = [
+            x for x in items if x["market_hash_name"] not in all_prices
+        ]
+        queue_cs2_price_refresh(missing_price_items[:100])
 
     if min_price_minor is not None or max_price_minor is not None:
         items = [
@@ -1351,6 +1368,10 @@ async def get_cs2_skins(request):
         "price_source": "Lis-Skins (primary) / Market.CSGO (fallback)",
         "price_currency": "RUB",
         "price_cache_hours": 12,
+        "price_range_minor": {"min": 200, "max": 10000000},
+        "price_pending_count": max(0, len(items) - len(all_prices)) if (
+            sort in {"price_asc", "price_desc"} or min_price_minor is not None or max_price_minor is not None
+        ) else len(stale),
         "demo_only": True,
     })
 
