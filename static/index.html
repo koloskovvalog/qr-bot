@@ -30,6 +30,13 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 @keyframes casePulse{from{transform:scale(.94) rotate(-3deg);filter:brightness(.8)}to{transform:scale(1.08) rotate(3deg);filter:brightness(1.5)}}
 .case-reel{display:none;overflow:hidden;border:1px solid #6b562c;border-radius:13px;background:#100e0a;padding:8px;margin:12px 0}.case-reel.spinning{display:block}.reel-track{display:flex;gap:8px;width:max-content;animation:reelSlide 1.55s cubic-bezier(.12,.72,.2,1) forwards}.reel-card{width:128px;min-height:62px;display:grid;place-items:center;text-align:center;padding:9px;border-radius:10px;background:linear-gradient(145deg,#39301e,#17140e);border:1px solid #66532d;color:var(--gold2);font-size:10px;font-weight:800}.reel-card span{display:block;color:var(--muted);font-size:9px;font-weight:500}@keyframes reelSlide{from{transform:translateX(0)}to{transform:translateX(-720px)}}
 .case-result{border:1px solid var(--gold);border-radius:15px;background:#16130d;padding:16px;margin-top:14px;animation:reveal .45s ease-out}.case-result strong{display:block;color:var(--gold2);font-size:17px;margin:7px}.case-result small{color:var(--muted)}
+.case-result-image{width:100%;max-width:250px;height:150px;object-fit:contain;display:block;margin:8px auto;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:12px}
+.case-result-price{font-size:22px;font-weight:900;color:var(--gold2);margin:10px 0}
+.case-result-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.case-result-actions button{flex:1;min-width:120px}
+.wallet-card{display:flex;justify-content:space-between;align-items:center;padding:16px;border:1px solid var(--gold);border-radius:14px;background:linear-gradient(120deg,#241d10,#111);margin:12px 0}
+.wallet-card small{display:block;color:var(--muted);font-size:11px}.wallet-card strong{display:block;font-size:24px;color:var(--gold2);margin-top:5px}
+.reel-card img{width:100%;height:62px;object-fit:contain;display:block}
+.inventory-actions{display:flex;flex-direction:column;gap:6px}.inventory-item .sell-item{background:#242014;border:1px solid var(--gold);color:var(--gold2);border-radius:10px;padding:9px 11px}
 @keyframes reveal{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
 .case-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.case-item,.inventory-item{border:1px solid var(--line);background:#171510;border-radius:13px;padding:12px}.case-item strong,.inventory-item strong{display:block;font-size:12px;margin:6px 0}.case-item small,.inventory-item small{font-size:10px;color:var(--muted)}.case-chance{color:var(--gold2);font-size:11px;font-weight:800}.inventory{display:grid;gap:8px}.inventory-item{display:flex;align-items:center;justify-content:space-between;gap:10px}.rarity{font-size:10px;color:var(--gold2)}
 .item-thumb{width:76px;height:58px;object-fit:contain;background:radial-gradient(circle,#4b3b20,#15120d);border-radius:9px;flex-shrink:0}
@@ -136,9 +143,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="skinsView" hidden>
  <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
- <div class="case-intro">Варианты износа, StatTrak™ и Souvenir. Цены загружаются из Steam Community Market и показываются только после получения ответа Steam. Это справочный каталог; предметы здесь виртуальные и не продаются.</div>
+ <div class="case-intro">Полный каталог вариантов CS2. Введи название оружия или скина — поиск работает по всему каталогу. Цены Steam показываются в рублях и обновляются постепенно.</div>
  <div class="skin-tools">
-  <input id="skinSearch" type="search" placeholder="Поиск скина или оружия…">
+  <input id="skinSearch" type="search" minlength="2" autocomplete="off" placeholder="Начни вводить: AK-47 Redline, AWP Asiimov…">
   <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
   <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
   <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
@@ -149,12 +156,12 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
   <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
  <div class="muted" id="skinPriceNote">Цены Steam обновляются постепенно в фоновом режиме. Необновлённая цена не заменяется выдуманной.</div>
- <div class="grid" id="skinGrid"><div class="empty">Загрузка каталога скинов…</div></div>
+ <div class="grid" id="skinGrid"><div class="empty">Введи минимум 2 символа — покажем подходящие скины без бесконечной прокрутки всего каталога.</div></div>
  <button class="goldbtn skin-loadmore" id="loadMoreSkins" hidden>Загрузить ещё</button>
 </section>
 <section id="ordersView" hidden><div class="section"><h2>История заказов</h2></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Открывай виртуальные кейсы, смотри вероятности и собирай коллекцию. Все предметы — демонстрационные, не передаются в Steam и не имеют денежной стоимости.</div>
+<div class="case-intro">Открывай кейсы, получай предметы с изображением и ценой Steam в ₽. Их можно направить в апгрейд или обменять на виртуальный баланс. Предметы и баланс не являются реальными активами и не выводятся на карту.</div>
 <div id="caseCards" class="grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 <div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
 <button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
@@ -163,6 +170,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
+ <div class="wallet-card"><div><small>Виртуальный баланс</small><strong id="walletBalance">0,00 ₽</strong></div><span>₽ RUB</span></div>
  <div id="profileStats" class="profile-grid"><div class="empty">Загрузка профиля…</div></div>
  <div class="order"><strong>Ваш реферальный код</strong><div id="myReferralCode" class="profile-code">—</div><button class="buy" id="copyReferralCode">Скопировать код</button><div class="muted">Поделитесь кодом с друзьями. Бонусы начисляются только после ручного подтверждения оплаты их первого заказа.</div></div>
  <div class="order"><strong>Применить код друга</strong><div class="profile-form"><input id="referralInput" maxlength="32" placeholder="Реферальный код"><button class="buy" id="applyReferralCode">Применить</button></div><div class="muted">Доступно до первого заказа, один раз.</div></div>
@@ -233,7 +241,8 @@ let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=
 let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="",skinCatalogMaxPrice="",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinSearchTimer=null;
 function renderSkinCatalog(){
  const grid=$("skinGrid");
- if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">Ничего не найдено. Измени фильтры.</div>';}
+ if(!skinCatalogQuery || skinCatalogQuery.length<2){grid.innerHTML='<div class="empty">Введи минимум 2 символа для поиска по всему каталогу CS2.</div>';}
+ else if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">По запросу ничего не найдено. Попробуй другое название или английское написание.</div>';}
  else grid.innerHTML=skinCatalogItems.map(x=>'<article class="skin-card">'+
   '<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">'+
   '<strong>'+esc(x.name)+'</strong><div class="muted">'+esc(x.weapon||"CS2")+' · '+esc(x.rarity||"Редкость не указана")+'</div>'+
@@ -245,16 +254,16 @@ function renderSkinCatalog(){
   (x.steam_volume?' · Продажи: '+esc(x.steam_volume):'')+'</small></div>'+
   (x.steam_fetched_at?'<div class="muted">Steam: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
   '</article>').join("");
- $("skinsCount").textContent=skinCatalogTotal.toLocaleString("ru-RU")+" вариантов";
+ $("skinsCount").textContent=skinCatalogQuery.length>=2?skinCatalogTotal.toLocaleString("ru-RU")+" результатов":skinCatalogTotal.toLocaleString("ru-RU")+" в каталоге";
  $("loadMoreSkins").hidden=!skinCatalogHasMore;
  $("loadMoreSkins").disabled=skinCatalogBusy;
 }
 async function loadSkinCatalog(reset=true){
- if(skinCatalogBusy)return;
+ if(skinCatalogBusy){clearTimeout(skinSearchTimer);skinSearchTimer=setTimeout(()=>loadSkinCatalog(reset),120);return;}
  if(reset){skinCatalogPage=0;skinCatalogItems=[];}
  skinCatalogBusy=true;renderSkinCatalog();
  try{
-  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"48",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort,phase:skinCatalogPhase,min_price:skinCatalogMinPrice,max_price:skinCatalogMaxPrice,stattrak:skinCatalogStatTrak?"1":"0",souvenir:skinCatalogSouvenir?"1":"0"});
+  const params=new URLSearchParams({page:String(skinCatalogPage),limit:"24",q:skinCatalogQuery,wear:skinCatalogWear,rarity:skinCatalogRarity,sort:skinCatalogSort,phase:skinCatalogPhase,min_price:skinCatalogMinPrice,max_price:skinCatalogMaxPrice,stattrak:skinCatalogStatTrak?"1":"0",souvenir:skinCatalogSouvenir?"1":"0"});
   const d=await api("/api/cs2/skins?"+params.toString());
   skinCatalogItems=reset?(d.items||[]):skinCatalogItems.concat(d.items||[]);
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
@@ -264,7 +273,7 @@ async function loadSkinCatalog(reset=true){
  finally{skinCatalogBusy=false;renderSkinCatalog();}
 }
 function initSkinCatalog(){
- $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),350)};
+ $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);if(skinCatalogQuery.length<2){skinCatalogItems=[];skinCatalogTotal=0;skinCatalogHasMore=false;renderSkinCatalog();return;}skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),220)};
  $("skinWear").onchange=()=>{skinCatalogWear=$("skinWear").value;loadSkinCatalog(true)};
  $("skinRarity").onchange=()=>{skinCatalogRarity=$("skinRarity").value;loadSkinCatalog(true)};
  $("skinSort").onchange=()=>{skinCatalogSort=$("skinSort").value;loadSkinCatalog(true)};
@@ -300,9 +309,56 @@ function skinMetaTags(x){
  if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<span class="case-chance">'+Number(i.chance_percent).toFixed(2)+'%</span></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'">':'')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
-async function openCase(){if(!initData){toast("Откройте приложение через Telegram.");return}const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");if(!id||button.disabled)return;button.disabled=true;stage.classList.add("rolling");const selectedCase=casesData.find(c=>c.id===Number(id));const pool=selectedCase?.items||[];if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;return}reel.innerHTML='<div class="reel-track">'+Array.from({length:14},(_,n)=>{const item=pool[n%pool.length];return '<div class="reel-card">'+esc(item.name)+'<span>'+esc(item.rarity)+'</span></div>'}).join("")+'</div>';reel.classList.add("spinning");$("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';try{const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});const [,d]=await Promise.all([new Promise(r=>setTimeout(r,1650)),request]);stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result"><small>ВЫПАЛО В ДЕМО-СИМУЛЯЦИИ</small><strong>'+esc(d.item.name)+'</strong><small>'+esc(d.item.rarity)+' · шанс '+Number(d.item.chance_percent).toFixed(2)+'%</small>'+skinMetaTags(d.item)+'</div>';toast("Предмет добавлен в виртуальный инвентарь");await showInventory();}catch(e){stage.classList.remove("rolling");reel.classList.remove("spinning");$("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>'}finally{button.disabled=false}}
+async function openCase(){
+ if(!initData){toast("Откройте приложение через Telegram.");return}
+ const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");
+ if(!id||button.disabled)return;
+ button.disabled=true;stage.classList.add("rolling");
+ const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
+ if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
+ reel.innerHTML='<div class="reel-track">'+Array.from({length:18},(_,n)=>{
+  const item=pool[n%pool.length];
+  return '<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="">':'')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span></div>';
+ }).join("")+'</div>';
+ reel.classList.add("spinning");
+ $("caseResult").innerHTML='<div class="case-result">Кейс открывается…</div>';
+ try{
+  const request=api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
+  const [,d]=await Promise.all([new Promise(r=>setTimeout(r,2100)),request]);
+  stage.classList.remove("rolling");reel.classList.remove("spinning");
+  const x=d.item,price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Steam уточняется";
+  const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
+  $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
+   (x.image_url?'<img class="case-result-image" src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'">':'')+
+   '<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · шанс '+Number(x.chance_percent).toFixed(2)+'%</small>'+
+   skinMetaTags(x)+'<div class="case-result-price">'+price+'</div>'+
+   '<div class="case-result-actions"><button class="goldbtn" onclick="upgradeInventoryItem('+x.inventory_id+',&quot;skin&quot;)">В апгрейд</button>'+sell+'</div>'+
+   '<small>Цена Steam · RUB. Продажа начисляет виртуальный баланс.</small></div>';
+  toast("Скин добавлен в инвентарь");
+  await showInventory();await refreshWalletBalance();
+ }catch(e){
+  stage.classList.remove("rolling");reel.classList.remove("spinning");
+  $("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>';
+ }finally{button.disabled=false}
+}
+
+async function refreshWalletBalance(){
+ try{const d=await api("/api/wallet");$("walletBalance").textContent=money(d.balance_minor||0,"₽");}
+ catch(e){if($("walletBalance"))$("walletBalance").textContent="—";}
+}
+async function sellInventoryItem(id,fromCase=false){
+ if(!initData){toast("Откройте приложение через Telegram.");return}
+ const button=fromCase?null:document.querySelector('[data-inv-sell="'+id+'"]');
+ if(button)button.disabled=true;
+ try{
+  const d=await api("/api/inventory/"+id+"/sell",{method:"POST",body:"{}"});
+  toast("Зачислено "+money(d.credited_minor,"₽")+" на виртуальный баланс");
+  await showInventory();await refreshWalletBalance();
+  if(fromCase){const box=$("caseResult");if(box)box.innerHTML+='<div class="muted">Предмет продан. Виртуальный баланс пополнен.</div>';}
+ }catch(e){toast(e.message);if(button)button.disabled=false;await showInventory();}
+}
 async function showInventory(){
  try{
   const d=await api("/api/inventory");
@@ -311,8 +367,9 @@ async function showInventory(){
    $("inventory").innerHTML='<div class="empty">Инвентарь пока пуст. Открой демо-кейс, чтобы получить первый предмет.<div class="ux-empty-action"><button class="goldbtn" onclick="switchTab(\'cases\')">✦ Перейти к кейсам</button></div></div>';
    return;
   }
-  $("inventory").innerHTML=items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1;min-width:0"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+money(i.value_minor,"V")+'</small><div class="rarity">'+esc(i.rarity)+'</div>'+skinMetaTags(i)+'</div><button class="buy" data-inv-upgrade="'+i.id+'" data-item-type="'+esc(i.item_type)+'">Апгрейд</button></div>').join("");
+  $("inventory").innerHTML=items.map(i=>'<div class="inventory-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.item_name)+'">':'')+'<div style="flex:1;min-width:0"><strong>'+esc(i.item_name)+'</strong><small>'+esc(i.item_type==="case"?"Кейс":"Скин")+' · '+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</small><div class="rarity">'+esc(i.rarity)+'</div>'+skinMetaTags(i)+'</div><div class="inventory-actions"><button class="buy" data-inv-upgrade="'+i.id+'" data-item-type="'+esc(i.item_type)+'">Апгрейд</button>'+(i.sell_value_minor?'<button class="sell-item" data-inv-sell="'+i.id+'">Продать '+money(i.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Цена уточняется</button>')+'</div></div>').join("");
   document.querySelectorAll("[data-inv-upgrade]").forEach(b=>b.onclick=()=>upgradeInventoryItem(Number(b.dataset.invUpgrade),b.dataset.itemType));
+  document.querySelectorAll("[data-inv-sell]").forEach(b=>b.onclick=()=>sellInventoryItem(Number(b.dataset.invSell),false));
  }catch(e){$("inventory").innerHTML='<div class="empty">Откройте Mini App через Telegram, чтобы увидеть инвентарь.</div>'}
 }
 function upgradeInventoryItem(id,type){
@@ -389,7 +446,7 @@ async function doUpgrade(){
   await loadUpgradeTargets();
  }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
-async function loadProfile(){try{const d=await api("/api/profile");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>'}catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
+async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>'}catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
 function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
 $("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};

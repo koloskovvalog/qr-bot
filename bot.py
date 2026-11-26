@@ -8,6 +8,7 @@ import time
 import secrets
 import re
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl
 
 import asyncpg
@@ -181,6 +182,23 @@ async def init_db():
                 CREATE UNIQUE INDEX IF NOT EXISTS loyalty_order_reward_unique
                     ON loyalty_ledger(user_id, order_id, reason)
                     WHERE order_id IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS wallet_accounts (
+                    user_id BIGINT PRIMARY KEY,
+                    balance_minor BIGINT NOT NULL DEFAULT 0 CHECK (balance_minor >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS wallet_ledger (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    inventory_id BIGINT NOT NULL UNIQUE,
+                    amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    reason TEXT NOT NULL DEFAULT 'virtual_skin_sale',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user
+                    ON wallet_ledger(user_id, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS cs2_steam_prices (
                     market_hash_name TEXT PRIMARY KEY,
@@ -668,20 +686,32 @@ async def get_cases(request):
         items = await conn.fetch("""
             SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight,
                    ci.image_url, ci.value_minor, ci.market_hash_name, ci.wear,
-                   ci.stattrak, ci.souvenir, ci.phase
+                   ci.stattrak, ci.souvenir, ci.phase,
+                   p.lowest_price, p.fetched_at
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
+            LEFT JOIN cs2_steam_prices p ON p.market_hash_name=ci.market_hash_name
             WHERE c.active = TRUE
             ORDER BY ci.case_id, ci.weight DESC
         """)
+    # Warm a tiny first batch for visible case-content prices without flooding Steam.
+    queue_cs2_price_refresh([
+        {"market_hash_name": item["market_hash_name"]}
+        for item in items if item["market_hash_name"]
+    ][:8])
 
     grouped = {}
     for item in items:
+        fresh = bool(item["fetched_at"] and
+                     (datetime.now(timezone.utc) - item["fetched_at"]).total_seconds() <= 43200)
+        market_minor = steam_price_to_minor(item["lowest_price"]) if fresh else None
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
             "image_url": item["image_url"] or skin_images.get(item["name"]),
             "value_minor": item["value_minor"],
+            "market_price_minor": market_minor,
+            "market_price": item["lowest_price"] if fresh else None,
             "market_hash_name": item["market_hash_name"],
             "wear": item["wear"], "stattrak": item["stattrak"],
             "souvenir": item["souvenir"], "phase": item["phase"],
@@ -745,21 +775,27 @@ async def open_case(request):
                      if item["name"] == selected["name"]),
                     None,
                 )
+            market_minor = None
             if selected.get("market_hash_name"):
-                cached_price = await conn.fetchval("""
-                    SELECT lowest_price FROM cs2_steam_prices
+                price_row = await conn.fetchrow("""
+                    SELECT lowest_price, fetched_at FROM cs2_steam_prices
                     WHERE market_hash_name=$1
                 """, selected["market_hash_name"])
-                market_minor = steam_price_to_minor(cached_price)
+                fresh = bool(price_row and
+                    (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
+                market_minor = steam_price_to_minor(price_row["lowest_price"]) if fresh else None
                 if market_minor:
                     selected["value_minor"] = market_minor
-            await conn.execute("""
+                else:
+                    queue_cs2_price_refresh([{"market_hash_name": selected["market_hash_name"]}])
+            inventory_id = await conn.fetchval("""
                 INSERT INTO user_inventory(
                     user_id, item_type, item_name, rarity, image_url,
                     value_minor, source, market_hash_name, wear,
                     stattrak, souvenir, phase
                 )
                 VALUES($1, 'skin', $2, $3, $4, $5, 'case', $6, $7, $8, $9, $10)
+                RETURNING id
             """, user["id"], selected["name"], selected["rarity"],
                  selected["image_url"], selected["value_minor"],
                  selected.get("market_hash_name"), selected.get("wear"),
@@ -788,6 +824,10 @@ async def open_case(request):
             "souvenir": selected.get("souvenir", False),
             "phase": selected.get("phase"),
             "image_url": selected.get("image_url"),
+            "value_minor": selected["value_minor"],
+            "market_price_minor": market_minor,
+            "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
+            "inventory_id": inventory_id,
             "chance_percent": round(selected["weight"] * 100 / total, 2),
         },
         "demo_only": True,
@@ -795,26 +835,126 @@ async def open_case(request):
     })
 
 
+
+async def get_wallet(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO wallet_accounts(user_id) VALUES($1)
+            ON CONFLICT (user_id) DO NOTHING
+        """, user["id"])
+        row = await conn.fetchrow("""
+            SELECT balance_minor, updated_at FROM wallet_accounts WHERE user_id=$1
+        """, user["id"])
+        ledger = await conn.fetch("""
+            SELECT amount_minor, reason, created_at FROM wallet_ledger
+            WHERE user_id=$1 ORDER BY id DESC LIMIT 20
+        """, user["id"])
+    return web.json_response({
+        "balance_minor": row["balance_minor"], "currency": "RUB",
+        "virtual_only": True, "updated_at": row["updated_at"].isoformat(),
+        "ledger": [{
+            "amount_minor": item["amount_minor"], "reason": item["reason"],
+            "created_at": item["created_at"].isoformat()
+        } for item in ledger]
+    })
+
+
+async def sell_inventory_item(request):
+    user = verify_telegram_user(request)
+    try:
+        inventory_id = int(request.match_info["inventory_id"])
+    except (ValueError, TypeError):
+        raise web.HTTPBadRequest(text="Некорректный ID предмета")
+
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            item = await conn.fetchrow("""
+                SELECT id, item_type, item_name, market_hash_name
+                FROM user_inventory
+                WHERE id=$1 AND user_id=$2 AND consumed_at IS NULL
+                FOR UPDATE
+            """, inventory_id, user["id"])
+            if not item:
+                raise web.HTTPNotFound(text="Предмет уже продан, использован или не найден")
+            if item["item_type"] != "skin" or not item["market_hash_name"]:
+                raise web.HTTPBadRequest(text="Этот тип предмета нельзя продать за виртуальные рубли")
+
+            price = await conn.fetchrow("""
+                SELECT lowest_price, fetched_at FROM cs2_steam_prices
+                WHERE market_hash_name=$1
+            """, item["market_hash_name"])
+            fresh = bool(price and
+                         (datetime.now(timezone.utc) - price["fetched_at"]).total_seconds() <= 43200)
+            market_minor = steam_price_to_minor(price["lowest_price"]) if fresh else None
+            if not market_minor:
+                queue_cs2_price_refresh([{"market_hash_name": item["market_hash_name"]}])
+                raise web.HTTPConflict(text="Цена Steam обновляется. Попробуйте продать предмет чуть позже.")
+
+            # Demo marketplace credit: 90% of the fresh Steam lowest listing.
+            sale_minor = market_minor * 90 // 100
+            if sale_minor <= 0:
+                raise web.HTTPConflict(text="Не удалось рассчитать цену продажи")
+            await conn.execute("""
+                INSERT INTO wallet_accounts(user_id) VALUES($1)
+                ON CONFLICT (user_id) DO NOTHING
+            """, user["id"])
+            await conn.execute("""
+                UPDATE user_inventory SET consumed_at=NOW() WHERE id=$1
+            """, inventory_id)
+            await conn.execute("""
+                INSERT INTO wallet_ledger(user_id, inventory_id, amount_minor, currency, reason)
+                VALUES($1,$2,$3,'RUB','virtual_skin_sale')
+            """, user["id"], inventory_id, sale_minor)
+            wallet = await conn.fetchrow("""
+                UPDATE wallet_accounts
+                SET balance_minor=balance_minor+$2, updated_at=NOW()
+                WHERE user_id=$1 RETURNING balance_minor
+            """, user["id"], sale_minor)
+
+    return web.json_response({
+        "ok": True, "inventory_id": inventory_id,
+        "item_name": item["item_name"], "credited_minor": sale_minor,
+        "balance_minor": wallet["balance_minor"], "currency": "RUB",
+        "virtual_only": True,
+        "message": "Предмет обменян на виртуальные рубли. Вывод средств отключён."
+    })
+
+
 async def get_inventory(request):
     user = verify_telegram_user(request)
     async with db.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, item_type, item_name, rarity, image_url,
-                   value_minor, source, created_at, market_hash_name,
-                   wear, stattrak, souvenir, phase
-            FROM user_inventory
-            WHERE user_id = $1 AND consumed_at IS NULL
-            ORDER BY id DESC LIMIT 100
+            SELECT i.id, i.item_type, i.item_name, i.rarity, i.image_url,
+                   i.value_minor, i.source, i.created_at, i.market_hash_name,
+                   i.wear, i.stattrak, i.souvenir, i.phase,
+                   p.lowest_price, p.fetched_at
+            FROM user_inventory i
+            LEFT JOIN cs2_steam_prices p ON p.market_hash_name=i.market_hash_name
+            WHERE i.user_id = $1 AND i.consumed_at IS NULL
+            ORDER BY i.id DESC LIMIT 100
         """, user["id"])
-    return web.json_response({"items": [{
-        "id": row["id"], "item_type": row["item_type"],
-        "item_name": row["item_name"], "rarity": row["rarity"],
-        "image_url": row["image_url"], "value_minor": row["value_minor"],
-        "source": row["source"], "created_at": row["created_at"].isoformat(),
-        "market_hash_name": row["market_hash_name"], "wear": row["wear"],
-        "stattrak": row["stattrak"], "souvenir": row["souvenir"],
-        "phase": row["phase"]
-    } for row in rows]})
+    items = []
+    for row in rows:
+        fresh = bool(row["fetched_at"] and
+                     (datetime.now(timezone.utc) - row["fetched_at"]).total_seconds() <= 43200)
+        market_minor = steam_price_to_minor(row["lowest_price"]) if fresh else None
+        if row["market_hash_name"] and not fresh:
+            queue_cs2_price_refresh([{"market_hash_name": row["market_hash_name"]}])
+        items.append({
+            "id": row["id"], "item_type": row["item_type"],
+            "item_name": row["item_name"], "rarity": row["rarity"],
+            "image_url": row["image_url"],
+            "value_minor": market_minor or row["value_minor"],
+            "market_price_minor": market_minor,
+            "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
+            "price_updated_at": row["fetched_at"].isoformat() if fresh else None,
+            "source": row["source"], "created_at": row["created_at"].isoformat(),
+            "market_hash_name": row["market_hash_name"], "wear": row["wear"],
+            "stattrak": row["stattrak"], "souvenir": row["souvenir"],
+            "phase": row["phase"]
+        })
+    return web.json_response({"items": items})
 
 # ============================================================
 # CS2 PUBLIC CATALOG AND VIRTUAL UPGRADER
@@ -1027,19 +1167,29 @@ async def get_cs2_skins(request):
     sort = request.query.get("sort", "name")
     try:
         page = max(0, min(int(request.query.get("page", "0")), 10000))
-        limit = max(1, min(int(request.query.get("limit", "48")), 60))
+        limit = max(1, min(int(request.query.get("limit", "24")), 40))
     except ValueError:
         page, limit = 0, 48
 
-    items = catalog
-    if query:
-        items = [x for x in items if query in (
-            x["name"] + " " + x.get("weapon", "") + " " +
-            x.get("rarity", "") + " " + x.get("wear", "") + " " +
-            x.get("phase", "") +
-            (" StatTrak" if x.get("stattrak") else "") +
-            (" Souvenir" if x.get("souvenir") else "")
-        ).casefold()]
+    # Search-first UX: never dump the full 10k+ catalogue into the scrolling UI.
+    if len(query) < 2:
+        return web.json_response({
+            "items": [], "total": len(catalog), "matched": 0,
+            "page": 0, "limit": 24, "has_more": False,
+            "search_required": True, "price_currency": "RUB",
+            "price_source": "Steam Community Market",
+        })
+    terms = [term for term in query.split() if term]
+    items = [
+        item for item in catalog
+        if all(term in (
+            item["name"] + " " + item.get("base_name", "") + " " +
+            item.get("weapon", "") + " " + item.get("rarity", "") + " " +
+            item.get("wear", "") + " " + item.get("phase", "") +
+            (" StatTrak" if item.get("stattrak") else "") +
+            (" Souvenir" if item.get("souvenir") else "")
+        ).casefold() for term in terms)
+    ]
     if wear_filter:
         items = [x for x in items if x.get("wear", "").casefold() == wear_filter]
     if rarity_filter:
@@ -1133,6 +1283,7 @@ async def get_cs2_skins(request):
     return web.json_response({
         "items": enriched,
         "total": total,
+        "matched": total,
         "page": page,
         "limit": limit,
         "has_more": start + len(page_items) < total,
@@ -2116,6 +2267,8 @@ def create_app():
     app.router.add_get("/api/cases", get_cases)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
+    app.router.add_get("/api/wallet", get_wallet)
+    app.router.add_post("/api/inventory/{inventory_id}/sell", sell_inventory_item)
 
     # Demo payment endpoints
     app.router.add_post("/api/payments/demo/create", create_demo_payment)
