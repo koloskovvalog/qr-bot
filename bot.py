@@ -1505,7 +1505,7 @@ async def create_upgrade_attempt(request):
                     target_value = market_minor
             if target_value <= source_value:
                 raise web.HTTPBadRequest(text="Выберите предмет дороже исходного")
-            chance = min(90.0, max(1.0, round(source_value / target_value * 75, 2)))
+            chance = min(75.0, max(0.01, round(source_value / target_value * 75, 2)))
             roll = secrets.randbelow(10000)
             success = roll < int(chance * 100)
             await conn.execute("""
