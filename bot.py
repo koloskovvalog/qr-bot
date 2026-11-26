@@ -532,6 +532,38 @@ async def get_cases(request):
         skin_images = {}
         fallback_case_image = None
     async with db.acquire() as conn:
+        async with conn.transaction():
+            for catalog_case in [
+                item for item in catalog_cases
+                if "case" in item["name"].lower()
+            ][:5]:
+                catalog_case_id = await conn.fetchval("""
+                    INSERT INTO cases(title, description, price_minor, currency, active, image_url)
+                    SELECT $1, 'Демонстрационный кейс CS2 — виртуальные предметы',
+                           0, 'RUB', TRUE, $2
+                    WHERE NOT EXISTS (SELECT 1 FROM cases WHERE title=$1)
+                    RETURNING id
+                """, catalog_case["name"], catalog_case["image_url"])
+                if not catalog_case_id:
+                    catalog_case_id = await conn.fetchval(
+                        "SELECT id FROM cases WHERE title=$1 ORDER BY id LIMIT 1",
+                        catalog_case["name"],
+                    )
+                await conn.execute("""
+                    UPDATE cases SET image_url=COALESCE(image_url, $2)
+                    WHERE id=$1
+                """, catalog_case_id, catalog_case["image_url"])
+                await conn.execute("""
+                    INSERT INTO case_items(case_id, name, rarity, weight, image_url, value_minor)
+                    SELECT $1, ci.name, ci.rarity, ci.weight, ci.image_url, ci.value_minor
+                    FROM case_items ci
+                    WHERE ci.case_id = (
+                        SELECT id FROM cases WHERE title='Премиум кейс' ORDER BY id LIMIT 1
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM case_items existing WHERE existing.case_id=$1
+                    )
+                """, catalog_case_id)
         cases = await conn.fetch("""
             SELECT id, title, description, price_minor, currency, image_url
             FROM cases
