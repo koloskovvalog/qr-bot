@@ -133,6 +133,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .skin-price small{display:block;color:#999;font-size:10px;font-weight:400;margin-top:3px}
 .skin-card{background:linear-gradient(145deg,#191919,#101010);border:1px solid #2d2a23;border-radius:14px;padding:11px;min-width:0}
 .skin-card img{width:100%;height:105px;object-fit:contain;display:block;margin-bottom:8px}
+.skin-image-placeholder{height:105px;display:grid;place-items:center;margin-bottom:8px;border-radius:9px;background:radial-gradient(circle,#51401f,#17130d);color:#e6c77e;font-size:22px;font-weight:950}
 .skin-card strong{display:block;font-size:12px;line-height:1.35;overflow-wrap:anywhere}
 .skin-card .muted{font-size:10px}
 .skin-loadmore{width:100%;margin-top:12px}
@@ -725,13 +726,13 @@ main{max-width:980px;padding:22px 18px calc(var(--nav-h) + 32px)}
   <select id="skinRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
   <select id="skinSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
   <select id="skinPhase"><option value="">Любая фаза</option><option>Phase 1</option><option>Phase 2</option><option>Phase 3</option><option>Phase 4</option><option>Ruby</option><option>Sapphire</option><option>Black Pearl</option><option>Emerald</option></select>
-  <input id="skinMinPrice" type="number" min="2" max="100000" step="1" value="2" placeholder="Цена от, ₽">
-  <input id="skinMaxPrice" type="number" min="2" max="100000" step="1" value="100000" placeholder="Цена до, ₽">
+  <input id="skinMinPrice" type="number" min="2" max="100000" step="1" placeholder="Цена от, ₽">
+  <input id="skinMaxPrice" type="number" min="2" max="100000" step="1" placeholder="Цена до, ₽">
   <label class="skin-check"><input id="skinStatTrak" type="checkbox"> Только StatTrak™</label>
   <label class="skin-check"><input id="skinSouvenir" type="checkbox"> Только Souvenir</label>
  </div>
- <div class="muted" id="skinPriceNote">Цены Lis-Skins обновляются постепенно; если предмета нет — используется Market.CSGO. Необновлённая цена не заменяется выдуманной.</div>
- <div class="grid" id="skinGrid"><div class="empty">Введи минимум 2 символа — покажем подходящие скины без бесконечной прокрутки всего каталога.</div></div>
+ <div class="muted" id="skinPriceNote">Рыночные цены и изображения подгружаются для каждой страницы каталога. Неизвестные цены не заменяются выдуманными.</div>
+ <div class="grid" id="skinGrid"><div class="empty">Загрузка каталога CS2…</div></div>
  <button class="goldbtn skin-loadmore" id="loadMoreSkins" hidden>Загрузить ещё</button>
 </section>
 <section id="ordersView" hidden>
@@ -885,23 +886,21 @@ async function checkout(){if(!initData){toast("Откройте магазин �
 async function loadProducts(){try{const d=await api("/api/products");products=d.items||[];renderFilters();renderProducts();updateCart()}catch(e){$("products").innerHTML='<div class="empty">Не удалось загрузить каталог. Откройте Mini App через Telegram.</div>'}}
 
 let skinCatalogItems=[],skinCatalogPage=0,skinCatalogTotal=0,skinCatalogHasMore=false,skinCatalogBusy=false;
-let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="2",skinCatalogMaxPrice="100000",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinCatalogPending=0,skinSearchTimer=null;
+let skinCatalogQuery="",skinCatalogWear="",skinCatalogRarity="",skinCatalogSort="name",skinCatalogPhase="",skinCatalogMinPrice="",skinCatalogMaxPrice="",skinCatalogStatTrak=false,skinCatalogSouvenir=false,skinCatalogPending=0,skinSearchTimer=null,skinPricePollTimer=null,skinPricePollAttempts=0;
 function renderSkinCatalog(){
  const grid=$("skinGrid");
- if(!skinCatalogQuery || skinCatalogQuery.length<2){grid.innerHTML='<div class="empty">Введи минимум 2 символа для поиска по всему каталогу CS2.</div>';}
- else if(!skinCatalogItems.length){grid.innerHTML='<div class="empty">'+(skinCatalogPending>0?'Цены для найденных скинов загружаются пакетами из API Skins. Подожди немного и нажми «Проверить цены».':'По запросу ничего не найдено в диапазоне 2–100 000 ₽. Попробуй другое название или английское написание.')+'</div>';}
+ if(!skinCatalogItems.length){grid.innerHTML=skinCatalogBusy?'<div class="empty">Загружаем скины и рыночные котировки…</div>':'<div class="empty">Скины не найдены. Измени фильтры или поисковый запрос.</div>';}
  else grid.innerHTML=skinCatalogItems.map(x=>'<article class="skin-card">'+
-  '<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">'+
+  (x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="skin-image-placeholder" hidden>CS2</div>':'<div class="skin-image-placeholder">CS2</div>')+
   '<strong>'+esc(x.name)+'</strong><div class="muted">'+esc(x.weapon||"CS2")+' · '+esc(x.rarity||"Редкость не указана")+'</div>'+
   '<div class="skin-meta">'+(x.wear?'<span class="skin-tag">'+esc(x.wear)+'</span>':'')+
   (x.stattrak?'<span class="skin-tag">StatTrak™</span>':'')+(x.souvenir?'<span class="skin-tag">Souvenir</span>':'')+
   (x.phase?'<span class="skin-tag">'+esc(x.phase)+'</span>':'')+'</div>'+
-  '<div class="skin-price">'+(x.steam_lowest_price?esc(x.steam_lowest_price):'Цена уточняется')+
-  '<small>'+(x.steam_median_price?'Медиана: '+esc(x.steam_median_price):'Медиана пока не получена')+
-  (x.steam_volume?' · Продажи: '+esc(x.steam_volume):'')+'</small></div>'+
-  (x.steam_fetched_at?'<div class="muted">Источник обновлён: '+new Date(x.steam_fetched_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает обновления цены</div>')+
+  '<div class="skin-price">'+(x.steam_lowest_price?esc(x.steam_lowest_price):'Рыночная цена уточняется')+
+  '<small>'+(x.market_price_source?'Источник: '+esc(priceSourceLabel(x.market_price_source)):'Котировка пока не получена')+'</small></div>'+
+  (x.market_price_updated_at?'<div class="muted">Обновлено: '+new Date(x.market_price_updated_at).toLocaleString("ru-RU")+'</div>':'<div class="muted">Ожидает рыночную котировку</div>')+
   '</article>').join("");
- $("skinsCount").textContent=skinCatalogQuery.length>=2?skinCatalogTotal.toLocaleString("ru-RU")+" результатов":skinCatalogTotal.toLocaleString("ru-RU")+" в каталоге";
+ $("skinsCount").textContent=skinCatalogTotal.toLocaleString("ru-RU")+" скинов в каталоге";
  $("loadMoreSkins").hidden=!(skinCatalogHasMore||skinCatalogPending>0);
  $("loadMoreSkins").textContent=skinCatalogPending>0?"Проверить цены":"Загрузить ещё";
  $("loadMoreSkins").disabled=skinCatalogBusy;
@@ -917,12 +916,22 @@ async function loadSkinCatalog(reset=true){
   skinCatalogTotal=Number(d.total||0);skinCatalogHasMore=Boolean(d.has_more);
   skinCatalogPending=Number(d.price_pending_count||0);
   skinCatalogPage=Number(d.page||0)+1;
-  $("skinPriceNote").textContent="Рыночный диапазон: 2–100 000 ₽. Источник: Lis-Skins → Market.CSGO. Цены кэшируются на 12 часов; отсутствующие цены запрашиваются пакетами до 100 скинов. В результатах — только предметы с подтверждённой актуальной ценой.";
+  $("skinPriceNote").textContent="Котировка — минимальная доступная цена предложения среди Steam, Skinport, CSFloat, BUFF163 и YouPin через OpenSkin; если её нет, используется цена Steam. Курс USD/RUB обновляется раз в час. Цены без подтверждённой котировки не подменяются оценками.";
  }catch(e){if(reset)$("skinGrid").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
- finally{skinCatalogBusy=false;renderSkinCatalog();}
+ finally{
+  skinCatalogBusy=false;renderSkinCatalog();
+  if(skinCatalogPending>0&&skinCatalogItems.length&&skinPricePollAttempts<4&&!$("skinsView").hidden){
+   const waits=[1800,2800,4200,6000];const delay=waits[skinPricePollAttempts++];
+   clearTimeout(skinPricePollTimer);skinPricePollTimer=setTimeout(()=>loadSkinCatalog(true),delay);
+  }else if(skinCatalogPending===0){skinPricePollAttempts=0;clearTimeout(skinPricePollTimer);}
+ }
+}
+function priceSourceLabel(source){
+ const key=String(source||"").replace(/^openskin_/,"").toLowerCase();
+ return ({steam:"Steam",skinport:"Skinport",buff:"BUFF163",youpin:"YouPin",csfloat:"CSFloat",market:"OpenSkin market"})[key]||key.replace(/_/g," ").toUpperCase();
 }
 function initSkinCatalog(){
- $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);if(skinCatalogQuery.length<2){skinCatalogItems=[];skinCatalogTotal=0;skinCatalogHasMore=false;renderSkinCatalog();return;}skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),220)};
+ $("skinSearch").oninput=()=>{skinCatalogQuery=$("skinSearch").value.trim();clearTimeout(skinSearchTimer);clearTimeout(skinPricePollTimer);skinPricePollAttempts=0;skinSearchTimer=setTimeout(()=>loadSkinCatalog(true),180)};
  $("skinWear").onchange=()=>{skinCatalogWear=$("skinWear").value;loadSkinCatalog(true)};
  $("skinRarity").onchange=()=>{skinCatalogRarity=$("skinRarity").value;loadSkinCatalog(true)};
  $("skinSort").onchange=()=>{skinCatalogSort=$("skinSort").value;loadSkinCatalog(true)};
@@ -931,7 +940,7 @@ function initSkinCatalog(){
  $("skinMaxPrice").onchange=()=>{skinCatalogMaxPrice=$("skinMaxPrice").value;loadSkinCatalog(true)};
  $("skinStatTrak").onchange=()=>{skinCatalogStatTrak=$("skinStatTrak").checked;loadSkinCatalog(true)};
  $("skinSouvenir").onchange=()=>{skinCatalogSouvenir=$("skinSouvenir").checked;loadSkinCatalog(true)};
- $("loadMoreSkins").onclick=()=>loadSkinCatalog(skinCatalogPending>0);
+ $("loadMoreSkins").onclick=()=>{if(skinCatalogPending>0){skinPricePollAttempts=0;loadSkinCatalog(true);}else loadSkinCatalog(false);};
 }
 
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
