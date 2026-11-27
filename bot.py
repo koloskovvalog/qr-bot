@@ -2635,24 +2635,32 @@ async def claim_demo_case(request):
     user = verify_telegram_user(request)
     try:
         case_id = int(request.match_info["case_id"])
-    except ValueError:
+    except (ValueError, TypeError):
         raise web.HTTPBadRequest(text="Некорректный ID кейса")
-    try:
-        catalog_cases = await load_cs2_catalog("cases")
-        fallback_image = next(
-            (item["image_url"] for item in catalog_cases if "case" in item["name"].lower()),
-            catalog_cases[0]["image_url"] if catalog_cases else None,
-        )
-    except Exception:
-        fallback_image = None
+
     async with db.acquire() as conn:
         async with conn.transaction():
             case = await conn.fetchrow(
-                "SELECT id, title, image_url FROM cases WHERE id=$1 AND active=TRUE",
+                "SELECT id, title FROM cases WHERE id=$1 AND active=TRUE",
                 case_id,
             )
             if not case:
                 raise web.HTTPNotFound(text="Кейс не найден")
+
+            # A daily demo claim grants a virtual catalog skin for practicing
+            # target selection. It is not a Steam item and has no cash value.
+            item = await conn.fetchrow("""
+                SELECT name, rarity, image_url, value_minor, market_hash_name,
+                       wear, stattrak, souvenir, phase
+                FROM case_items
+                WHERE case_id=$1 AND is_active=TRUE
+                  AND market_hash_name IS NOT NULL
+                ORDER BY COALESCE(value_minor, 1000), id
+                LIMIT 1
+            """, case_id)
+            if not item:
+                raise web.HTTPConflict(text="В этом кейсе пока нет предмета для тестового апгрейда")
+
             claimed = await conn.fetchval("""
                 INSERT INTO demo_case_claims(user_id, claim_date)
                 VALUES($1, CURRENT_DATE)
@@ -2660,16 +2668,29 @@ async def claim_demo_case(request):
                 RETURNING user_id
             """, user["id"])
             if not claimed:
-                raise web.HTTPConflict(text="Бесплатный тестовый кейс уже получен сегодня")
+                raise web.HTTPConflict(text="Бесплатный тестовый скин уже получен сегодня")
+
             inventory_id = await conn.fetchval("""
                 INSERT INTO user_inventory(
                     user_id, item_type, item_name, rarity, image_url,
-                    value_minor, source
+                    value_minor, source, market_hash_name, wear,
+                    stattrak, souvenir, phase
                 )
-                VALUES($1, 'case', $2, 'Тестовый кейс', $3, 1000, 'daily_demo')
+                VALUES($1, 'skin', $2, $3, $4, $5, 'daily_demo',
+                       $6, $7, $8, $9, $10)
                 RETURNING id
-            """, user["id"], case["title"], case["image_url"])
-    return web.json_response({"ok": True, "inventory_id": inventory_id, "message": "Тестовый кейс добавлен в инвентарь"})
+            """, user["id"], item["name"], item["rarity"] or "Обычный",
+                item["image_url"], int(item["value_minor"] or 1000),
+                item["market_hash_name"], item["wear"], bool(item["stattrak"]),
+                bool(item["souvenir"]), item["phase"])
+
+    return web.json_response({
+        "ok": True,
+        "inventory_id": inventory_id,
+        "item_name": item["name"],
+        "message": "Тестовый виртуальный скин добавлен в инвентарь",
+        "demo_only": True,
+    })
 
 async def suggest_upgrade_target(request):
     user = verify_telegram_user(request)
@@ -4872,7 +4893,10 @@ async def store_boundary_middleware(request: web.Request, handler):
         # Case catalogue and upgrade target suggestions are read-only previews.
         # Opening cases and consuming inventory through an upgrade stay disabled
         # until a real item-delivery provider and approved payment flow exist.
-        if request.path.startswith("/api/cases/"):
+        if request.path.startswith("/api/cases/") and not (
+            request.method == "POST"
+            and re.fullmatch(r"/api/cases/\\d+/claim", request.path)
+        ):
             raise web.HTTPGone(text="Открытие кейсов пока недоступно: подключение реальной выдачи предметов ещё не завершено.")
         if request.path.startswith("/api/upgrades/") and not (
             request.path == "/api/upgrades/suggest" and request.method == "POST"
@@ -4903,6 +4927,7 @@ def create_app():
     app.router.add_get("/api/steam/callback", steam_auth_callback)
     app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
+    app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
     app.router.add_get("/api/live-drops", get_live_drops)
     app.router.add_get("/api/creator-cases", get_creator_cases)
     app.router.add_post("/api/creator-cases", create_creator_case)
