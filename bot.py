@@ -4895,7 +4895,7 @@ async def store_boundary_middleware(request: web.Request, handler):
         # until a real item-delivery provider and approved payment flow exist.
         if request.path.startswith("/api/cases/") and not (
             request.method == "POST"
-            and re.fullmatch(r"/api/cases/\\d+/claim", request.path)
+            and re.fullmatch(r"/api/cases/\d+/claim", request.path)
         ):
             raise web.HTTPGone(text="Открытие кейсов пока недоступно: подключение реальной выдачи предметов ещё не завершено.")
         if request.path.startswith("/api/upgrades/") and not (
