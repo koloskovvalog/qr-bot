@@ -367,7 +367,6 @@ main{max-width:1180px;padding:22px 22px 62px}
 </head>
 <body><main>
 <header class="top"><div class="brand">QR <span>BOT</span> PRO</div><div class="pill">✦ PREMIUM STORE</div></header>
-<section class="hero"><div class="eyebrow">EXCLUSIVE DIGITAL GOODS</div><h1>Покупки<br>в премиальном стиле</h1><p>Выбирайте цифровые товары, открывайте CS2-кейсы и улучшайте предметы в виртуальном апгрейдере.</p><div class="upgrade-entry"><button class="hero-cta" id="heroUpgrade">✦ ОТКРЫТЬ CS2 АПГРЕЙДЕР</button></div></section>
 <div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="skinsTab">CS2 Скины</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
 <section id="catalogView">
 <div class="ux-home" id="uxHome">
@@ -389,7 +388,6 @@ main{max-width:1180px;padding:22px 22px 62px}
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="skinsView" hidden>
  <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
- <div class="case-intro">Полный каталог вариантов CS2. Введи название оружия или скина — поиск работает по всему каталогу. Цены Lis-Skins (резерв — Market.CSGO) показываются в рублях и обновляются постепенно.</div>
  <div class="skin-tools">
   <input id="skinSearch" type="search" minlength="2" autocomplete="off" placeholder="Начни вводить: AK-47 Redline, AWP Asiimov…">
   <select id="skinWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
@@ -412,7 +410,6 @@ main{max-width:1180px;padding:22px 22px 62px}
  <div class="muted purchase-footnote">Демо-режим: отображение заказа не означает фактическую оплату. Реальные списания отключены.</div>
 </section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Выбирай кейс, изучай содержимое и запускай открытие. Результат определяется сервером, а анимация показывает уже зафиксированный выигрыш. Все открытия сейчас виртуальные и бесплатные.</div>
 <div class="case-catalog-toolbar">
  <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
  <select id="caseSort" class="search" aria-label="Сортировка кейсов"><option value="featured">Рекомендуемые</option><option value="name">По названию</option><option value="items">Больше предметов</option><option value="newest">Сначала новые</option></select>
@@ -438,7 +435,6 @@ main{max-width:1180px;padding:22px 22px 62px}
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Выбери скин из инвентаря и конкретную цель из каталога CS2. Стоимость и шанс считаются по актуальной цене Lis-Skins; если её нет — по Market.CSGO, в рублях. Каталог включает бюджетные скины от 2 ₽ до дорогих вариантов до 100 000 ₽. Виртуальные предметы не являются предметами Steam, реальные деньги не используются.</div>
 <div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><strong id="upgradeWheelPercent">—%</strong><small>CHANCE</small></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
@@ -484,7 +480,6 @@ main{max-width:1180px;padding:22px 22px 62px}
 <div class="notice">Важно: оформление заказа не означает оплату. Оплата считается подтверждённой только после фактической проверки поступления средств. Перед запуском продаж укажите достоверные сведения о продавце, товарах, условиях оплаты, сроках исполнения, контактах и возвратах.</div>
 <section class="admin" id="adminPanel"><h3>Панель администратора</h3><label>Название товара<input id="pTitle" maxlength="120"></label><label>Описание<textarea id="pDesc" rows="2" maxlength="1500"></textarea></label><label>Цена<input id="pPrice" type="number" min=".01" step=".01"></label><label>Валюта<select id="pCurrency"><option>RUB</option><option>EUR</option><option>USD</option></select></label><button id="addProduct">Добавить товар</button><div class="section"><h3>Последние заказы</h3></div><div id="adminOrders" class="orders"></div>
 <div class="section"><h3>Платёжные системы</h3><span class="count">DEMO MODE</span></div>
-<div class="case-intro">Тестовый платёжный контур. Реальные списания отключены. Успешный демо-результат никогда не переводит заказ в статус «Оплачен».</div>
 <div id="paymentProviders" class="orders"><div class="empty">Загрузка провайдеров…</div></div>
 <div class="section"><h3>Тестовые транзакции</h3></div>
 <div id="paymentTransactions" class="orders"><div class="empty">Загрузка…</div></div>
@@ -892,7 +887,7 @@ const drops=d.case_drops||[];
 $("caseDropHistory").innerHTML=drops.length?'<div class="case-drop-grid">'+drops.map(x=>'<article class="case-drop-card">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.item_name)+'" loading="lazy">':'<div class="case-drop-placeholder">CS2</div>')+'<div class="case-drop-info"><strong>'+esc(x.item_name)+'</strong><small>'+esc(x.rarity)+' · '+esc(x.case_title)+'</small><b>'+(x.value_minor?money(x.value_minor,"₽"):"Цена уточняется")+'</b><time>'+new Date(x.created_at).toLocaleString("ru-RU")+'</time></div><span class="demo-pill">DEMO</span></article>').join("")+'</div>':'<div class="empty">Пока ничего не выпало. Открой кейс CS2 — результат появится здесь.</div>';
 }catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>';if($("caseDropHistory"))$("caseDropHistory").innerHTML='<div class="empty">Не удалось загрузить историю кейсов.</div>'}}
 function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
-$("heroUpgrade").onclick=()=>switchTab("upgrade");$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
+$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function adminInit(){try{const d=await api("/api/admin/orders");$("adminPanel").style.display="block";if(!d.items.length){$("adminOrders").innerHTML="Заказов пока нет."}else{$("adminOrders").innerHTML=d.items.map(o=>'<div class="order"><strong>#'+o.id+' · '+esc(o.product_title)+'</strong><div>'+money(o.amount_minor,o.currency)+' · '+esc(o.status)+' · user '+o.user_id+'</div><select id="st'+o.id+'"><option value="invoice_sent">Счёт отправлен</option><option value="paid">Оплата подтверждена</option><option value="delivered">Выдано</option><option value="cancelled">Отменён</option><option value="refunded">Возвращён</option></select><button onclick="setStatus('+o.id+')">Сохранить</button></div>').join("")}await loadPaymentAdmin()}catch(e){}}
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}
