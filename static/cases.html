@@ -35,6 +35,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .case-result-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.case-result-actions button{flex:1;min-width:120px}
 .wallet-card{display:flex;justify-content:space-between;align-items:center;padding:16px;border:1px solid var(--gold);border-radius:14px;background:linear-gradient(120deg,#241d10,#111);margin:12px 0}
 .wallet-card small{display:block;color:var(--muted);font-size:11px}.wallet-card strong{display:block;font-size:24px;color:var(--gold2);margin-top:5px}
+.wallet-topup-panel{margin:10px 0 16px}.wallet-topup-button{width:100%;min-height:48px;font-size:14px;font-weight:950;letter-spacing:.25px;box-shadow:0 6px 22px #d8b45a30}.wallet-topup-caption{text-align:center;color:var(--muted);font-size:10px;margin-top:7px}.wallet-topup-modal{position:fixed;inset:0;z-index:1000;background:#000c;display:flex;align-items:flex-end;justify-content:center;padding:14px}.wallet-topup-modal[hidden]{display:none}.wallet-topup-dialog{position:relative;width:min(100%,440px);padding:22px 18px 18px;border:1px solid #a7833c;border-radius:22px 22px 16px 16px;background:linear-gradient(155deg,#292113,#11100d 70%);box-shadow:0 20px 70px #000b}.wallet-topup-close{position:absolute;right:13px;top:10px;border:0;background:#ffffff12;color:#fff;border-radius:50%;width:34px;height:34px;font-size:23px}.wallet-topup-eyebrow{font-size:10px;letter-spacing:2px;color:var(--gold2);font-weight:900}.wallet-topup-dialog h3{margin:8px 0;font-size:23px}.wallet-topup-dialog p{color:var(--muted);font-size:12px;line-height:1.5;margin:0 0 16px}.wallet-topup-presets{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.wallet-topup-presets button{border:1px solid #7d6637;background:#201b11;color:var(--gold2);border-radius:11px;padding:13px 6px;font-weight:900}.wallet-topup-presets button.active{background:linear-gradient(135deg,#f3dc98,#b98732);color:#171208;border-color:#f3dc98}.wallet-topup-label{display:block;color:var(--muted);font-size:11px;margin:16px 0 6px}.wallet-topup-dialog input{width:100%;box-sizing:border-box;background:#0d0c0a;border:1px solid #554629;color:#fff;border-radius:11px;padding:14px;font-size:16px}.wallet-topup-pay{width:100%;margin-top:13px;min-height:48px}.wallet-topup-pay:disabled{opacity:.55}.wallet-topup-hint{display:block;text-align:center;color:var(--muted);font-size:10px;margin-top:9px}
 .reel-card img{width:100%;height:62px;object-fit:contain;display:block}
 .inventory-actions{display:flex;flex-direction:column;gap:6px}.inventory-item .sell-item{background:#242014;border:1px solid var(--gold);color:var(--gold2);border-radius:10px;padding:9px 11px}
 @keyframes reveal{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
@@ -764,7 +765,31 @@ main{max-width:980px;padding:22px 18px calc(var(--nav-h) + 32px)}
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
- <div class="wallet-card"><div><small>Виртуальный баланс</small><strong id="walletBalance">0,00 ₽</strong></div><span>₽ RUB</span></div>
+ <div class="wallet-card"><div><small>Денежный баланс</small><strong id="walletBalance">0,00 ₽</strong></div><span>₽ RUB</span></div>
+ <div class="wallet-topup-panel">
+  <button type="button" class="goldbtn wallet-topup-button" id="walletTopupBtn">＋ Пополнить баланс</button>
+  <div class="wallet-topup-caption">Безопасная оплата через TeleBotly Pay</div>
+ </div>
+ <div id="walletTopupModal" class="wallet-topup-modal" hidden>
+  <div class="wallet-topup-dialog">
+   <button type="button" class="wallet-topup-close" id="walletTopupClose" aria-label="Закрыть">×</button>
+   <div class="wallet-topup-eyebrow">SHIRPDROP WALLET</div>
+   <h3>Пополнение баланса</h3>
+   <p>Выбери сумму пополнения. Баланс зачислится после подтверждения платежа.</p>
+   <div class="wallet-topup-presets">
+    <button type="button" data-topup-amount="5000">50 ₽</button>
+    <button type="button" data-topup-amount="10000">100 ₽</button>
+    <button type="button" data-topup-amount="30000">300 ₽</button>
+    <button type="button" data-topup-amount="50000">500 ₽</button>
+    <button type="button" data-topup-amount="100000">1 000 ₽</button>
+    <button type="button" data-topup-amount="500000">5 000 ₽</button>
+   </div>
+   <label class="wallet-topup-label" for="walletTopupCustom">Или введи сумму, ₽</label>
+   <input id="walletTopupCustom" type="number" min="10" max="100000" step="1" inputmode="numeric" placeholder="Например, 250">
+   <button type="button" class="goldbtn wallet-topup-pay" id="walletTopupPay">Перейти к оплате</button>
+   <small class="wallet-topup-hint">Минимум 10 ₽ · максимум 100 000 ₽</small>
+  </div>
+ </div>
  <div id="profileStats" class="profile-grid"><div class="empty">Загрузка профиля…</div></div>
  <div class="order"><strong>Ваш реферальный код</strong><div id="myReferralCode" class="profile-code">—</div><button class="buy" id="copyReferralCode">Скопировать код</button><div class="muted">Поделитесь кодом с друзьями. Бонусы начисляются только после ручного подтверждения оплаты их первого заказа.</div></div>
  <div class="order"><strong>Применить код друга</strong><div class="profile-form"><input id="referralInput" maxlength="32" placeholder="Реферальный код"><button class="buy" id="applyReferralCode">Применить</button></div><div class="muted">Доступно до первого заказа, один раз.</div></div>
@@ -1357,7 +1382,22 @@ async function doUpgrade(){
   renderUpgradeChance();
  }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";const pointer=wheel.parentElement.querySelector(".upgrade-wheel-pointer");if(pointer){pointer.getAnimations().forEach(a=>a.cancel());pointer.style.transition="none";pointer.style.transform="rotate(0deg)"}$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>';renderUpgradeChance()}
 }
-async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
+function openWalletTopup(){const modal=$("walletTopupModal");if(modal)modal.hidden=false}
+function closeWalletTopup(){const modal=$("walletTopupModal");if(modal)modal.hidden=true}
+async function submitWalletTopup(){
+ const raw=String($("walletTopupCustom")?.value||"").trim().replace(",",".");
+ const amount=Number(raw);
+ if(!Number.isFinite(amount)||amount<10||amount>100000||Math.round(amount*100)!==amount*100){toast("Укажи сумму от 10 до 100 000 ₽");return}
+ const button=$("walletTopupPay");button.disabled=true;button.textContent="Создаём платёж…";
+ try{
+  const result=await api("/api/wallet/topups",{method:"POST",body:JSON.stringify({amount_minor:Math.round(amount*100)})});
+  if(!result.payment_url)throw new Error("Платёжная ссылка не получена");
+  closeWalletTopup();
+  if(tg?.openLink)tg.openLink(result.payment_url);else window.location.assign(result.payment_url);
+ }catch(e){toast(e.message)}
+ finally{button.disabled=false;button.textContent="Перейти к оплате"}
+}
+async function loadProfile(){try{const [d,w,cash]=await Promise.all([api("/api/profile"),api("/api/wallet"),api("/api/wallet/cash")]);$("walletBalance").textContent=money(cash.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
 const drops=d.case_drops||[];
 $("caseDropHistory").innerHTML=drops.length?'<div class="case-drop-grid">'+drops.map(x=>'<article class="case-drop-card">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.item_name)+'" loading="lazy">':'<div class="case-drop-placeholder">CS2</div>')+'<div class="case-drop-info"><strong>'+esc(x.item_name)+'</strong><small>'+esc(x.rarity)+' · '+esc(x.case_title)+'</small><b>'+(x.value_minor?money(x.value_minor,"₽"):"Цена уточняется")+'</b><time>'+new Date(x.created_at).toLocaleString("ru-RU")+'</time></div><span class="demo-pill">DEMO</span></article>').join("")+'</div>':'<div class="empty">Пока ничего не выпало. Открой кейс CS2 — результат появится здесь.</div>';
 }catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>';if($("caseDropHistory"))$("caseDropHistory").innerHTML='<div class="empty">Не удалось загрузить историю кейсов.</div>'}}
@@ -1390,7 +1430,8 @@ async function loadLiveDrops(force=false){
 }
 
 function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("dropsView").hidden=t!=="drops";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","drops","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="drops")loadLiveDrops(true);if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
-$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
+$("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>$("walletTopupBtn").onclick=openWalletTopup;$("walletTopupClose").onclick=closeWalletTopup;$("walletTopupPay").onclick=submitWalletTopup;document.querySelectorAll("[data-topup-amount]").forEach(b=>b.onclick=()=>{$("walletTopupCustom").value=(Number(b.dataset.topupAmount)/100).toString();document.querySelectorAll("[data-topup-amount]").forEach(x=>x.classList.toggle("active",x===b))});$("walletTopupModal").addEventListener("click",e=>{if(e.target.id==="walletTopupModal")closeWalletTopup()});
+switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}
 document.body.classList.add("cases-store");
