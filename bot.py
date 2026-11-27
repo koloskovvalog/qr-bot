@@ -395,11 +395,9 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_cs2_price_checks_checked
                     ON cs2_price_checks(last_checked_at);
 
-                INSERT INTO payment_providers(code, title, mode, enabled, public_config)
-                VALUES
-                    ('demo', 'QR BOT PRO Demo Gateway', 'demo', TRUE, '{"description":"Тестовый провайдер без списания средств"}'::jsonb),
-                    ('antilopay', 'Antilopay', 'unconfigured', FALSE, '{"description":"Адаптер будет активирован после получения официальной документации и тестовых реквизитов"}'::jsonb)
-                ON CONFLICT (code) DO NOTHING;
+                UPDATE payment_providers
+                SET enabled=FALSE, mode='disabled'
+                WHERE code='demo';
 
                 CREATE TABLE IF NOT EXISTS cases (
                     id BIGSERIAL PRIMARY KEY,
@@ -4719,6 +4717,16 @@ async def store_boundary_middleware(request: web.Request, handler):
         def matches(prefixes):
             return any(request.path == prefix or request.path.startswith(prefix + "/") for prefix in prefixes)
 
+        disabled_demo = (
+            "/api/cases", "/api/live-drops", "/api/creator-cases",
+            "/api/upgrades", "/api/rewards", "/api/admin/cases",
+            "/api/admin/cs2-providers",
+        )
+        if matches(disabled_demo):
+            raise web.HTTPGone(text="Этот демонстрационный раздел ShirpDrop отключён.")
+        if request.path.startswith("/api/inventory/") and request.path.endswith("/sell"):
+            raise web.HTTPGone(text="Продажа виртуальных предметов отключена. Денежные средства доступны только через подтверждённые платежи.")
+
         if mode == "digital" and matches(case_only):
             raise web.HTTPNotFound(text="Этот раздел доступен в магазине QR CASES")
         if mode == "cases" and matches(digital_only):
@@ -4743,21 +4751,13 @@ def create_app():
     app.router.add_get("/api/creator-cases", get_creator_cases)
     app.router.add_post("/api/creator-cases", create_creator_case)
     app.router.add_post("/api/creator-cases/{case_id}/favorite", toggle_creator_case_favorite)
-    app.router.add_post("/api/creator-cases/{case_id}/open", open_creator_case)
     app.router.add_post("/api/inventory/{inventory_id}/favorite", toggle_inventory_favorite)
     app.router.add_get("/api/rewards", get_rewards)
-    app.router.add_post("/api/rewards/weekly/claim", claim_weekly_reward)
-    app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
     app.router.add_get("/api/wallet", get_wallet)
     app.router.add_get("/api/wallet/cash", get_cash_wallet)
     app.router.add_post("/api/wallet/topups", create_telebotly_topup)
     app.router.add_post("/api/webhooks/telebotly", telebotly_webhook)
-    app.router.add_post("/api/inventory/{inventory_id}/sell", sell_inventory_item)
-
-    # Demo payment endpoints
-    app.router.add_post("/api/payments/demo/create", create_demo_payment)
-    app.router.add_get("/api/payments", get_my_demo_payments)
 
     # Payment administration endpoints
     app.router.add_get("/api/admin/payment-providers", admin_get_payment_providers)
@@ -4766,16 +4766,8 @@ def create_app():
         admin_configure_payment_provider,
     )
     app.router.add_get("/api/admin/payment-transactions", admin_get_payment_transactions)
-    app.router.add_post(
-        "/api/admin/payment-transactions/{transaction_id}/simulate",
-        admin_simulate_demo_payment,
-    )
     app.router.add_get("/api/cs2/catalog", get_cs2_catalog)
     app.router.add_get("/api/cs2/skins", get_cs2_skins)
-    app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
-    app.router.add_post("/api/upgrades/suggest", suggest_upgrade_target)
-    app.router.add_post("/api/upgrades/attempt", create_upgrade_attempt)
-    app.router.add_get("/api/upgrades/history", get_upgrade_history)
 
     # Admin endpoints
     app.router.add_put("/api/admin/products/{product_id}", admin_update_product)
