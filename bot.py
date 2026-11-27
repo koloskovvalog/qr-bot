@@ -1621,10 +1621,9 @@ async def create_telebotly_topup(request):
     user = verify_telegram_user(request)
     if not TELEBOTLY_PAY_KEY:
         raise web.HTTPServiceUnavailable(text="TELEBOTLY_PAY_KEY не задан в Render")
-    if not (TELEBOTLY_PAY_KEY.startswith("tbp_test_") or TELEBOTLY_PAY_KEY.startswith("tbp_live_")):
-        logger.error("Invalid TeleBotly Pay key format: expected tbp_test_ or tbp_live_; received prefix=%s",
-                     TELEBOTLY_PAY_KEY[:4] if len(TELEBOTLY_PAY_KEY) >= 4 else "short")
-        raise web.HTTPServiceUnavailable(text="Неверный тип ключа: нужен именно TeleBotly Pay API key с префиксом tbp_live_ или tbp_test_. Ключ tbk_live_ не подходит.")
+    # TeleBotly Pay project keys may be issued with tbp_* or the newer
+    # account API tbk_* prefix. Do not reject locally by prefix: let /project
+    # validate the credential and its permissions.
     if not TELEBOTLY_WEBHOOK_SECRET or not TELEBOTLY_WEBHOOK_SECRET.startswith("whsec_"):
         raise web.HTTPServiceUnavailable(text="TELEBOTLY_WEBHOOK_SECRET отсутствует или имеет неверный формат (ожидается whsec_)")
     try:
@@ -1676,7 +1675,9 @@ async def create_telebotly_topup(request):
                         text=f"TeleBotly не подтвердил Pay API Key (HTTP {project_response.status}, {err.get('code') or 'ошибка ключа'})"
                     )
                 project = project_result.get("data") or project_result
-                if TELEBOTLY_PAY_KEY.startswith("tbp_live_") and not project.get("accepts_live_payments"):
+                is_live_key = TELEBOTLY_PAY_KEY.startswith(("tbp_live_", "tbk_live_"))
+                is_live_project = project.get("livemode") is True
+                if (is_live_key or is_live_project) and not project.get("accepts_live_payments"):
                     raise web.HTTPServiceUnavailable(text="TeleBotly пока не разрешил проекту принимать реальные платежи")
             async with session.post(
                 f"{TELEBOTLY_API_BASE}/payments",
