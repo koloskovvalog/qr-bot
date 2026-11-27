@@ -52,3 +52,4 @@ jobs:
           PY
           node --check /tmp/index.js
           node --check /tmp/admin.js
+          node --check static/caser-features.js
