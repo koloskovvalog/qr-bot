@@ -1621,6 +1621,8 @@ async def create_telebotly_topup(request):
     user = verify_telegram_user(request)
     if not TELEBOTLY_PAY_KEY:
         raise web.HTTPServiceUnavailable(text="TeleBotly Pay API key не настроен на сервере")
+    if not TELEBOTLY_WEBHOOK_SECRET or not TELEBOTLY_WEBHOOK_SECRET.startswith("whsec_"):
+        raise web.HTTPServiceUnavailable(text="TeleBotly webhook secret не настроен на сервере")
     try:
         data = await request.json()
         amount_minor = int(data.get("amount_minor"))
