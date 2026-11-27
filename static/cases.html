@@ -537,6 +537,30 @@ body.cases-store .bottom-nav [data-nav="catalog"],body.cases-store .bottom-nav [
 body.cases-store .bottom-nav{grid-template-columns:repeat(7,minmax(0,1fr))!important}
 body.cases-store #catalogView,body.cases-store #skinsView,body.cases-store #ordersView{display:none!important}
 body.cases-store #cartbar{display:none!important}
+
+/* UX pass: centered case reel, visible drop preview, visual inventory picker */
+#caseStage .case-reel{display:flex;align-items:center;justify-content:flex-start;height:184px;min-height:184px;box-sizing:border-box}
+#caseStage .reel-track{align-items:center;height:100%;min-height:100%}
+#caseStage .reel-card{align-self:center}
+@media(max-width:600px){#caseStage .case-reel{height:158px;min-height:158px}}
+.case-preview{margin:18px 0 8px;padding:13px;border:1px solid #444b58;border-radius:15px;background:linear-gradient(145deg,#202630,#12161d);text-align:left}
+.case-preview-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.case-preview-head strong{font-size:13px;color:#f2d58d}.case-preview-head span{font-size:10px;color:#aab2c0}
+.case-preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.case-preview-item{min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 6px;border:1px solid #3b424d;border-radius:11px;background:#11151b;text-align:center}
+.case-preview-item img,.case-preview-fallback{width:100%;height:62px;object-fit:contain}.case-preview-fallback{display:grid;place-items:center;color:#e4c47d;font-weight:900}
+.case-preview-item strong{width:100%;font-size:9px;line-height:1.25;min-height:24px;overflow-wrap:anywhere}.case-preview-item span,.case-preview-item small{font-size:8px;color:#aab2c0}.case-preview-item b{font-size:10px;color:#f2d58d}
+.case-preview-more{width:100%;margin-top:9px;padding:9px;border:1px solid #5b4b2d;border-radius:9px;background:#211d15;color:#e9cf8b;font-size:10px;font-weight:800}
+.upgrade-source-picker{margin:4px 0 10px;padding:12px;border:1px solid #3b424d;border-radius:14px;background:linear-gradient(145deg,#1b2028,#11151b)}
+.upgrade-source-picker-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}.upgrade-source-picker-head strong{font-size:12px;color:#e9d39c}.upgrade-source-picker-head span{font-size:10px;color:#9da6b5}
+.upgrade-source-picker>.search{width:100%;margin-bottom:10px}
+.upgrade-source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-height:330px;overflow:auto;overscroll-behavior:contain}
+.upgrade-source-card{min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 6px;border:1px solid #3c424d;border-radius:11px;background:#151a22;color:#e7eaf0;text-align:center;cursor:pointer}
+.upgrade-source-card.selected{border-color:#e5bf68;background:linear-gradient(145deg,#342b19,#171a20);box-shadow:0 0 0 1px #e5bf6855}
+.upgrade-source-card img,.upgrade-source-fallback{width:100%;height:66px;object-fit:contain}.upgrade-source-fallback{display:grid;place-items:center;background:#252a33;border-radius:8px;color:#e4c47d;font-weight:900}
+.upgrade-source-card strong{width:100%;min-height:27px;font-size:9px;line-height:1.25;overflow-wrap:anywhere}.upgrade-source-card b{font-size:10px;color:#e9cf8b}
+@media(max-width:390px){.case-preview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.upgrade-source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 </style>
 </head>
 <body><main>
@@ -657,7 +681,8 @@ body.cases-store #cartbar{display:none!important}
 <label class="muted">Режим улучшения</label>
 <select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
 <label class="muted">Предмет для ставки</label>
-<select id="upgradeSource" class="search"><option value="">Загрузка инвентаря…</option></select>
+<select id="upgradeSource" class="search" aria-hidden="true" tabindex="-1" style="display:none"><option value="">Загрузка инвентаря…</option></select>
+<div class="upgrade-source-picker"><div class="upgrade-source-picker-head"><strong>Твой инвентарь</strong><span id="upgradeSourceCount">0 предметов</span></div><input id="upgradeSourceSearch" class="search" type="search" placeholder="Найти свой скин…"><div id="upgradeSourceCards" class="upgrade-source-grid"><div class="empty">Загрузка инвентаря…</div></div></div>
 <div id="upgradeSourceInfo" class="muted">Выбери предмет из инвентаря.</div>
 <div class="upgrade-preset-panel">
  <div class="preset-heading">Быстрый выбор цели</div>
@@ -824,6 +849,7 @@ function selectCase(caseId){
   '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • THEMATIC DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'СКОРО')+'</span></div>'+
   '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</p>'+
   '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>Серверный случайный результат</span></div></div></div>'+
+   '<div class="case-preview"><div class="case-preview-head"><strong>Что может выпасть</strong><span>'+Number(c.items_total||c.items.length)+' предметов в кейсе</span></div><div class="case-preview-grid" id="casePreviewItems"></div><button type="button" class="case-preview-more" id="casePreviewMore">Посмотреть все скины и шансы ↓</button></div>'+
   '<div class="case-open-controls"><label for="caseOpenCount">Количество открытий</label><select id="caseOpenCount" class="search"><option value="1">1 кейс</option><option value="2">2 кейса</option><option value="3">3 кейса</option><option value="4">4 кейса</option><option value="5">5 кейсов</option></select>'+
   '<div class="case-open-actions"><button id="quickOpenCase" class="case-quick-btn" type="button">⚡ Быстро открыть</button><button id="openCase" class="goldbtn" type="button">✦ Открыть с прокруткой</button></div>'+
   '<small class="case-demo-note">'+(Number(c.price_minor||0)===0?'Демо-открытие · виртуальные предметы':'Этот кейс пока недоступен для открытия')+'</small></div>'+
@@ -833,7 +859,7 @@ function selectCase(caseId){
  $("openCase").onclick=()=>openCase("spin");$("quickOpenCase").onclick=()=>openCase("quick");
  $("backToCases").onclick=()=>{$("caseDetailPanel").hidden=true;$("caseCatalogPanel").hidden=false;$("caseResult").innerHTML="";};
  $("claimDemoCase").onclick=claimDemoCase;
- renderCaseCards();renderCaseItems(c.items||[]);
+ renderCaseCards();renderCaseItems(c.items||[]);renderCasePreview(c.items||[]);
  if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы рассчитаны по полному составу кейса.</div>')}
  window.scrollTo?.({top:0,behavior:"smooth"});
 }
@@ -859,6 +885,11 @@ function skinMetaTags(x){
  if(x.souvenir)tags.push('<span class="skin-tag">Souvenir</span>');
  if(x.phase)tags.push('<span class="skin-tag">'+esc(x.phase)+'</span>');
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
+}
+function renderCasePreview(items){
+ const host=$("casePreviewItems");if(!host)return;
+ host.innerHTML=items.slice(0,6).map(i=>'<div class="case-preview-item">'+(i.image_url?'<img src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" loading="lazy" onerror="this.hidden=true">':'<div class="case-preview-fallback">CS2</div>')+'<strong>'+esc(i.name)+'</strong><span>'+esc(i.rarity)+'</span><b>'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</b><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("");
+ const more=$("casePreviewMore");if(more)more.onclick=()=> $("caseItems").scrollIntoView({behavior:"smooth",block:"start"});
 }
 function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
@@ -944,6 +975,7 @@ async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте приложение через Telegram.</div>';return}
  $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";renderUpgradeSources();loadUpgradeTargets(true)};
  $("upgradeSearch").oninput=()=>{clearTimeout(upgradeSearchTimer);upgradeSearchTimer=setTimeout(()=>loadUpgradeTargets(true),250)};
+ $("upgradeSourceSearch").oninput=renderUpgradeSources;
  $("upgradeMinPrice").onchange=()=>loadUpgradeTargets(true);
  $("upgradeMaxPrice").onchange=()=>loadUpgradeTargets(true);
  $("upgradeWear").onchange=()=>loadUpgradeTargets(true);
@@ -961,7 +993,7 @@ async function loadUpgradeView(){
    const inv=await api("/api/inventory");upgradeInventory=inv.items||[];upgradeInventoryLoadedAt=Date.now();
   }
   renderUpgradeSources();
-  if(pendingUpgradeSourceId!==null){$("upgradeSource").value=String(pendingUpgradeSourceId);pendingUpgradeSourceId=null;}
+  if(pendingUpgradeSourceId!==null){$("upgradeSource").value=String(pendingUpgradeSourceId);pendingUpgradeSourceId=null;renderUpgradeSources();}
   if(!upgradeTargets.length||Date.now()-upgradeTargetsLoadedAt>30000)await loadUpgradeTargets(true);
   else renderUpgradeTargets();
   renderUpgradeChance();
@@ -969,10 +1001,20 @@ async function loadUpgradeView(){
 }
 function renderUpgradeSources(){
  const type=$("upgradeMode").value,list=upgradeInventory.filter(x=>x.item_type===type);
- $("upgradeSource").innerHTML=list.length?list.map(x=>'<option value="'+x.id+'">'+esc(x.item_name)+' · '+(x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</option>').join(""):'<option value="">Нет предметов этого типа в инвентаре</option>';
- $("upgradeSource").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;renderUpgradeTargets();renderUpgradeChance()};
+ const currentId=Number($("upgradeSource").value)||0;
+ $("upgradeSource").innerHTML=list.length?list.map(x=>'<option value="'+x.id+'">'+esc(x.item_name)+' · '+(x.market_price_minor?money(x.market_price_minor,"₽"):"Цена уточняется")+'</option>').join(""):'<option value="">Нет предметов этого типа в инвентаре</option>';
+ if(list.some(x=>x.id===currentId))$("upgradeSource").value=String(currentId);
  const selected=list.find(x=>x.id===Number($("upgradeSource").value));
- $("upgradeSourceInfo").textContent=selected?'Ставка: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена Lis-Skins / Market.CSGO уточняется"):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Сначала откройте демо-кейс, чтобы получить скин.');
+ const query=($("upgradeSourceSearch")?.value||"").toLowerCase().trim();
+ const visible=list.filter(x=>!query||(x.item_name||"").toLowerCase().includes(query));
+ $("upgradeSourceCount").textContent=list.length+" предметов";
+ $("upgradeSourceCards").innerHTML=visible.length?visible.map(x=>'<button type="button" class="upgrade-source-card '+(selected?.id===x.id?"selected":"")+'" data-upgrade-source="'+x.id+'">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="upgrade-source-fallback" hidden>CS2</span>':'<span class="upgrade-source-fallback">CS2</span>')+'<strong>'+esc(x.item_name)+'</strong><b>'+(x.market_price_minor?money(x.market_price_minor,"₽"):"Цена уточняется")+'</b></button>').join(""):(list.length?'<div class="empty">Ничего не найдено по этому запросу.</div>':'<div class="empty">'+(type==="case"?'У тебя пока нет кейсов для апгрейда.':'Инвентарь пуст. Сначала открой демо-кейс и получи скин.')+'</div>');
+ $("upgradeSourceCards").querySelectorAll("[data-upgrade-source]").forEach(button=>button.onclick=()=>{
+  $("upgradeSource").value=button.dataset.upgradeSource;selectedUpgradeTarget=null;upgradePresetMode=null;
+  renderUpgradeSources();renderUpgradeTargets();renderUpgradeChance();
+ });
+ $("upgradeSource").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;renderUpgradeSources();renderUpgradeTargets();renderUpgradeChance()};
+ $("upgradeSourceInfo").textContent=selected?'Выбрано: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена уточняется"):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Выбери свой скин ниже или открой демо-кейс.');
 }
 async function applyUpgradePreset(mode,value){
  if($("upgradeMode").value!=="skin"){toast("Пресеты X и % доступны в режиме скинов");return}
