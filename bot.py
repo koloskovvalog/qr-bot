@@ -333,6 +333,7 @@ async def init_db():
                 );
 
                 ALTER TABLE cases ADD COLUMN IF NOT EXISTS image_url TEXT;
+                ALTER TABLE cases ADD COLUMN IF NOT EXISTS reference_price_minor BIGINT NOT NULL DEFAULT 0;
 
                 CREATE TABLE IF NOT EXISTS case_items (
                     id BIGSERIAL PRIMARY KEY,
@@ -1149,8 +1150,111 @@ async def build_cases_response(request):
                         WHERE market_hash_name IS NOT NULL DO NOTHING
                     """, records)
 
+        # Public Caser price points are stored separately from the playable price.
+        # The app remains demo-only: no money is charged and no paid opening is enabled.
+        caser_case_prices = {
+            "snakebite case": 18000,
+            "revolution case": 20000,
+            "clutch case": 21000,
+            "recoil case": 21900,
+            "fracture case": 23500,
+            "falchion case": 24000,
+            "danger zone case": 26000,
+            "gallery case": 29500,
+            "prisma case": 32000,
+            "prisma 2 case": 33300,
+            "horizon case": 33500,
+            "dreams nightmares case": 35000,
+            "dreams and nightmares case": 35000,
+            "operation riptide case": 58000,
+            "kilowatt case": 35000,
+            "cs20 case": 38000,
+            "shadow case": 39000,
+            "shattered web case": 45000,
+            "operation phoenix weapon case": 55000,
+            "revolver case": 65000,
+            "spectrum 2 case": 69000,
+            "operation wildfire case": 69000,
+            "spectrum case": 80000,
+            "operation broken fang case": 105000,
+            "operation hydra case": 300000,
+        }
+        caser_style_specs = [
+            ("MAJOR", 2900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
+            ("CLEAVER", 2900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and 0 < int(x.get("value_minor") or 0) <= 10000),
+            ("BLOWBACK", 3500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() or ("restricted" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 20000)),
+            ("GENESIS", 8900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("restricted", "classified"))),
+            ("SIGMA 2", 5500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 25000),
+            ("SIGMA", 5900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
+            ("ECLIPSE", 7900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("mil-spec", "restricted"))),
+            ("MIL-SPEC", 3900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
+            ("RESTRICTED", 15900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
+            ("CLASSIFIED", 64900, lambda x: "classified" in str(x.get("rarity") or "").casefold()),
+            ("COVERT", 589900, lambda x: "covert" in str(x.get("rarity") or "").casefold()),
+            ("KNIFE", 1249900, lambda x: any(k in str(x.get("weapon") or x.get("name") or "").casefold() for k in ("knife", "karambit", "bayonet", "daggers", "talon", "stiletto", "kukri", "ursus", "navaja", "nomad", "paracord", "skeleton", "survival", "falchion", "bowie", "flip", "gut", "gloves"))),
+            ("PREMIUM 1", 499900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("classified", "covert"))),
+        ]
+        for title, reference_price, predicate in caser_style_specs:
+            selected = [skin for skin in catalog_skins if skin.get("market_hash_name") and predicate(skin)]
+            unique = {skin["market_hash_name"]: skin for skin in selected}
+            selected = list(unique.values())
+            selected.sort(key=lambda x: (int(x.get("value_minor") or 0), str(x.get("name") or "")))
+            selected = selected[:160]
+            if len(selected) < 8:
+                logger.info("Skipping Caser-inspired demo case %s: only %s matching catalog items", title, len(selected))
+                continue
+            cover_url = selected[0].get("image_url")
+            case_id = await conn.fetchval("SELECT id FROM cases WHERE title=$1 ORDER BY id LIMIT 1", title)
+            description = "Авторская подборка ShirpDrop по мотивам публичных категорий кейсов. Ориентир цены взят из открытого каталога Caser; открытие бесплатное и демо."
+            if case_id:
+                await conn.execute("""
+                    UPDATE cases SET description=$2, price_minor=0, reference_price_minor=$3,
+                        currency='RUB', image_url=COALESCE(image_url,$4), active=TRUE
+                    WHERE id=$1
+                """, case_id, description, reference_price, cover_url)
+            else:
+                case_id = await conn.fetchval("""
+                    INSERT INTO cases(title,description,price_minor,reference_price_minor,currency,image_url,active)
+                    VALUES($1,$2,0,$3,'RUB',$4,TRUE) RETURNING id
+                """, title, description, reference_price, cover_url)
+            has_items = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM case_items WHERE case_id=$1)", case_id)
+            if not has_items:
+                records = []
+                for skin in selected:
+                    records.append((
+                        case_id, skin.get("name") or skin["market_hash_name"],
+                        skin.get("rarity") or "Неизвестно", cs2_case_weight(skin.get("rarity")),
+                        skin.get("image_url"), int(skin.get("value_minor") or 0),
+                        skin["market_hash_name"], skin.get("wear") or "",
+                        bool(skin.get("stattrak")), bool(skin.get("souvenir")), skin.get("phase") or ""
+                    ))
+                await conn.executemany("""
+                    INSERT INTO case_items(case_id,name,rarity,weight,image_url,value_minor,market_hash_name,wear,stattrak,souvenir,phase)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    ON CONFLICT (case_id, market_hash_name) WHERE market_hash_name IS NOT NULL DO NOTHING
+                """, records)
+
+        for catalog_case in catalog_cases:
+            normalized_title = re.sub(r"[^a-z0-9]+", " ", str(catalog_case.get("name") or "").casefold()).strip()
+            reference_price = caser_case_prices.get(normalized_title)
+            if not reference_price:
+                continue
+            existing_case = await conn.fetchrow("""
+                SELECT c.id, EXISTS(
+                    SELECT 1 FROM case_items ci
+                    WHERE ci.case_id=c.id AND ci.is_active=TRUE
+                ) AS has_items
+                FROM cases c WHERE c.title=$1 ORDER BY c.id LIMIT 1
+            """, catalog_case["name"])
+            if existing_case and existing_case["has_items"]:
+                await conn.execute("""
+                    UPDATE cases
+                    SET active=TRUE, reference_price_minor=$2
+                    WHERE id=$1
+                """, existing_case["id"], reference_price)
+
         cases = await conn.fetch("""
-            SELECT id, title, description, price_minor, currency, image_url
+            SELECT id, title, description, price_minor, reference_price_minor, currency, image_url
             FROM cases
             WHERE active = TRUE
             ORDER BY id
@@ -1210,6 +1314,9 @@ async def build_cases_response(request):
             "id": case["id"], "title": case["title"],
             "description": case["description"],
             "price_minor": case["price_minor"],
+            "reference_price_minor": case["reference_price_minor"],
+            "estimated_return_minor": (sum(int(x["weight"]) * int(x.get("market_price_minor") or x.get("value_minor") or 0) * 90 for x in contents) // (total * 100)) if total else 0,
+            "estimated_rtp_percent": round((sum(int(x["weight"]) * int(x.get("market_price_minor") or x.get("value_minor") or 0) * 90 for x in contents) / (total * 100)) * 100 / case["reference_price_minor"], 2) if total and case["reference_price_minor"] else None,
             "currency": case["currency"],
             "image_url": case["image_url"] or fallback_case_image,
             "demo_only": True,
@@ -2242,7 +2349,8 @@ async def suggest_upgrade_target(request):
     chosen["suggested_chance_percent"] = round(source_value/chosen["market_price_minor"]*75, 2)
     return web.json_response({"item": chosen, "source_value_minor": source_value,
         "desired_target_minor": round(desired), "mode": mode, "value": raw_value,
-        "fresh_price_count": len(prices), "demo_only": True})
+        "fresh_price_count": len(prices), "expected_return_percent": 75.0,
+        "house_edge_percent": 25.0, "demo_only": True})
 
 
 async def create_upgrade_attempt(request):
@@ -2371,7 +2479,8 @@ async def create_upgrade_attempt(request):
     return web.json_response({
         "ok": True, "attempt_id": attempt_id, "success": success,
         "chance_percent": chance, "roll_percent": roll / 100.0, "source_name": source["item_name"],
-        "target": target, "demo_only": True,
+        "target": target, "expected_return_percent": 75.0,
+        "house_edge_percent": 25.0, "demo_only": True,
         "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
     })
 
@@ -2943,7 +3052,7 @@ async def admin_get_cases(request):
     require_admin(request)
     async with db.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT c.id,c.title,c.description,c.price_minor,c.currency,c.active,
+            SELECT c.id,c.title,c.description,c.price_minor,c.reference_price_minor,c.currency,c.active,
                    c.image_url,c.created_at,
                    COUNT(ci.id) FILTER (WHERE ci.is_active)::INTEGER AS active_items,
                    COUNT(ci.id)::INTEGER AS total_items
@@ -2952,7 +3061,7 @@ async def admin_get_cases(request):
         """)
     return web.json_response({"items":[{
         "id":r["id"],"title":r["title"],"description":r["description"],
-        "price_minor":r["price_minor"],"currency":r["currency"],
+        "price_minor":r["price_minor"],"reference_price_minor":r["reference_price_minor"],"currency":r["currency"],
         "active":r["active"],"image_url":r["image_url"],
         "active_items":r["active_items"],"total_items":r["total_items"],
         "created_at":r["created_at"].isoformat()
@@ -2968,11 +3077,13 @@ async def admin_save_case(request):
         currency = str(data.get("currency","RUB")).upper()
         raw_price = Decimal(str(data.get("price","0")).replace(",","."))
         price_minor = int(raw_price * 100)
+        raw_reference_price = Decimal(str(data.get("reference_price","0")).replace(",","."))
+        reference_price_minor = int(raw_reference_price * 100)
         image_url = str(data.get("image_url","")).strip()[:1000] or None
         active = bool(data.get("active", True))
     except (ValueError, TypeError, InvalidOperation, json.JSONDecodeError):
         raise web.HTTPBadRequest(text="Проверьте данные кейса")
-    if not title or currency not in {"RUB","EUR","USD"} or price_minor < 0:
+    if not title or currency not in {"RUB","EUR","USD"} or price_minor < 0 or reference_price_minor < 0:
         raise web.HTTPBadRequest(text="Название обязательно, цена не может быть отрицательной")
     if image_url and not image_url.startswith(("https://","http://")):
         raise web.HTTPBadRequest(text="Ссылка на изображение должна начинаться с http:// или https://")
@@ -2980,15 +3091,15 @@ async def admin_save_case(request):
         if case_id:
             row = await conn.fetchrow("""
                 UPDATE cases SET title=$1,description=$2,price_minor=$3,
-                    currency=$4,image_url=$5,active=$6 WHERE id=$7 RETURNING id
-            """,title,description,price_minor,currency,image_url,active,case_id)
+                    reference_price_minor=$4,currency=$5,image_url=$6,active=$7 WHERE id=$8 RETURNING id
+            """,title,description,price_minor,reference_price_minor,currency,image_url,active,case_id)
             if not row: raise web.HTTPNotFound(text="Кейс не найден")
             saved_id=case_id
         else:
             saved_id = await conn.fetchval("""
-                INSERT INTO cases(title,description,price_minor,currency,image_url,active)
-                VALUES($1,$2,$3,$4,$5,$6) RETURNING id
-            """,title,description,price_minor,currency,image_url,active)
+                INSERT INTO cases(title,description,price_minor,reference_price_minor,currency,image_url,active)
+                VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id
+            """,title,description,price_minor,reference_price_minor,currency,image_url,active)
     await write_audit(user["id"],"case_saved",{"case_id":saved_id})
     return web.json_response({"ok":True,"case_id":saved_id})
 
@@ -4021,10 +4132,11 @@ async def get_rewards(request):
             SELECT claimed_at, points FROM weekly_reward_claims
             WHERE user_id=$1 ORDER BY claimed_at DESC LIMIT 1
         """, user["id"])
-    available = not last or (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() >= 7*86400
-    next_at = (last["claimed_at"] + timedelta(days=7)).isoformat() if last and not available else None
+    available = (not last or (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() >= 7*86400) and int(points) < 1000
+    next_at = (last["claimed_at"] + timedelta(days=7)).isoformat() if last and not available and int(points) < 1000 else None
     return web.json_response({
-        "points": int(points), "weekly_points": 100,
+        "points": int(points), "weekly_points": 100, "points_cap": 1000,
+        "cap_reached": int(points) >= 1000,
         "available": available, "next_claim_at": next_at,
         "last_claim_at": last["claimed_at"].isoformat() if last else None,
         "demo_only": True
@@ -4048,20 +4160,24 @@ async def claim_weekly_reward(request):
             """, user["id"])
             if last and (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() < 7*86400:
                 raise web.HTTPConflict(text="Еженедельная награда уже получена. Загляните позже.")
+            current_points = await conn.fetchval("SELECT points FROM user_reward_points WHERE user_id=$1", user["id"]) or 0
+            if int(current_points) >= 1000:
+                raise web.HTTPConflict(text="Достигнут лимит демонстрационных бонусов — 1 000 баллов.")
+            award_points = min(100, 1000 - int(current_points))
             await conn.execute("""
-                INSERT INTO weekly_reward_claims(user_id,points) VALUES($1,100)
-            """, user["id"])
+                INSERT INTO weekly_reward_claims(user_id,points) VALUES($1,$2)
+            """, user["id"], award_points)
             points = await conn.fetchval("""
-                UPDATE user_reward_points SET points=points+100,updated_at=NOW()
+                UPDATE user_reward_points SET points=points+$2,updated_at=NOW()
                 WHERE user_id=$1 RETURNING points
-            """, user["id"])
+            """, user["id"], award_points)
             await conn.execute("""
                 INSERT INTO audit_log(actor_id,action,details)
                 VALUES($1,'weekly_demo_reward_claimed',$2::jsonb)
-            """, user["id"], json.dumps({"points":100}))
+            """, user["id"], json.dumps({"points":award_points, "cap":1000}))
     return web.json_response({
-        "ok": True, "points": int(points), "added_points": 100,
-        "message": "Начислено 100 демонстрационных бонусных баллов. Они не являются деньгами и не выводятся."
+        "ok": True, "points": int(points), "added_points": award_points,
+        "message": f"Начислено {award_points} демонстрационных бонусных баллов. Лимит — 1 000 баллов; они не являются деньгами и не выводятся."
     })
 
 
