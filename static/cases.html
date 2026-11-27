@@ -730,7 +730,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div class="section"><h2>Популярные CS2-кейсы</h2><button class="text-link" type="button" data-go="cases">Все кейсы →</button></div>
  <div id="homeCaseGrid" class="home-case-grid"><div class="empty">Загружаем кейсы…</div></div>
 </section>
-<div class="ux-hint"><strong>Как начать:</strong> открой кейс, забери предмет в виртуальный инвентарь и попробуй апгрейд.</div>
+<div class="ux-hint"><strong>Как начать:</strong> изучи содержимое кейсов, получи ежедневный тестовый скин и попробуй калькулятор апгрейда.</div>
 <div class="section"><h2>Цифровые товары</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по цифровым товарам…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
@@ -1019,7 +1019,7 @@ function renderCaseCards(){
   return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
    '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
    '<div class="case-card-info"><div class="case-card-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+('КАТАЛОГ')+'</span></div><strong>'+esc(c.title)+'</strong>'+
-   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.reference_price_minor||0)>0?'ориентир '+money(c.reference_price_minor,"RUB"):(Number(c.price_minor||0)===0?'0 ₽':'СКОРО'))+'</b></div></div></button>';
+   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.reference_price_minor||0)>0?'ориентир '+money(c.reference_price_minor,"RUB"):'ОТКРЫТИЕ СКОРО')+'</b></div></div></button>';
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
 }
