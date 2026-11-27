@@ -970,6 +970,90 @@ async def get_cases(request):
                         "No source skin membership found for CS2 crate %s (%s)",
                         catalog_case.get("name"), catalog_case.get("id")
                     )
+        # Replace generic imported crates on the public shelf with original
+        # ShirpDrop themed demo cases. Old case rows/items and opening history stay intact.
+        standard_case_titles = [
+            item["name"] for item in catalog_cases
+            if "case" in str(item.get("name", "")).casefold()
+        ]
+        themed_case_specs = [
+            ("АК-47: КАЛИБР", "Тематическая подборка раскрасок AK-47 — от армейских до тайных.", lambda x: "ak-47" in str(x.get("weapon", "")).casefold()),
+            ("AWP: ОДИН ВЫСТРЕЛ", "Снайперская серия с раскрасками AWP разных уровней редкости.", lambda x: str(x.get("weapon", "")).casefold() == "awp"),
+            ("M4: ТАКТИЧЕСКИЙ ОТРЯД", "Подборка M4A4 и M4A1-S для тех, кто играет от контроля карты.", lambda x: str(x.get("weapon", "")).casefold() in {"m4a4", "m4a1-s"}),
+            ("ПИСТОЛЕТНЫЙ КАЛИБР", "Пистолетные раскраски: быстрый дроп с разными уровнями редкости.", lambda x: str(x.get("weapon", "")).casefold() in {"glock-18", "usp-s", "p2000", "p250", "five-seven", "tec-9", "cz75-auto", "dual berettas", "desert eagle", "r8 revolver"}),
+            ("НОЖЕВОЙ: КОЛЛЕКЦИЯ КЛИНКОВ", "Клинки и редкие ножевые модели CS2. Только виртуальные демо-предметы.", lambda x: any(k in str(x.get("weapon", "")).casefold() for k in ("knife", "karambit", "bayonet", "daggers", "talon", "stiletto", "kukri", "ursus", "navaja", "nomad", "paracord", "skeleton", "survival", "falchion", "bowie", "flip", "gut"))),
+            ("ПЕРЧАТОЧНЫЙ: BLACK GOLD", "Коллекция перчаток с разными вариантами износа.", lambda x: "glove" in str(x.get("weapon", "")).casefold() or "перчат" in str(x.get("weapon", "")).casefold()),
+            ("НЕОНОВАЯ НОЧЬ", "Яркие и контрастные раскраски: Asiimov, Hyper Beast, Neo-Noir и другие.", lambda x: any(k in str(x.get("name", "")).casefold() for k in ("neon", "asiimov", "hyper beast", "neo-noir", "printstream", "cyrex", "decimator", "pulse", "mecha industries", "vivid"))),
+            ("ТАЙНЫЙ УРОВЕНЬ", "Подборка предметов высшей редкости — шанс каждого предмета показан в кейсе.", lambda x: any(k in str(x.get("rarity", "")).casefold() for k in ("covert", "тайное", "extraordinary", "контрабанд"))),
+            ("ЗОЛОТОЙ ЧАС", "Золотые, градиентные и переливающиеся покрытия.", lambda x: any(k in str(x.get("name", "")).casefold() for k in ("fade", "doppler", "tiger tooth", "marble fade", "gamma doppler", "gold", "lore", "ruby", "sapphire", "emerald", "black pearl", "case hardened"))),
+        ]
+        async with conn.transaction():
+            await conn.execute("""
+                UPDATE cases SET active=FALSE
+                WHERE title = ANY($1::text[]) OR title='Премиум кейс'
+            """, standard_case_titles)
+            for title, description, predicate in themed_case_specs:
+                selected = [
+                    skin for skin in catalog_skins
+                    if skin.get("market_hash_name") and predicate(skin)
+                ]
+                unique = {skin["market_hash_name"]: skin for skin in selected}
+                selected = list(unique.values())
+                selected.sort(key=lambda x: (
+                    cs2_case_weight(x.get("rarity")),
+                    -int(x.get("value_minor") or 0),
+                    str(x.get("name") or "")
+                ))
+                selected = selected[:160]
+                if len(selected) < 8:
+                    logger.warning("Skipping themed case %s: only %s matching catalog items", title, len(selected))
+                    continue
+                cover_url = selected[0].get("image_url")
+                case_id = await conn.fetchval(
+                    "SELECT id FROM cases WHERE title=$1 ORDER BY id LIMIT 1",
+                    title
+                )
+                if case_id:
+                    await conn.execute("""
+                        UPDATE cases SET description=$2, price_minor=0, currency='RUB',
+                            image_url=COALESCE(image_url, $3), active=TRUE
+                        WHERE id=$1
+                    """, case_id, description + " Демо-режим: виртуальные предметы, без денежных ставок.", cover_url)
+                else:
+                    case_id = await conn.fetchval("""
+                        INSERT INTO cases(title, description, price_minor, currency, image_url, active)
+                        VALUES($1,$2,0,'RUB',$3,TRUE) RETURNING id
+                    """, title, description + " Демо-режим: виртуальные предметы, без денежных ставок.", cover_url)
+                has_items = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM case_items WHERE case_id=$1)",
+                    case_id
+                )
+                if not has_items:
+                    records = []
+                    for skin in selected:
+                        try:
+                            value_minor = int(skin.get("value_minor") or 0)
+                        except (TypeError, ValueError):
+                            value_minor = 0
+                        records.append((
+                            case_id, skin.get("name") or skin["market_hash_name"],
+                            skin.get("rarity") or "Неизвестно",
+                            cs2_case_weight(skin.get("rarity")),
+                            skin.get("image_url"), value_minor,
+                            skin["market_hash_name"], skin.get("wear") or "",
+                            bool(skin.get("stattrak")), bool(skin.get("souvenir")),
+                            skin.get("phase") or ""
+                        ))
+                    await conn.executemany("""
+                        INSERT INTO case_items(
+                            case_id,name,rarity,weight,image_url,value_minor,
+                            market_hash_name,wear,stattrak,souvenir,phase
+                        )
+                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        ON CONFLICT (case_id, market_hash_name)
+                        WHERE market_hash_name IS NOT NULL DO NOTHING
+                    """, records)
+
         cases = await conn.fetch("""
             SELECT id, title, description, price_minor, currency, image_url
             FROM cases
@@ -1976,8 +2060,8 @@ async def suggest_upgrade_target(request):
         if not source_value:
             if not source_market_name:
                 raise web.HTTPBadRequest(text="Не удалось однозначно сопоставить этот предмет с каталогом CS2. Выберите другой скин.")
-            if not APISKINS_API_KEY:
-                raise web.HTTPServiceUnavailable(text="Цены временно недоступны: не настроен ключ API Skins на сервере.")
+            # OpenSkin is the primary public price source and does not require API Skins credentials.
+            # API Skins remains an optional fallback inside the price worker.
             # Fetch the source quote and a useful target sample in the SAME
             # marketplace batch. Previously these were requested sequentially,
             # costing users two complete API round trips before an X2 target appeared.
@@ -2021,8 +2105,7 @@ async def suggest_upgrade_target(request):
         queue_cs2_price_refresh([{"market_hash_name": name} for name in list(stale_names)[:100]])
     candidates = [x for x in catalog if x.get("market_hash_name") in prices]
     if not candidates:
-        if not APISKINS_API_KEY:
-            raise web.HTTPServiceUnavailable(text="Цены каталога недоступны: проверьте APISKINS_API_KEY в настройках Render.")
+        # Continue with the keyless OpenSkin queue; API Skins is only an optional fallback.
         # Queue a useful sample around the requested price instead of the first
         # eight alphabetic entries; one batch can contain up to 100 names.
         ranked = sorted(
