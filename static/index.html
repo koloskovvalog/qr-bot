@@ -774,7 +774,7 @@ function upgradeInventoryItem(id,type){
 }
 
 let pendingUpgradeSourceId=null;
-let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null;
+let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetTotal=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null;
 async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте приложение через Telegram.</div>';return}
  $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";loadUpgradeView()};
@@ -847,20 +847,13 @@ async function applyUpgradePreset(mode,value){
 async function loadUpgradeTargets(reset=true){
  if(upgradeTargetBusy)return;
  const type=$("upgradeMode").value;
- if(reset){upgradeTargetPage=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
+ if(reset){upgradeTargetPage=0;upgradeTargetTotal=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
  const q=$("upgradeSearch").value.trim();
- if(type==="skin"&&q.length<2){
-  $("upgradeTargets").innerHTML='<div class="empty">Введи минимум 2 символа для ручного поиска или выбери быстрый X / шанс выше — подберём цель автоматически по всему каталогу.</div>';
-  $("upgradeTargetCount").textContent="Автоподбор или поиск";
-  $("upgradeLoadMore").hidden=true;
-  $("doUpgrade").disabled=!selectedUpgradeTarget;
-  return;
- }
  upgradeTargetBusy=true;$("upgradeTargets").innerHTML=reset?'<div class="empty">Загружаем скины и цены Steam…</div>':$("upgradeTargets").innerHTML;
  try{
   if(type==="case"){
    const d=await api("/api/cs2/catalog?kind=cases&limit=160");
-   upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);upgradeTargetHasMore=false;
+   upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);upgradeTargetTotal=upgradeTargets.length;upgradeTargetHasMore=false;
   }else{
    const params=new URLSearchParams({q,page:String(upgradeTargetPage),limit:"24",sort:$("upgradeSort").value});
    if($("upgradeMinPrice").value)params.set("min_price",$("upgradeMinPrice").value);
@@ -871,6 +864,7 @@ async function loadUpgradeTargets(reset=true){
    if($("upgradeSouvenir").checked)params.set("souvenir","1");
    const d=await api("/api/cs2/skins?"+params.toString());
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
+   upgradeTargetTotal=Number(d.total||0);
    upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
    $("upgradePriceNote").textContent="Полный каталог CS2: износ, редкость, StatTrak™ и Souvenir. Цены Lis-Skins / Market.CSGO обновляются постепенно; скины без цены видны, но станут доступны для апгрейда после обновления котировки.";
   }
@@ -887,7 +881,7 @@ function renderUpgradeTargets(){
   const inSteamRange=price===0||(price>=200&&price<=10000000);
   return inSteamRange&&(!source||!sourceValue||!price||targetValue>sourceValue)&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
  });
- $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":list.length+" на странице";
+ $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":(upgradeTargetTotal?list.length+" из "+upgradeTargetTotal+" скинов":list.length+" на странице");
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=!selectedUpgradeTarget;return}
  $("upgradeTargets").innerHTML=list.map(x=>{const price=Number(x.market_price_minor||0),available=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);return '<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+(!available?' unpriced':'')+'" data-target="'+esc(x.id)+'" '+(!available?'disabled aria-disabled="true"':'')+'>'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+(available?money(price,"₽"):"Цена обновляется")+'</small>'+skinMetaTags(x)+'</button>'}).join("");
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
@@ -899,6 +893,13 @@ function renderUpgradeChance(){
  const sourceValue=Number($("upgradeMode").value==="skin"?source.market_price_minor:source.value_minor);
  const targetValue=Number($("upgradeMode").value==="skin"?selectedUpgradeTarget.market_price_minor:selectedUpgradeTarget.value_minor);
  if(!sourceValue||!targetValue){$("upgradeChance").textContent="Цена уточняется";$("doUpgrade").disabled=true;return}
+ if(!sourceValue||!targetValue){
+  $("upgradeChance").textContent="Цена уточняется";$("upgradeWheelPercent").textContent="—%";
+  $("upgradeWheel").style.setProperty("--chance","0%");
+  $("upgradeWheelStatus").textContent="Ожидаем актуальную цену предмета для честного расчёта";
+  $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
+  $("doUpgrade").disabled=true;return;
+ }
  const chance=Math.min(75,Math.max(.01,Math.round(sourceValue/targetValue*7500)/100));
  $("upgradeChance").textContent=chance.toFixed(2)+"%";$("upgradeWheelPercent").textContent=chance.toFixed(1)+"%";$("upgradeWheel").style.setProperty("--chance",chance+"%");$("upgradeWheelStatus").textContent="Сектор успеха подсвечен золотым";
  const multiplier=targetValue/sourceValue;
