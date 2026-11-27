@@ -995,7 +995,7 @@ async function loadCases(force=false){
  if(casesLoadPromise)return casesLoadPromise;
  casesLoadPromise=(async()=>{try{
   const d=await api("/api/cases");casesData=d.items||[];casesLoadedAt=Date.now();
-  $("caseSearch").oninput=()=>{clearTimeout(caseSearchTimer);caseSearchTimer=setTimeout(renderCaseCards,120)};
+  $("caseSearch").oninput=()=>{clearTimeout(caseSearchTimer);caseSearchTimer=setTimeout(renderCaseCards,60)};
   $("caseSort").onchange=renderCaseCards;
   if(!casesData.length){$("caseCatalogCount").textContent="0 кейсов";$("caseCards").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';$("caseStage").innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
   renderCaseCards();
@@ -1101,7 +1101,7 @@ let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTarg
 async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте приложение через Telegram.</div>';return}
  $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";renderUpgradeSources();loadUpgradeTargets(true)};
- $("upgradeSearch").oninput=()=>{clearTimeout(upgradeSearchTimer);upgradeSearchTimer=setTimeout(()=>loadUpgradeTargets(true),250)};
+ $("upgradeSearch").oninput=()=>{clearTimeout(upgradeSearchTimer);upgradeSearchTimer=setTimeout(()=>loadUpgradeTargets(true),120)};
  $("upgradeSourceSearch").oninput=renderUpgradeSources;
  $("upgradeMinPrice").onchange=()=>loadUpgradeTargets(true);
  $("upgradeMaxPrice").onchange=()=>loadUpgradeTargets(true);
@@ -1116,8 +1116,8 @@ async function loadUpgradeView(){
  $("applyCustomMultiplier").onclick=()=>applyUpgradePreset("multiplier",Number($("upgradeCustomMultiplier").value));
  $("applyCustomChance").onclick=()=>applyUpgradePreset("chance",Number($("upgradeCustomChance").value));
  try{
-  const needInventory=!upgradeInventoryLoadedAt||Date.now()-upgradeInventoryLoadedAt>60000;
-  const needTargets=!upgradeTargets.length||Date.now()-upgradeTargetsLoadedAt>120000;
+  const needInventory=!upgradeInventoryLoadedAt||Date.now()-upgradeInventoryLoadedAt>120000;
+  const needTargets=!upgradeTargets.length||Date.now()-upgradeTargetsLoadedAt>180000;
   const jobs=[];
   if(needInventory)jobs.push(api("/api/inventory").then(inv=>{upgradeInventory=inv.items||[];upgradeInventoryLoadedAt=Date.now();}));
   if(needTargets)jobs.push(loadUpgradeTargets(true));
@@ -1156,16 +1156,19 @@ async function applyUpgradePreset(mode,value){
  const presetButtons=[...document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]")];
  presetButtons.forEach(b=>b.disabled=true);
  try{
-  let d=null;
-  for(let attempt=0;attempt<18;attempt++){
-   d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
-   if(!d.pending)break;
-   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" · "+(attempt+1)+"/18";
-   await new Promise(resolve=>setTimeout(resolve,1000));
+  const payload={source_inventory_id:source.id,item_type:"skin",mode,value};
+  let d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify(payload)});
+  // The first request queues a market batch. Poll with increasing intervals
+  // instead of hammering the API every second for up to 18 seconds.
+  const waits=[1400,2200,3200,4500];
+  for(let attempt=0;d?.pending&&attempt<waits.length;attempt++){
+   $("upgradePresetStatus").textContent=(d.message||"Получаем рыночные котировки…")+" · "+(attempt+1)+"/"+waits.length;
+   await new Promise(resolve=>setTimeout(resolve,waits[attempt]));
+   d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify(payload)});
   }
   if(!d||d.pending){
-   $("upgradePresetStatus").textContent="Рыночные котировки ещё обновляются. Попробуй повторить подбор чуть позже.";
-   toast("Цены CS2 ещё загружаются");
+   $("upgradePresetStatus").textContent="Цены рынка ещё обновляются. Каталог уже доступен — повтори подбор чуть позже.";
+   toast("Подбор временно ожидает котировки рынка");
    return;
   }
   selectedUpgradeTarget=d.item;
