@@ -2422,19 +2422,29 @@ async def admin_toggle_case_item(request):
 
 async def admin_get_wallet_users(request):
     require_admin(request)
-    q=str(request.query.get("q","")).strip()[:100]
+    q = str(request.query.get("q", "")).strip()[:100]
     async with db.acquire() as conn:
-        rows=await conn.fetch("""
-            SELECT w.user_id,w.balance_minor,w.updated_at,
-                   (SELECT COUNT(*) FROM orders o WHERE o.user_id=w.user_id) AS orders_count
-            FROM wallet_accounts w
-            WHERE ($1='' OR w.user_id::text ILIKE '%'||$1||'%')
-            ORDER BY w.updated_at DESC LIMIT 100
-        """,q)
+        rows = await conn.fetch("""
+            WITH known_users AS (
+                SELECT user_id FROM wallet_accounts
+                UNION SELECT user_id FROM orders
+                UNION SELECT user_id FROM user_inventory
+                UNION SELECT user_id FROM customer_profiles
+            )
+            SELECT u.user_id, COALESCE(w.balance_minor, 0)::BIGINT AS balance_minor,
+                   COALESCE(w.updated_at, NOW()) AS updated_at,
+                   (SELECT COUNT(*) FROM orders o WHERE o.user_id=u.user_id) AS orders_count
+            FROM known_users u
+            LEFT JOIN wallet_accounts w ON w.user_id=u.user_id
+            WHERE ($1='' OR u.user_id::text ILIKE '%'||$1||'%')
+            ORDER BY COALESCE(w.updated_at, NOW()) DESC
+            LIMIT 100
+        """, q)
     return web.json_response({"items":[{
         "user_id":r["user_id"],"balance_minor":r["balance_minor"],
         "orders_count":r["orders_count"],"updated_at":r["updated_at"].isoformat()
     } for r in rows]})
+
 
 async def admin_adjust_wallet(request):
     admin=require_admin(request)
