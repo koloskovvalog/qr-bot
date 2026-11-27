@@ -893,13 +893,13 @@ async function loadUpgradeTargets(reset=true){
  const type=$("upgradeMode").value;
  if(reset){upgradeTargetPage=0;upgradeTargetTotal=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
  const q=$("upgradeSearch").value.trim();
- upgradeTargetBusy=true;$("upgradeTargets").innerHTML=reset?'<div class="empty">Загружаем скины и цены Steam…</div>':$("upgradeTargets").innerHTML;
+ upgradeTargetBusy=true;$("upgradeTargets").innerHTML=reset?'<div class="empty">Загружаем каталог CS2…</div>':$("upgradeTargets").innerHTML;
  try{
   if(type==="case"){
    const d=await api("/api/cs2/catalog?kind=cases&limit=160");
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);upgradeTargetTotal=upgradeTargets.length;upgradeTargetHasMore=false;
   }else{
-   const params=new URLSearchParams({q,page:String(upgradeTargetPage),limit:"24",sort:$("upgradeSort").value});
+   const params=new URLSearchParams({q,page:String(upgradeTargetPage),limit:"40",sort:$("upgradeSort").value});
    if($("upgradeMinPrice").value)params.set("min_price",$("upgradeMinPrice").value);
    if($("upgradeMaxPrice").value)params.set("max_price",$("upgradeMaxPrice").value);
    if($("upgradeWear").value)params.set("wear",$("upgradeWear").value);
@@ -910,11 +910,11 @@ async function loadUpgradeTargets(reset=true){
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
    upgradeTargetTotal=Number(d.total||0);
    upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
-   $("upgradePriceNote").textContent="Полный каталог CS2: износ, редкость, StatTrak™ и Souvenir. Цены Lis-Skins / Market.CSGO обновляются постепенно; скины без цены видны, но станут доступны для апгрейда после обновления котировки.";
+   $("upgradePriceNote").textContent="Полный каталог CS2, загрузка по 40 скинов. Цены берутся из кэша до 7 дней, обновление выполняется в фоне; знак ≈ означает сохранённую цену, которая может быть не самой свежей. Скины без котировки не допускаются к апгрейду.";
   }
   renderUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
- finally{upgradeTargetBusy=false;$("upgradeLoadMore").hidden=type!=="skin"||!upgradeTargetHasMore;$("upgradeLoadMore").disabled=upgradeTargetBusy}
+ finally{upgradeTargetBusy=false;$("upgradeLoadMore").hidden=type!=="skin"||!upgradeTargetHasMore;$("upgradeLoadMore").textContent="Показать ещё 40 скинов";$("upgradeLoadMore").disabled=upgradeTargetBusy}
 }
 function currentUpgradeSource(){return upgradeInventory.find(x=>x.id===Number($("upgradeSource").value))}
 function renderUpgradeTargets(){
@@ -927,7 +927,7 @@ function renderUpgradeTargets(){
  });
  $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":(upgradeTargetTotal?list.length+" из "+upgradeTargetTotal+" скинов":list.length+" на странице");
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=!selectedUpgradeTarget;return}
- $("upgradeTargets").innerHTML=list.map(x=>{const price=Number(x.market_price_minor||0),available=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);return '<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+(!available?' unpriced':'')+'" data-target="'+esc(x.id)+'" '+(!available?'disabled aria-disabled="true"':'')+'>'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+(available?money(price,"₽"):"Цена обновляется")+'</small>'+skinMetaTags(x)+'</button>'}).join("");
+ $("upgradeTargets").innerHTML=list.map(x=>{const price=Number(x.market_price_minor||0),available=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);return '<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+(!available?' unpriced':'')+'" data-target="'+esc(x.id)+'" '+(!available?'disabled aria-disabled="true"':'')+'>'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+(available?((x.market_price_stale?"≈ ":"")+money(price,"₽")):"Цена обновляется")+'</small>'+skinMetaTags(x)+'</button>'}).join("");
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }

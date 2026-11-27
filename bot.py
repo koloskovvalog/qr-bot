@@ -37,6 +37,8 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
 USD_RUB_RATE = None
 USD_RUB_RATE_AT = 0
+CS2_PRICE_USABLE_TTL_SECONDS = 7 * 24 * 60 * 60  # last known quote remains usable for 7 days
+CS2_PRICE_REFRESH_TTL_SECONDS = 12 * 60 * 60  # refresh in background after 12 hours
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_PATH = "/telegram-webhook"
 
@@ -766,7 +768,7 @@ async def get_cases(request):
     grouped = {}
     for item in items:
         fresh = bool(item["fetched_at"] and
-                     (datetime.now(timezone.utc) - item["fetched_at"]).total_seconds() <= 43200)
+                     (datetime.now(timezone.utc) - item["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
         market_minor = steam_price_to_minor(item["lowest_price"]) if fresh else None
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
@@ -867,7 +869,7 @@ async def open_case(request):
                         WHERE market_hash_name=$1 AND price_source <> 'steam'
                     """, selected["market_hash_name"])
                     fresh = bool(price_row and
-                        (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
+                        (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
                     market_minor = steam_price_to_minor(price_row["lowest_price"]) if fresh else None
                     if market_minor:
                         selected["value_minor"] = market_minor
@@ -1027,10 +1029,11 @@ async def get_inventory(request):
         """, user["id"])
     items = []
     for row in rows:
-        fresh = bool(row["fetched_at"] and
-                     (datetime.now(timezone.utc) - row["fetched_at"]).total_seconds() <= 43200)
-        market_minor = steam_price_to_minor(row["lowest_price"]) if fresh else None
-        if row["market_hash_name"] and not fresh:
+        age_seconds = (datetime.now(timezone.utc) - row["fetched_at"]).total_seconds() if row["fetched_at"] else float("inf")
+        usable = age_seconds <= CS2_PRICE_USABLE_TTL_SECONDS
+        refresh_due = age_seconds > CS2_PRICE_REFRESH_TTL_SECONDS
+        market_minor = steam_price_to_minor(row["lowest_price"]) if usable else None
+        if row["market_hash_name"] and refresh_due:
             queue_cs2_price_refresh([{"market_hash_name": row["market_hash_name"]}])
         items.append({
             "id": row["id"], "item_type": row["item_type"],
@@ -1038,8 +1041,9 @@ async def get_inventory(request):
             "image_url": row["image_url"],
             "value_minor": market_minor or row["value_minor"],
             "market_price_minor": market_minor,
+            "market_price_stale": bool(market_minor and refresh_due),
             "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
-            "price_updated_at": row["fetched_at"].isoformat() if fresh else None,
+            "price_updated_at": row["fetched_at"].isoformat() if usable else None,
             "source": row["source"], "created_at": row["created_at"].isoformat(),
             "market_hash_name": row["market_hash_name"], "wear": row["wear"],
             "stattrak": row["stattrak"], "souvenir": row["souvenir"],
@@ -1230,7 +1234,7 @@ async def cs2_steam_price_worker():
                         headers={**headers, "X-API-KEY": APISKINS_API_KEY},
                     ) as response:
                         if response.status == 429:
-                            logger.warning("API Skins rate limited; retrying marketplace batch in 60 seconds")
+                            logger.warning("API Skins rate limited; cooling down marketplace queue for 30 minutes")
                             retry_later = True
                         elif response.status == 200:
                             offers_payload = await response.json(content_type=None)
@@ -1291,7 +1295,7 @@ async def cs2_steam_price_worker():
                     CS2_PRICE_QUEUED.discard(market_hash_name)
                     CS2_PRICE_QUEUE.task_done()
                 if retry_later:
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(1800)
                     for market_hash_name in batch:
                         if market_hash_name not in CS2_PRICE_QUEUED:
                             CS2_PRICE_QUEUED.add(market_hash_name)
@@ -1380,7 +1384,7 @@ async def get_cs2_skins(request):
         all_prices = {
             row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
             for row in all_price_rows
-            if (now_utc - row["fetched_at"]).total_seconds() <= 43200
+            if (now_utc - row["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS
             and steam_price_to_minor(row["lowest_price"]) is not None
         }
         # If the user applies a price filter, request prices for the next
@@ -1438,8 +1442,11 @@ async def get_cs2_skins(request):
             item["steam_median_price"] = price["median_price"]
             item["steam_volume"] = price["volume"]
             item["steam_fetched_at"] = price["fetched_at"].isoformat()
-            is_stale = (now - price["fetched_at"].timestamp()) > 43200
-            item["market_price_minor"] = None if is_stale else steam_price_to_minor(price["lowest_price"])
+            age_seconds = now - price["fetched_at"].timestamp()
+            is_stale = age_seconds > CS2_PRICE_REFRESH_TTL_SECONDS
+            is_expired = age_seconds > CS2_PRICE_USABLE_TTL_SECONDS
+            item["market_price_minor"] = None if is_expired else steam_price_to_minor(price["lowest_price"])
+            item["market_price_stale"] = bool(item["market_price_minor"] and is_stale)
             if item["market_price_minor"]:
                 item["value_minor"] = item["market_price_minor"]
         else:
@@ -1448,6 +1455,7 @@ async def get_cs2_skins(request):
             item["steam_volume"] = None
             item["steam_fetched_at"] = None
             item["market_price_minor"] = None
+            item["market_price_stale"] = False
             is_stale = True
         if is_stale:
             stale.append(source)
@@ -1464,7 +1472,8 @@ async def get_cs2_skins(request):
         "has_more": start + len(page_items) < total,
         "price_source": "Lis-Skins (primary) / Market.CSGO (fallback)",
         "price_currency": "RUB",
-        "price_cache_hours": 12,
+        "price_cache_hours": 168,
+        "price_refresh_after_hours": 12,
         "price_range_minor": {"min": 200, "max": 10000000},
         "price_pending_count": price_pending_count,
         "demo_only": True,
@@ -1613,8 +1622,10 @@ async def suggest_upgrade_target(request):
             WHERE market_hash_name=$1 AND price_source <> 'steam'
         """, source_market_name) if source_market_name else None
         fresh_source = bool(source_price and
-            (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= 43200)
+            (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
         source_value = steam_price_to_minor(source_price["lowest_price"]) if fresh_source else None
+        if source_value and (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+            queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
         if not source_value:
             if not source_market_name:
                 raise web.HTTPBadRequest(text="Не удалось однозначно сопоставить этот предмет с каталогом CS2. Выберите другой скин.")
@@ -1654,11 +1665,13 @@ async def suggest_upgrade_target(request):
     now = datetime.now(timezone.utc)
     for row in rows:
         minor = steam_price_to_minor(row["lowest_price"])
-        fresh = (now-row["fetched_at"]).total_seconds() <= 43200
+        fresh = (now-row["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS
         if fresh and minor and 200 <= minor <= 10000000 and minor > source_value:
             prices[row["market_hash_name"]] = minor
         elif not fresh:
             stale_names.add(row["market_hash_name"])
+    if stale_names:
+        queue_cs2_price_refresh([{"market_hash_name": name} for name in list(stale_names)[:100]])
     candidates = [x for x in catalog if x.get("market_hash_name") in prices]
     if not candidates:
         if not APISKINS_API_KEY:
@@ -1678,6 +1691,11 @@ async def suggest_upgrade_target(request):
     candidates.sort(key=lambda x: abs(prices[x["market_hash_name"]]-desired)/max(desired,1))
     chosen = dict(candidates[0])
     chosen["market_price_minor"] = prices[chosen["market_hash_name"]]
+    chosen["market_price_stale"] = any(
+        row["market_hash_name"] == chosen["market_hash_name"]
+        and (now - row["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS
+        for row in rows
+    )
     chosen["value_minor"] = chosen["market_price_minor"]
     chosen["suggested_multiplier"] = round(chosen["market_price_minor"]/source_value, 2)
     chosen["suggested_chance_percent"] = round(source_value/chosen["market_price_minor"]*75, 2)
@@ -1744,8 +1762,10 @@ async def create_upgrade_attempt(request):
                     WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, source_market_name)
                 source_fresh = bool(source_price and
-                    (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= 43200)
+                    (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
                 source_market_minor = steam_price_to_minor(source_price["lowest_price"]) if source_fresh else None
+                if source_market_minor and (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+                    queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
                 if not source_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
                     return web.json_response({"pending": True, "message": "Обновляем цену исходного скина. Повторите через несколько секунд."}, status=202)
@@ -1755,8 +1775,10 @@ async def create_upgrade_attempt(request):
                     WHERE market_hash_name=$1 AND price_source <> 'steam'
                 """, target["market_hash_name"])
                 target_fresh = bool(target_price and
-                    (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= 43200)
+                    (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
                 target_market_minor = steam_price_to_minor(target_price["lowest_price"]) if target_fresh else None
+                if target_market_minor and (datetime.now(timezone.utc)-target_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+                    queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
                 if not target_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
                     return web.json_response({"pending": True, "message": "Обновляем цену целевого скина. Повторите через несколько секунд."}, status=202)
