@@ -31,9 +31,12 @@ logging.basicConfig(
 logger = logging.getLogger("qr_bot_pro")
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+CASES_BOT_TOKEN = os.getenv("CASES_BOT_TOKEN", "").strip()
 DATABASE_URL = os.environ["DATABASE_URL"]
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+CASES_APP_URL = os.getenv("CASES_APP_URL", f"{PUBLIC_BASE_URL}/cases").rstrip("/")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+CASES_WEBHOOK_SECRET = os.getenv("CASES_WEBHOOK_SECRET", "").strip()
 APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
 APISKINS_COOLDOWN_UNTIL = 0
 USD_RUB_RATE = None
@@ -42,6 +45,7 @@ CS2_PRICE_USABLE_TTL_SECONDS = 7 * 24 * 60 * 60  # last known quote remains usab
 CS2_PRICE_REFRESH_TTL_SECONDS = 12 * 60 * 60  # refresh in background after 12 hours
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_PATH = "/telegram-webhook"
+CASES_WEBHOOK_PATH = "/telegram-webhook-cases"
 
 ADMIN_IDS = {
     int(value.strip())
@@ -51,6 +55,8 @@ ADMIN_IDS = {
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+cases_bot = Bot(token=CASES_BOT_TOKEN) if CASES_BOT_TOKEN else None
+cases_dp = Dispatcher()
 
 db: asyncpg.Pool | None = None
 CS2_CATALOG_CACHE = {}
@@ -500,9 +506,16 @@ def verify_telegram_user(request: web.Request) -> dict:
         for key, value in sorted(values.items())
     )
 
+    store_mode = request.headers.get("X-Store-Mode", "digital").strip().lower()
+    if store_mode not in {"digital", "cases"}:
+        raise web.HTTPBadRequest(text="Неизвестный магазин")
+    auth_token = CASES_BOT_TOKEN if store_mode == "cases" else BOT_TOKEN
+    if not auth_token:
+        raise web.HTTPServiceUnavailable(text="Telegram-бот кейсов ещё не подключён")
+
     secret_key = hmac.new(
         key=b"WebAppData",
-        msg=BOT_TOKEN.encode(),
+        msg=auth_token.encode(),
         digestmod=hashlib.sha256,
     ).digest()
 
@@ -3008,6 +3021,53 @@ async def cmd_start(message: types.Message):
     )
 
 
+@cases_dp.message(Command("start"))
+async def cmd_cases_start(message: types.Message):
+    if not cases_bot or not CASES_APP_URL:
+        await message.answer("QR CASES ещё не настроен. Администратор подключит отдельного бота.")
+        return
+
+    if is_admin(message.from_user.id):
+        await message.bot.set_chat_menu_button(
+            chat_id=message.chat.id,
+            menu_button=MenuButtonWebApp(
+                text="Админ-панель CS2",
+                web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/admin?store=cases"),
+            ),
+        )
+
+    buttons = [[
+        InlineKeyboardButton(
+            text="🎁 Открыть CS2-кейсы",
+            web_app=WebAppInfo(url=CASES_APP_URL),
+        )
+    ]]
+    if is_admin(message.from_user.id):
+        buttons.append([
+            InlineKeyboardButton(
+                text="⚙️ Управление кейсами",
+                web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/admin?store=cases"),
+            )
+        ])
+
+    await message.answer(
+        "Добро пожаловать в QR CASES!\n\n"
+        "Отдельный магазин CS2: кейсы, апгрейд, инвентарь, авторские кейсы и лента выпадений.\n"
+        "Авторизация Steam и приватный доступ будут добавлены отдельным этапом.\n\n"
+        "Нажмите кнопку ниже, чтобы открыть магазин.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@cases_dp.message(Command("help"))
+async def cmd_cases_help(message: types.Message):
+    await message.answer(
+        "QR CASES — отдельный магазин CS2.\n"
+        "/start — открыть кейсы\n"
+        "/help — помощь"
+    )
+
+
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
@@ -3482,8 +3542,7 @@ async def on_startup(app: web.Application):
     if not WEBHOOK_SECRET:
         raise RuntimeError("Не задан WEBHOOK_SECRET")
 
-    # Force Telegram's bottom-left menu button to open QR BOT PRO itself.
-    # This overrides any stale BotFather menu URL that may still point to another bot.
+    # The digital-products bot always opens its own storefront.
     bot_identity = await bot.get_me()
     logger.info("Telegram bot identity: @%s (id=%s)", bot_identity.username, bot_identity.id)
     await bot.set_chat_menu_button(
@@ -3498,6 +3557,23 @@ async def on_startup(app: web.Application):
         secret_token=WEBHOOK_SECRET,
         allowed_updates=dp.resolve_used_update_types(),
     )
+
+    if cases_bot:
+        cases_identity = await cases_bot.get_me()
+        logger.info("CS2 bot identity: @%s (id=%s)", cases_identity.username, cases_identity.id)
+        await cases_bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Открыть CS2",
+                web_app=WebAppInfo(url=CASES_APP_URL),
+            )
+        )
+        await cases_bot.set_webhook(
+            url=f"{PUBLIC_BASE_URL}{CASES_WEBHOOK_PATH}",
+            secret_token=CASES_WEBHOOK_SECRET or WEBHOOK_SECRET,
+            allowed_updates=cases_dp.resolve_used_update_types(),
+        )
+    else:
+        logger.warning("CASES_BOT_TOKEN is not set; QR CASES Mini App is deployed but its Telegram bot is not connected")
 
     global CS2_PRICE_WORKER_TASK
     if CS2_PRICE_WORKER_TASK is None or CS2_PRICE_WORKER_TASK.done():
@@ -3518,6 +3594,8 @@ async def on_cleanup(app: web.Application):
         await db.close()
 
     await bot.session.close()
+    if cases_bot:
+        await cases_bot.session.close()
 
 
 def create_app():
@@ -3592,18 +3670,28 @@ def create_app():
         admin_set_order_status,
     )
 
-    # Telegram webhook
+    # Telegram webhooks: one dispatcher and token per independent storefront.
     SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
         secret_token=WEBHOOK_SECRET,
     ).register(app, path=WEBHOOK_PATH)
-
     setup_application(app, dp, bot=bot)
 
-    # Static Mini App
+    if cases_bot:
+        SimpleRequestHandler(
+            dispatcher=cases_dp,
+            bot=cases_bot,
+            secret_token=CASES_WEBHOOK_SECRET or WEBHOOK_SECRET,
+        ).register(app, path=CASES_WEBHOOK_PATH)
+        setup_application(app, cases_dp, bot=cases_bot)
+
+    # Static Mini Apps
     async def index_handler(request):
         return web.FileResponse("static/index.html")
+
+    async def cases_page_handler(request):
+        return web.FileResponse("static/cases.html")
 
     async def admin_page_handler(request):
         # Serve only the static shell here. Telegram initData is not attached to
@@ -3612,6 +3700,8 @@ def create_app():
 
     app.router.add_get("/admin", admin_page_handler)
     app.router.add_get("/admin/", admin_page_handler)
+    app.router.add_get("/cases", cases_page_handler)
+    app.router.add_get("/cases/", cases_page_handler)
     app.router.add_get("/", index_handler)
     app.router.add_static("/", path="static", show_index=False)
 
