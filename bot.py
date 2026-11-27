@@ -1665,8 +1665,10 @@ async def load_cs2_catalog(kind: str):
                 continue
             name = str(entry.get("name") or "").strip()
             image_url = str(entry.get("image") or "").strip()
-            if not name or not image_url.startswith("https://"):
+            if not name:
                 continue
+            if not image_url.startswith("https://"):
+                image_url = None
             rarity = entry.get("rarity") or {}
             rarity_name = rarity.get("name", "Неизвестно") if isinstance(rarity, dict) else str(rarity)
             wear = entry.get("wear") or {}
@@ -1827,15 +1829,18 @@ async def _fetch_openskin_prices(session, batch):
             continue
         steam = item.get("steam") or {}
         lowest = item.get("lowest_ask") or {}
-        # Prefer the Steam Community Market ask because QR BOT PRO displays
-        # Steam-based valuations. Use a named marketplace quote only if Steam
-        # has no ask for this exact market_hash_name.
-        price = steam.get("ask")
-        provider = "openskin_steam"
+        # Use the cheapest currently listed ask across supported marketplaces,
+        # like case sites that benchmark against tradable marketplace listings.
+        # Fall back to Steam's own ask only when the aggregator has no floor quote.
+        price = lowest.get("price")
+        marketplace = str(lowest.get("marketplace") or "").strip().lower()
+        provider = (
+            "openskin_" + re.sub(r"[^a-z0-9_]+", "_", marketplace)[:32]
+            if marketplace else "openskin_market"
+        )
         if price is None:
-            price = lowest.get("price")
-            marketplace = str(lowest.get("marketplace") or "market").strip().lower()
-            provider = "openskin_" + re.sub(r"[^a-z0-9_]+", "_", marketplace)[:32]
+            price = steam.get("ask")
+            provider = "openskin_steam"
         if price is None:
             for marketplace in ("skinport", "csfloat", "buff", "youpin"):
                 quote = item.get(marketplace) or {}
@@ -2088,7 +2093,8 @@ async def get_cs2_skins(request):
 
     async with db.acquire() as conn:
         price_rows = await conn.fetch("""
-            SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
+            SELECT market_hash_name, lowest_price, median_price, volume, fetched_at,
+                   price_source, image_url
             FROM cs2_steam_prices
             WHERE market_hash_name = ANY($1::text[])
               AND price_source <> 'steam'
@@ -2106,6 +2112,10 @@ async def get_cs2_skins(request):
             item["steam_median_price"] = price["median_price"]
             item["steam_volume"] = price["volume"]
             item["steam_fetched_at"] = price["fetched_at"].isoformat()
+            item["market_price_source"] = price["price_source"]
+            item["market_price_updated_at"] = price["fetched_at"].isoformat()
+            if not item.get("image_url") and price["image_url"]:
+                item["image_url"] = price["image_url"]
             age_seconds = now - price["fetched_at"].timestamp()
             is_stale = age_seconds > CS2_PRICE_REFRESH_TTL_SECONDS
             is_expired = age_seconds > CS2_PRICE_USABLE_TTL_SECONDS
@@ -2118,6 +2128,8 @@ async def get_cs2_skins(request):
             item["steam_median_price"] = None
             item["steam_volume"] = None
             item["steam_fetched_at"] = None
+            item["market_price_source"] = None
+            item["market_price_updated_at"] = None
             item["market_price_minor"] = None
             item["market_price_stale"] = False
             is_stale = True
@@ -2158,7 +2170,8 @@ async def get_cs2_catalog(request):
         names = [x.get("market_hash_name") for x in selected if x.get("market_hash_name")]
         async with db.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT market_hash_name, lowest_price, median_price, volume, fetched_at
+                SELECT market_hash_name, lowest_price, median_price, volume, fetched_at,
+                   price_source, image_url
                 FROM cs2_steam_prices WHERE market_hash_name = ANY($1::text[])
                     AND price_source <> 'steam'
             """, names) if names else []
@@ -2169,8 +2182,13 @@ async def get_cs2_catalog(request):
                 item["steam_lowest_price"] = price["lowest_price"]
                 item["steam_median_price"] = price["median_price"]
                 item["steam_volume"] = price["volume"]
+                item["market_price_source"] = price["price_source"]
+                item["market_price_updated_at"] = price["fetched_at"].isoformat()
+                if not item.get("image_url") and price["image_url"]:
+                    item["image_url"] = price["image_url"]
                 market_minor = steam_price_to_minor(price["lowest_price"])
                 if market_minor:
+                    item["market_price_minor"] = market_minor
                     item["value_minor"] = market_minor
     return web.json_response({
         "items": selected,
