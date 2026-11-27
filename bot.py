@@ -1634,8 +1634,10 @@ async def get_cs2_skins(request):
             stale.append(source)
         enriched.append(item)
 
-    # Refresh a small batch asynchronously; cached values remain visible immediately.
-    queue_cs2_price_refresh(stale[:8])
+    # Warm the visible page in one batch so unpriced targets become selectable
+    # without requiring the user to click a disabled card or change sort order.
+    price_pending_count = sum(1 for item in enriched if not item.get("market_price_minor"))
+    queue_cs2_price_refresh(stale[:40])
     return web.json_response({
         "items": enriched,
         "total": total,
@@ -1643,7 +1645,7 @@ async def get_cs2_skins(request):
         "page": page,
         "limit": limit,
         "has_more": start + len(page_items) < total,
-        "price_source": "Lis-Skins (primary) / Market.CSGO (fallback)",
+        "price_source": "Steam via OpenSkin (primary) / marketplace fallback",
         "price_currency": "RUB",
         "price_cache_hours": 168,
         "price_refresh_after_hours": 12,
