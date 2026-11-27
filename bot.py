@@ -1177,6 +1177,59 @@ async def build_cases_response(request):
             "operation broken fang case": 105000,
             "operation hydra case": 300000,
         }
+        caser_style_specs = [
+            ("CLEAVER", 2900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and 0 < int(x.get("value_minor") or 0) <= 10000),
+            ("BLOWBACK", 3500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() or ("restricted" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 20000)),
+            ("SIGMA 2", 5500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 25000),
+            ("SIGMA", 5900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
+            ("ECLIPSE", 7900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("mil-spec", "restricted"))),
+            ("MILSPEС", 3900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
+            ("RESTRICTED", 15900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
+            ("CLASSIFIED", 64900, lambda x: "classified" in str(x.get("rarity") or "").casefold()),
+            ("COVERT", 589900, lambda x: "covert" in str(x.get("rarity") or "").casefold()),
+            ("KNIFE", 1249900, lambda x: any(k in str(x.get("weapon") or x.get("name") or "").casefold() for k in ("knife", "karambit", "bayonet", "daggers", "talon", "stiletto", "kukri", "ursus", "navaja", "nomad", "paracord", "skeleton", "survival", "falchion", "bowie", "flip", "gut", "gloves"))),
+            ("PREMIUM 1", 499900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("classified", "covert"))),
+        ]
+        for title, reference_price, predicate in caser_style_specs:
+            selected = [skin for skin in catalog_skins if skin.get("market_hash_name") and predicate(skin)]
+            unique = {skin["market_hash_name"]: skin for skin in selected}
+            selected = list(unique.values())
+            selected.sort(key=lambda x: (int(x.get("value_minor") or 0), str(x.get("name") or "")))
+            selected = selected[:160]
+            if len(selected) < 8:
+                logger.info("Skipping Caser-inspired demo case %s: only %s matching catalog items", title, len(selected))
+                continue
+            cover_url = selected[0].get("image_url")
+            case_id = await conn.fetchval("SELECT id FROM cases WHERE title=$1 ORDER BY id LIMIT 1", title)
+            description = "Авторская подборка ShirpDrop по мотивам публичных категорий кейсов. Ориентир цены взят из открытого каталога Caser; открытие бесплатное и демо."
+            if case_id:
+                await conn.execute("""
+                    UPDATE cases SET description=$2, price_minor=0, reference_price_minor=$3,
+                        currency='RUB', image_url=COALESCE(image_url,$4), active=TRUE
+                    WHERE id=$1
+                """, case_id, description, reference_price, cover_url)
+            else:
+                case_id = await conn.fetchval("""
+                    INSERT INTO cases(title,description,price_minor,reference_price_minor,currency,image_url,active)
+                    VALUES($1,$2,0,$3,'RUB',$4,TRUE) RETURNING id
+                """, title, description, reference_price, cover_url)
+            has_items = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM case_items WHERE case_id=$1)", case_id)
+            if not has_items:
+                records = []
+                for skin in selected:
+                    records.append((
+                        case_id, skin.get("name") or skin["market_hash_name"],
+                        skin.get("rarity") or "Неизвестно", cs2_case_weight(skin.get("rarity")),
+                        skin.get("image_url"), int(skin.get("value_minor") or 0),
+                        skin["market_hash_name"], skin.get("wear") or "",
+                        bool(skin.get("stattrak")), bool(skin.get("souvenir")), skin.get("phase") or ""
+                    ))
+                await conn.executemany("""
+                    INSERT INTO case_items(case_id,name,rarity,weight,image_url,value_minor,market_hash_name,wear,stattrak,souvenir,phase)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    ON CONFLICT (case_id, market_hash_name) WHERE market_hash_name IS NOT NULL DO NOTHING
+                """, records)
+
         for catalog_case in catalog_cases:
             normalized_title = re.sub(r"[^a-z0-9]+", " ", str(catalog_case.get("name") or "").casefold()).strip()
             reference_price = caser_case_prices.get(normalized_title)
