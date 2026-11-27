@@ -2458,6 +2458,14 @@ async def admin_adjust_wallet(request):
     if delta == 0 or abs(delta) > 100000000:
         raise web.HTTPBadRequest(text="Сумма должна быть ненулевой и не превышать 1 000 000 ₽")
     async with db.acquire() as conn:
+        known_user = await conn.fetchval("""
+            SELECT EXISTS(SELECT 1 FROM orders WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM user_inventory WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM customer_profiles WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM wallet_accounts WHERE user_id=$1)
+        """, user_id)
+        if not known_user:
+            raise web.HTTPNotFound(text="Пользователь не найден")
         async with conn.transaction():
             await conn.execute("""
                 INSERT INTO wallet_accounts(user_id,balance_minor)
