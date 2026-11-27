@@ -1178,12 +1178,14 @@ async def build_cases_response(request):
             "operation hydra case": 300000,
         }
         caser_style_specs = [
+            ("MAJOR", 2900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
             ("CLEAVER", 2900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and 0 < int(x.get("value_minor") or 0) <= 10000),
             ("BLOWBACK", 3500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() or ("restricted" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 20000)),
+            ("GENESIS", 8900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("restricted", "classified"))),
             ("SIGMA 2", 5500, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold() and int(x.get("value_minor") or 0) <= 25000),
             ("SIGMA", 5900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
             ("ECLIPSE", 7900, lambda x: any(k in str(x.get("rarity") or "").casefold() for k in ("mil-spec", "restricted"))),
-            ("MILSPEС", 3900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
+            ("MIL-SPEC", 3900, lambda x: "mil-spec" in str(x.get("rarity") or "").casefold()),
             ("RESTRICTED", 15900, lambda x: "restricted" in str(x.get("rarity") or "").casefold()),
             ("CLASSIFIED", 64900, lambda x: "classified" in str(x.get("rarity") or "").casefold()),
             ("COVERT", 589900, lambda x: "covert" in str(x.get("rarity") or "").casefold()),
@@ -4128,10 +4130,11 @@ async def get_rewards(request):
             SELECT claimed_at, points FROM weekly_reward_claims
             WHERE user_id=$1 ORDER BY claimed_at DESC LIMIT 1
         """, user["id"])
-    available = not last or (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() >= 7*86400
-    next_at = (last["claimed_at"] + timedelta(days=7)).isoformat() if last and not available else None
+    available = (not last or (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() >= 7*86400) and int(points) < 1000
+    next_at = (last["claimed_at"] + timedelta(days=7)).isoformat() if last and not available and int(points) < 1000 else None
     return web.json_response({
-        "points": int(points), "weekly_points": 100,
+        "points": int(points), "weekly_points": 100, "points_cap": 1000,
+        "cap_reached": int(points) >= 1000,
         "available": available, "next_claim_at": next_at,
         "last_claim_at": last["claimed_at"].isoformat() if last else None,
         "demo_only": True
@@ -4155,20 +4158,24 @@ async def claim_weekly_reward(request):
             """, user["id"])
             if last and (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() < 7*86400:
                 raise web.HTTPConflict(text="Еженедельная награда уже получена. Загляните позже.")
+            current_points = await conn.fetchval("SELECT points FROM user_reward_points WHERE user_id=$1", user["id"]) or 0
+            if int(current_points) >= 1000:
+                raise web.HTTPConflict(text="Достигнут лимит демонстрационных бонусов — 1 000 баллов.")
+            award_points = min(100, 1000 - int(current_points))
             await conn.execute("""
-                INSERT INTO weekly_reward_claims(user_id,points) VALUES($1,100)
-            """, user["id"])
+                INSERT INTO weekly_reward_claims(user_id,points) VALUES($1,$2)
+            """, user["id"], award_points)
             points = await conn.fetchval("""
-                UPDATE user_reward_points SET points=points+100,updated_at=NOW()
+                UPDATE user_reward_points SET points=points+$2,updated_at=NOW()
                 WHERE user_id=$1 RETURNING points
-            """, user["id"])
+            """, user["id"], award_points)
             await conn.execute("""
                 INSERT INTO audit_log(actor_id,action,details)
                 VALUES($1,'weekly_demo_reward_claimed',$2::jsonb)
-            """, user["id"], json.dumps({"points":100}))
+            """, user["id"], json.dumps({"points":award_points, "cap":1000}))
     return web.json_response({
-        "ok": True, "points": int(points), "added_points": 100,
-        "message": "Начислено 100 демонстрационных бонусных баллов. Они не являются деньгами и не выводятся."
+        "ok": True, "points": int(points), "added_points": award_points,
+        "message": f"Начислено {award_points} демонстрационных бонусных баллов. Лимит — 1 000 баллов; они не являются деньгами и не выводятся."
     })
 
 
