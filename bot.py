@@ -2662,6 +2662,7 @@ async def claim_demo_case(request):
                 FROM case_items
                 WHERE case_id=$1 AND is_active=TRUE
                   AND market_hash_name IS NOT NULL
+                  AND COALESCE(value_minor, 1000) > 0
                 ORDER BY COALESCE(value_minor, 1000), id
                 LIMIT 1
             """, case_id)
