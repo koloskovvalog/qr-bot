@@ -43,6 +43,7 @@ document.querySelectorAll("[data-page]").forEach(b=>b.onclick=()=>showPage(b.dat
 if(STORE_MODE==="cases"){
  document.body.classList.add("cases-admin");
  document.querySelectorAll('[data-page="orders"],[data-page="products"],[data-page="payments"]').forEach(b=>b.hidden=true);
+ const backLink=document.querySelector(".top a");if(backLink)backLink.href="/cases";
  showPage("cases");
 }
 function orderTable(items){if(!items.length)return '<div class="empty">Заказов пока нет</div>';return '<table><thead><tr><th>Заказ</th><th>Покупатель</th><th>Товар</th><th>Сумма</th><th>Дата</th><th>Статус / действие</th></tr></thead><tbody>'+items.map(o=>'<tr><td>#'+o.id+'</td><td>'+esc(o.username||("ID "+o.user_id))+'</td><td>'+esc(o.product_title)+'</td><td>'+money(o.amount_minor,o.currency)+'</td><td>'+new Date(o.created_at).toLocaleString("ru-RU")+'</td><td><div class="row"><select id="st'+o.id+'">'+Object.entries(statusName).map(([v,n])=>'<option value="'+v+'" '+(o.status===v?"selected":"")+'>'+n+'</option>').join("")+'</select><button class="btn" onclick="setStatus('+o.id+')">Сохранить</button></div><span class="status '+esc(o.status)+'">'+esc(statusName[o.status]||o.status)+'</span></td></tr>').join("")+'</tbody></table>'}
