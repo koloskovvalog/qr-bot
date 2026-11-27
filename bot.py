@@ -3598,8 +3598,38 @@ async def on_cleanup(app: web.Application):
         await cases_bot.session.close()
 
 
+@web.middleware
+async def store_boundary_middleware(request: web.Request, handler):
+    if request.path.startswith("/api/"):
+        mode = request.headers.get("X-Store-Mode", "digital").strip().lower()
+        if mode not in {"digital", "cases"}:
+            raise web.HTTPBadRequest(text="Неизвестный магазин")
+
+        case_only = (
+            "/api/cases", "/api/cs2", "/api/live-drops",
+            "/api/creator-cases", "/api/inventory", "/api/upgrades",
+            "/api/rewards", "/api/admin/cases",
+        )
+        digital_only = (
+            "/api/products", "/api/orders", "/api/payments",
+            "/api/referrals", "/api/admin/products", "/api/admin/orders",
+            "/api/admin/payment-providers", "/api/admin/payment-transactions",
+            "/api/admin/dashboard",
+        )
+
+        def matches(prefixes):
+            return any(request.path == prefix or request.path.startswith(prefix + "/") for prefix in prefixes)
+
+        if mode == "digital" and matches(case_only):
+            raise web.HTTPNotFound(text="Этот раздел доступен в магазине QR CASES")
+        if mode == "cases" and matches(digital_only):
+            raise web.HTTPNotFound(text="Этот раздел доступен в магазине цифровых товаров")
+
+    return await handler(request)
+
+
 def create_app():
-    app = web.Application(middlewares=[error_middleware])
+    app = web.Application(middlewares=[error_middleware, store_boundary_middleware])
 
     # Public endpoints
     app.router.add_get("/health", health)
@@ -3684,7 +3714,6 @@ def create_app():
             bot=cases_bot,
             secret_token=CASES_WEBHOOK_SECRET or WEBHOOK_SECRET,
         ).register(app, path=CASES_WEBHOOK_PATH)
-        setup_application(app, cases_dp, bot=cases_bot)
 
     # Static Mini Apps
     async def index_handler(request):
