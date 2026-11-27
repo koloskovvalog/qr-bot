@@ -453,6 +453,24 @@ main{max-width:1180px;padding:22px 22px 62px}
 .upgrade-duel-placeholder{height:78px;width:100%;display:grid;place-items:center;color:#8f8777;font-size:12px;border:1px dashed #50442d;border-radius:9px;background:#0d0e12}
 .upgrade-duel-vs{font-size:11px;font-weight:1000;letter-spacing:1px;color:#f2d98c;text-align:center;text-shadow:0 0 12px #d8b45a66}
 @media(max-width:480px){#upgradeView .upgrade-live-panel{padding:16px 10px 13px}.upgrade-duel-cards{grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);gap:6px}.upgrade-duel-card{min-height:132px;padding:9px 5px}.upgrade-duel-card img,.upgrade-duel-placeholder{height:64px}.upgrade-duel-card strong{font-size:10px}.upgrade-duel-card b{font-size:11px}.upgrade-duel-vs{font-size:9px}}
+
+/* Live Drops */
+.live-drop-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 14px}
+.live-drop-status{font-size:11px;color:var(--muted)}
+.live-drop-list{display:grid;gap:9px}
+.live-drop{display:grid;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(120deg,#1d1a13,#11110f)}
+.live-drop-art{width:76px;height:68px;display:grid;place-items:center;overflow:hidden;border-radius:10px;background:radial-gradient(circle,#51401f,#17130d);color:var(--gold2);font-weight:950}
+.live-drop-art img{width:100%;height:100%;object-fit:contain}
+.live-drop-main{min-width:0}
+.live-drop-type{font-size:9px;letter-spacing:1px;color:var(--gold2);font-weight:900}
+.live-drop-main strong{display:block;font-size:12px;line-height:1.35;margin:5px 0;overflow-wrap:anywhere}
+.live-drop-meta{font-size:10px;color:var(--muted);line-height:1.45}
+.live-drop-value{font-size:12px;font-weight:900;color:var(--gold2);text-align:right;white-space:nowrap}
+.live-drop-value small{display:block;font-size:9px;color:var(--muted);font-weight:600;margin-top:5px}
+.live-drop-result{display:inline-block;margin-top:4px;padding:3px 6px;border-radius:6px;font-size:9px;font-weight:900;background:#173022;color:#9be0b2}
+.live-drop-result.fail{background:#321c19;color:#eaa096}
+@media(max-width:420px){.live-drop{grid-template-columns:62px minmax(0,1fr) auto;gap:8px;padding:9px}.live-drop-art{width:62px;height:60px}.live-drop-value{font-size:11px}.bottom-nav{grid-template-columns:repeat(7,minmax(0,1fr))}.bottom-nav button{font-size:8px}}
+
 </style>
 </head>
 <body><main>
@@ -476,6 +494,12 @@ main{max-width:1180px;padding:22px 22px 62px}
 <div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
+<section id="dropsView" hidden>
+ <div class="section"><h2>Live Drops</h2><span class="count">Последние события</span></div>
+ <div class="live-drop-toolbar"><span class="live-drop-status" id="liveDropsUpdated">Обновление автоматически</span><button class="chip" id="refreshLiveDrops" type="button">↻ Обновить</button></div>
+ <div class="live-drop-list" id="liveDropsList"><div class="empty">Загружаем последние выпадения…</div></div>
+ <div class="notice">Здесь отображаются реальные события из демо-режима QR BOT PRO. Стоимость — сохранённая оценка предмета, а не выплата или гарантированная рыночная цена. Игроки показаны анонимно.</div>
+</section>
 <section id="skinsView" hidden>
  <div class="section"><h2>Каталог скинов CS2</h2><span class="count" id="skinsCount">Загрузка…</span></div>
  <div class="skin-tools">
@@ -584,6 +608,7 @@ main{max-width:1180px;padding:22px 22px 62px}
 <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация">
  <button data-nav="catalog" class="active"><span>⌂</span>Магазин</button>
  <button data-nav="cases"><span>▣</span>Кейсы</button>
+ <button data-nav="drops"><span>◉</span>Лента</button>
  <button data-nav="upgrade"><span>✦</span>Апгрейд</button>
  <button data-nav="inventory"><span>◇</span>Инвентарь</button>
  <button data-nav="orders"><span>▤</span>Заказы</button>
@@ -1030,10 +1055,38 @@ async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profil
 const drops=d.case_drops||[];
 $("caseDropHistory").innerHTML=drops.length?'<div class="case-drop-grid">'+drops.map(x=>'<article class="case-drop-card">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.item_name)+'" loading="lazy">':'<div class="case-drop-placeholder">CS2</div>')+'<div class="case-drop-info"><strong>'+esc(x.item_name)+'</strong><small>'+esc(x.rarity)+' · '+esc(x.case_title)+'</small><b>'+(x.value_minor?money(x.value_minor,"₽"):"Цена уточняется")+'</b><time>'+new Date(x.created_at).toLocaleString("ru-RU")+'</time></div><span class="demo-pill">DEMO</span></article>').join("")+'</div>':'<div class="empty">Пока ничего не выпало. Открой кейс CS2 — результат появится здесь.</div>';
 }catch(e){$("profileStats").innerHTML='<div class="empty">'+esc(e.message)+'</div>';if($("caseDropHistory"))$("caseDropHistory").innerHTML='<div class="empty">Не удалось загрузить историю кейсов.</div>'}}
-function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
+
+let liveDropsLoadedAt=0,liveDropsBusy=false;
+function liveDropTime(value){
+ const seconds=Math.max(0,Math.floor((Date.now()-new Date(value).getTime())/1000));
+ if(seconds<60)return "только что";
+ if(seconds<3600)return Math.floor(seconds/60)+" мин. назад";
+ if(seconds<86400)return Math.floor(seconds/3600)+" ч. назад";
+ return new Date(value).toLocaleDateString("ru-RU",{day:"2-digit",month:"short"});
+}
+async function loadLiveDrops(force=false){
+ if(liveDropsBusy)return;
+ if(!force&&liveDropsLoadedAt&&Date.now()-liveDropsLoadedAt<15000)return;
+ liveDropsBusy=true;
+ try{
+  const d=await api("/api/live-drops"),items=d.items||[];
+  $("liveDropsList").innerHTML=items.length?items.map(x=>{
+   const isCase=x.type==="case",success=x.success===true,fail=x.success===false;
+   const label=isCase?"ОТКРЫТИЕ КЕЙСА":(success?"АПГРЕЙД · УСПЕХ":"АПГРЕЙД · НЕУДАЧА");
+   const result=isCase?"":'<span class="live-drop-result '+(fail?"fail":"")+'">'+(success?"УСПЕХ":"НЕУДАЧА")+'</span>';
+   const image=x.image_url?'<img src="'+esc(x.image_url)+'" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.textContent=\'CS2\'">':"CS2";
+   const value=Number(x.value_minor||0);
+   return '<article class="live-drop"><div class="live-drop-art">'+image+'</div><div class="live-drop-main"><div class="live-drop-type">'+label+'</div><strong>'+esc(x.title||"Предмет CS2")+'</strong><div class="live-drop-meta">'+esc(x.player)+' · '+esc(x.context||"QR BOT PRO")+'<br>'+liveDropTime(x.created_at)+(x.rarity?" · "+esc(x.rarity):"")+'</div>'+result+'</div><div class="live-drop-value">'+(value?money(value,"₽"):"—")+'<small>DEMO</small></div></article>';
+  }).join(""):'<div class="empty">Пока нет открытий или апгрейдов. Как только появятся первые события, они отобразятся здесь.</div>';
+  liveDropsLoadedAt=Date.now();$("liveDropsUpdated").textContent="Обновлено: "+new Date().toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
+ }catch(e){$("liveDropsList").innerHTML='<div class="empty">Не удалось загрузить ленту: '+esc(e.message)+'</div>'}
+ finally{liveDropsBusy=false}
+}
+
+function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("dropsView").hidden=t!=="drops";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","drops","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="drops")loadLiveDrops(true);if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
 $("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}
 document.querySelectorAll("[data-nav],[data-go]").forEach(b=>b.onclick=()=>switchTab(b.dataset.nav||b.dataset.go));
-loadProducts();loadHomeCaseHighlights();if(initData){showOrders()}
+loadProducts();loadHomeCaseHighlights();$("refreshLiveDrops").onclick=()=>loadLiveDrops(true);loadLiveDrops();setInterval(()=>{if(!$("dropsView").hidden)loadLiveDrops(true)},30000);if(initData){showOrders()}
 </script></body></html>

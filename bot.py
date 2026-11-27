@@ -1834,6 +1834,64 @@ async def create_upgrade_attempt(request):
         "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
     })
 
+async def get_live_drops(request):
+    """Public, anonymized feed of real demo case openings and upgrader results."""
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT event_id, user_id, event_type, title, rarity, image_url,
+                   value_minor, context, success, created_at
+            FROM (
+                SELECT
+                    'case:' || co.id::text AS event_id,
+                    co.user_id,
+                    'case'::text AS event_type,
+                    co.item_name AS title,
+                    co.rarity,
+                    ci.image_url,
+                    COALESCE(ci.value_minor, 0)::BIGINT AS value_minor,
+                    c.title AS context,
+                    NULL::BOOLEAN AS success,
+                    co.created_at
+                FROM case_openings co
+                JOIN cases c ON c.id = co.case_id
+                LEFT JOIN case_items ci ON ci.id = co.item_id
+
+                UNION ALL
+
+                SELECT
+                    'upgrade:' || ua.id::text AS event_id,
+                    ua.user_id,
+                    'upgrade'::text AS event_type,
+                    ua.target_name AS title,
+                    NULL::TEXT AS rarity,
+                    ua.target_image_url AS image_url,
+                    ua.target_value_minor AS value_minor,
+                    ua.source_name AS context,
+                    ua.success,
+                    ua.created_at
+                FROM upgrade_attempts ua
+            ) events
+            ORDER BY created_at DESC
+            LIMIT 40
+        """)
+    items = []
+    for row in rows:
+        user_suffix = str(row["user_id"])[-3:].rjust(3, "0")
+        items.append({
+            "id": row["event_id"],
+            "player": "Игрок • " + user_suffix,
+            "type": row["event_type"],
+            "title": row["title"],
+            "rarity": row["rarity"],
+            "image_url": row["image_url"],
+            "value_minor": row["value_minor"],
+            "context": row["context"],
+            "success": row["success"],
+            "created_at": row["created_at"].isoformat(),
+            "demo_only": True,
+        })
+    return web.json_response({"items": items, "demo_only": True})
+
 async def get_upgrade_history(request):
     user = verify_telegram_user(request)
     async with db.acquire() as conn:
@@ -2981,6 +3039,7 @@ def create_app():
     app.router.add_get("/api/profile", get_my_profile)
     app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
+    app.router.add_get("/api/live-drops", get_live_drops)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
     app.router.add_get("/api/wallet", get_wallet)
