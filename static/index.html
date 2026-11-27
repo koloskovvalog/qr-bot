@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#090909">
-<title>ShirpDrop — цифровой магазин и CS2</title>
+<title>ShirpDrop — кейсы CS2, апгрейд и скины</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#090909;--panel:#151411;--panel2:#1d1b16;--line:#393326;--gold:#d8b45a;--gold2:#f2d98c;--muted:#a9a397;--white:#f7f3e9;--green:#80c69b;--red:#e58d80}
@@ -543,16 +543,24 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(7,minmax(0,1fr))!impor
 body.cases-store #catalogView,body.cases-store #skinsView,body.cases-store #ordersView{display:none!important}
 body.cases-store #cartbar{display:none!important}
 
-/* Production storefront: hide demo-only game mechanics, preserve catalog, account, orders and cash top-ups. */
-#casesView,#upgradeView,#dropsView,#creatorView,#rewardsView,
-[data-nav="cases"],[data-nav="upgrade"],[data-nav="drops"],[data-nav="creator"],[data-nav="rewards"],
-[data-go="cases"],[data-go="upgrade"],[data-go="drops"],[data-go="creator"],[data-go="rewards"],
-.bottom-nav [data-nav="cases"],.bottom-nav [data-nav="upgrade"],.bottom-nav [data-nav="drops"],
-.bottom-nav [data-nav="creator"],.bottom-nav [data-nav="rewards"],
-#casesTab,#upgradeTab,#dropsTab,#creatorTab,#rewardsTab,
-.home-cases-section,.creator-intro,.creator-builder,.rewards-hero,
-.inventory-actions{display:none!important}
-.demo-pill{display:none!important}
+/* CS2 CASES BOT: keep the game experience; hide only unrelated storefront sections. */
+#dropsView,#creatorView,#rewardsView,
+[data-nav="drops"],[data-nav="creator"],[data-nav="rewards"],
+[data-go="drops"],[data-go="creator"],[data-go="rewards"],
+.bottom-nav [data-nav="drops"],.bottom-nav [data-nav="creator"],.bottom-nav [data-nav="rewards"],
+#dropsTab,#creatorTab,#rewardsTab,
+.creator-intro,.creator-builder,.rewards-hero{display:none!important}
+.demo-pill{display:inline-flex!important}
+body.cases-store .tabs{display:none!important}
+body.cases-store .bottom-nav{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+body.cases-store .bottom-nav [data-nav="cases"]{display:flex!important}
+body.cases-store .bottom-nav [data-nav="upgrade"]{display:flex!important}
+body.cases-store .bottom-nav [data-nav="inventory"]{display:flex!important}
+body.cases-store .bottom-nav [data-nav="profile"]{display:flex!important}
+body.cases-store .bottom-nav button{font-size:10px;padding:9px 3px}
+body.cases-store .bottom-nav button span{font-size:19px}
+body.cases-store .top .pill{letter-spacing:.8px}
+body.cases-store .brand{letter-spacing:2px}
 
 /* SHIRPDROP DESIGN SYSTEM — visual consistency and mobile polish */
 :root{--bg:#0b1015;--panel:#121a22;--panel2:#18232d;--line:#293744;--gold:#a9e66e;--gold2:#c9f58f;--muted:#91a0ad;--white:#f3f7fa;--green:#83d6a5;--red:#ed9292;color-scheme:dark}
@@ -613,7 +621,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 </style>
 </head>
 <body><main>
-<header class="top"><div class="brand">SHIRP<span>DROP</span></div><div class="pill">CS2 · DIGITAL STORE</div></header>
+<header class="top"><div class="brand">SHIRP<span>DROP</span></div><div class="pill">CS2 · CASE OPENING</div></header>
 <div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="skinsTab">CS2 Скины</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
 <section id="catalogView">
 <div class="ux-home" id="uxHome">
@@ -662,7 +670,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
  <div class="purchase-table"><div class="purchase-table-head"><span>ТОВАР</span><span>СУММА</span><span>СТАТУС</span><span>ДАТА</span></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></div>
  <div class="muted purchase-footnote">Статус заказа обновляется после его обработки. Пополнение денежного баланса доступно в профиле.</div>
 </section>
-<section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
+<section id="casesView" hidden><div class="section"><h2>Кейсы CS2</h2><span class="count demo-pill">DEMO MODE</span></div>
 <div id="caseCatalogPanel">
 <div class="case-catalog-toolbar">
  <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
@@ -798,8 +806,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="cartbar" id="cartbar" hidden><div><div class="cartmeta" id="cartCount">Корзина · 0</div><div class="muted" id="cartTotal"></div></div><div class="cart-actions"><button class="cart-clear" id="clearCart" type="button">Очистить</button><button class="goldbtn" id="checkout">Оформить заказ</button></div></div>
 <div class="notice">Важно: оформление заказа не означает оплату. Оплата считается подтверждённой только после фактической проверки поступления средств. Перед запуском продаж укажите достоверные сведения о продавце, товарах, условиях оплаты, сроках исполнения, контактах и возвратах.</div>
 <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация">
- <button data-nav="catalog" class="active"><span>⌂</span>Магазин</button>
- <button data-nav="cases"><span>▣</span>Кейсы</button>
+ <button data-nav="catalog"><span>⌂</span>Магазин</button>
+ <button data-nav="cases" class="active"><span>▣</span>Кейсы</button>
  <button data-nav="drops"><span>◉</span>Лента</button>
  <button data-nav="upgrade"><span>✦</span>Апгрейд</button>
  <button data-nav="inventory"><span>◇</span>Инвентарь</button>
@@ -811,7 +819,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 </main><div class="toast" id="toast"></div>
 <script>
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();const initData=tg?.initData||"";
-const STORE_MODE="digital";const headers={"Content-Type":"application/json","X-Telegram-Init-Data":initData,"X-Store-Mode":STORE_MODE};const $=id=>document.getElementById(id);
+const STORE_MODE="cases";const headers={"Content-Type":"application/json","X-Telegram-Init-Data":initData,"X-Store-Mode":STORE_MODE};const $=id=>document.getElementById(id);
 let products=[],cart=new Map(),category="Все",query="";
 const icons=[["chatgpt","✦"],["netflix","▶"],["spotify","♫"],["steam","◆"]];
 function iconFor(p){const s=(p.title+" "+p.description).toLowerCase();return icons.find(([k])=>s.includes(k))?.[1]||"◇"}
@@ -1314,10 +1322,10 @@ async function loadLiveDrops(force=false){
 function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hidden=t!=="catalog";$("dropsView").hidden=t!=="drops";$("skinsView").hidden=t!=="skins";$("ordersView").hidden=t!=="orders";$("casesView").hidden=t!=="cases";$("inventoryView").hidden=t!=="inventory";$("upgradeView").hidden=t!=="upgrade";["catalog","skins","cases","drops","upgrade","orders","inventory","profile"].forEach(x=>{if($(x+"Tab"))$(x+"Tab").classList.toggle("active",t===x)});document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===t));$("cartbar").hidden=t!=="catalog"||cart.size===0;if(t==="orders")showOrders();if(t==="drops")loadLiveDrops(true);if(t==="skins")loadSkinCatalog(true);if(t==="profile")loadProfile();if(t==="cases")loadCases();if(t==="inventory")showInventory();if(t==="upgrade")loadUpgradeView();window.scrollTo({top:0,behavior:"smooth"})}
 $("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
-document.body.classList.add("digital-store");
+document.body.classList.remove("digital-store");document.body.classList.add("cases-store");switchTab("cases");
 document.querySelectorAll("[data-nav],[data-go]").forEach(b=>b.onclick=()=>switchTab(b.dataset.nav||b.dataset.go));
 $("walletTopupBtn").onclick=openWalletTopup;$("walletTopupClose").onclick=closeWalletTopup;$("walletTopupPay").onclick=submitWalletTopup;document.querySelectorAll("[data-topup-amount]").forEach(b=>b.onclick=()=>{$("walletTopupCustom").value=(Number(b.dataset.topupAmount)/100).toString();document.querySelectorAll("[data-topup-amount]").forEach(x=>x.classList.toggle("active",x===b))});$("walletTopupModal").addEventListener("click",e=>{if(e.target.id==="walletTopupModal")closeWalletTopup()});
-loadProducts();$("refreshLiveDrops").onclick=()=>loadLiveDrops(true);if(initData){showOrders()}
+if(STORE_MODE==="digital"){loadProducts();if(initData)showOrders()}$("refreshLiveDrops").onclick=()=>loadLiveDrops(true);
 </script>
 <script src="/caser-features.js"></script>
 </body></html>
