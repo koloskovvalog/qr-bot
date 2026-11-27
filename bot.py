@@ -793,9 +793,21 @@ async def open_case(request):
     user = verify_telegram_user(request)
     try:
         case_id = int(request.match_info["case_id"])
-    except ValueError:
+    except (ValueError, TypeError):
         raise web.HTTPBadRequest(text="Некорректный ID кейса")
 
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    try:
+        count = int(payload.get("count", 1)) if isinstance(payload, dict) else 1
+    except (TypeError, ValueError):
+        raise web.HTTPBadRequest(text="Некорректное количество кейсов")
+    if count < 1 or count > 5:
+        raise web.HTTPBadRequest(text="За одно открытие можно выбрать от 1 до 5 кейсов")
+
+    opened_items = []
     async with db.acquire() as conn:
         async with conn.transaction():
             case = await conn.fetchrow("""
@@ -814,80 +826,88 @@ async def open_case(request):
             total = sum(row["weight"] for row in contents)
             if total <= 0:
                 raise web.HTTPConflict(text="В кейсе пока нет предметов")
-            roll = secrets.randbelow(total)
-            cursor = 0
-            selected = contents[-1]
-            for item in contents:
-                cursor += item["weight"]
-                if roll < cursor:
-                    selected = item
-                    break
-            selected = dict(selected)
-            if not selected["image_url"]:
-                cached_skins = CS2_CATALOG_CACHE.get("skins", [])
-                selected["image_url"] = next(
-                    (item["image_url"] for item in cached_skins
-                     if item["market_hash_name"] == selected.get("market_hash_name")
-                     or item["name"].casefold() == selected["name"].casefold()),
-                    None,
-                )
-            market_minor = None
-            if selected.get("market_hash_name"):
-                price_row = await conn.fetchrow("""
-                    SELECT lowest_price, fetched_at FROM cs2_steam_prices
-                    WHERE market_hash_name=$1 AND price_source <> 'steam'
-                """, selected["market_hash_name"])
-                fresh = bool(price_row and
-                    (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
-                market_minor = steam_price_to_minor(price_row["lowest_price"]) if fresh else None
-                if market_minor:
-                    selected["value_minor"] = market_minor
-                else:
-                    queue_cs2_price_refresh([{"market_hash_name": selected["market_hash_name"]}])
-            inventory_id = await conn.fetchval("""
-                INSERT INTO user_inventory(
-                    user_id, item_type, item_name, rarity, image_url,
-                    value_minor, source, market_hash_name, wear,
-                    stattrak, souvenir, phase
-                )
-                VALUES($1, 'skin', $2, $3, $4, $5, 'case', $6, $7, $8, $9, $10)
-                RETURNING id
-            """, user["id"], selected["name"], selected["rarity"],
-                 selected["image_url"], selected["value_minor"],
-                 selected.get("market_hash_name"), selected.get("wear"),
-                 selected.get("stattrak", False), selected.get("souvenir", False),
-                 selected.get("phase"))
 
-            opening_id = await conn.fetchval("""
-                INSERT INTO case_openings(user_id, case_id, item_id, item_name, rarity)
-                VALUES($1, $2, $3, $4, $5) RETURNING id
-            """, user["id"], case_id, selected["id"], selected["name"], selected["rarity"])
-            await conn.execute("""
-                INSERT INTO audit_log(actor_id, action, details)
-                VALUES($1, 'case_opened', $2::jsonb)
-            """, user["id"], json.dumps({
-                "opening_id": opening_id, "case_id": case_id,
-                "item_id": selected["id"], "roll": roll, "total_weight": total
-            }))
+            for _ in range(count):
+                roll = secrets.randbelow(total)
+                cursor = 0
+                selected = contents[-1]
+                for item in contents:
+                    cursor += item["weight"]
+                    if roll < cursor:
+                        selected = item
+                        break
+                selected = dict(selected)
+                if not selected["image_url"]:
+                    cached_skins = CS2_CATALOG_CACHE.get("skins", [])
+                    selected["image_url"] = next(
+                        (item["image_url"] for item in cached_skins
+                         if item["market_hash_name"] == selected.get("market_hash_name")
+                         or item["name"].casefold() == selected["name"].casefold()),
+                        None,
+                    )
+
+                market_minor = None
+                if selected.get("market_hash_name"):
+                    price_row = await conn.fetchrow("""
+                        SELECT lowest_price, fetched_at FROM cs2_steam_prices
+                        WHERE market_hash_name=$1 AND price_source <> 'steam'
+                    """, selected["market_hash_name"])
+                    fresh = bool(price_row and
+                        (datetime.now(timezone.utc) - price_row["fetched_at"]).total_seconds() <= 43200)
+                    market_minor = steam_price_to_minor(price_row["lowest_price"]) if fresh else None
+                    if market_minor:
+                        selected["value_minor"] = market_minor
+                    else:
+                        queue_cs2_price_refresh([{"market_hash_name": selected["market_hash_name"]}])
+
+                inventory_id = await conn.fetchval("""
+                    INSERT INTO user_inventory(
+                        user_id, item_type, item_name, rarity, image_url,
+                        value_minor, source, market_hash_name, wear,
+                        stattrak, souvenir, phase
+                    )
+                    VALUES($1, 'skin', $2, $3, $4, $5, 'case', $6, $7, $8, $9, $10)
+                    RETURNING id
+                """, user["id"], selected["name"], selected["rarity"],
+                     selected["image_url"], selected["value_minor"],
+                     selected.get("market_hash_name"), selected.get("wear"),
+                     selected.get("stattrak", False), selected.get("souvenir", False),
+                     selected.get("phase"))
+
+                opening_id = await conn.fetchval("""
+                    INSERT INTO case_openings(user_id, case_id, item_id, item_name, rarity)
+                    VALUES($1, $2, $3, $4, $5) RETURNING id
+                """, user["id"], case_id, selected["id"], selected["name"], selected["rarity"])
+                await conn.execute("""
+                    INSERT INTO audit_log(actor_id, action, details)
+                    VALUES($1, 'case_opened', $2::jsonb)
+                """, user["id"], json.dumps({
+                    "opening_id": opening_id, "case_id": case_id,
+                    "item_id": selected["id"], "roll": roll,
+                    "total_weight": total, "batch_count": count
+                }))
+                opened_items.append({
+                    "id": selected["id"], "name": selected["name"],
+                    "rarity": selected["rarity"],
+                    "wear": selected.get("wear"),
+                    "stattrak": selected.get("stattrak", False),
+                    "souvenir": selected.get("souvenir", False),
+                    "phase": selected.get("phase"),
+                    "image_url": selected.get("image_url"),
+                    "value_minor": selected["value_minor"],
+                    "market_price_minor": market_minor,
+                    "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
+                    "inventory_id": inventory_id,
+                    "opening_id": opening_id,
+                    "chance_percent": round(selected["weight"] * 100 / total, 2),
+                })
 
     return web.json_response({
-        "ok": True, "opening_id": opening_id, "case_id": case_id, "case_title": case["title"],
-        "item": {
-            "id": selected["id"], "name": selected["name"],
-            "rarity": selected["rarity"],
-            "wear": selected.get("wear"),
-            "stattrak": selected.get("stattrak", False),
-            "souvenir": selected.get("souvenir", False),
-            "phase": selected.get("phase"),
-            "image_url": selected.get("image_url"),
-            "value_minor": selected["value_minor"],
-            "market_price_minor": market_minor,
-            "sell_value_minor": (market_minor * 90 // 100) if market_minor else None,
-            "inventory_id": inventory_id,
-            "chance_percent": round(selected["weight"] * 100 / total, 2),
-        },
+        "ok": True, "opening_id": opened_items[0]["opening_id"],
+        "case_id": case_id, "case_title": case["title"],
+        "count": count, "items": opened_items, "item": opened_items[0],
         "demo_only": True,
-        "message": "Виртуальный предмет симуляции; не является предметом Steam."
+        "message": "Виртуальные предметы симуляции; не являются предметами Steam."
     })
 
 
