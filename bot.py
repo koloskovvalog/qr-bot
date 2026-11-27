@@ -9,7 +9,7 @@ import secrets
 import re
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone, timedelta
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode
 
 import asyncpg
 import aiohttp
@@ -238,6 +238,15 @@ async def init_db():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+
+                CREATE TABLE IF NOT EXISTS steam_auth_states (
+                    state TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    consumed_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_steam_auth_states_created
+                    ON steam_auth_states(created_at);
 
                 CREATE TABLE IF NOT EXISTS cs2_skin_deposits (
                     id BIGSERIAL PRIMARY KEY,
@@ -3117,6 +3126,108 @@ async def ensure_customer_profile(conn, user_id: int):
     raise web.HTTPConflict(text="Не удалось создать профиль. Повторите попытку.")
 
 
+async def start_steam_auth(request):
+    user = verify_telegram_user(request)
+    state = secrets.token_urlsafe(32)
+    callback_url = f"{PUBLIC_BASE_URL}/api/steam/callback?state={state}"
+    realm = f"{PUBLIC_BASE_URL}/"
+    params = {
+        "openid.ns": "http://specs.openid.net/auth/2.0",
+        "openid.mode": "checkid_setup",
+        "openid.return_to": callback_url,
+        "openid.realm": realm,
+        "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+        "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+    }
+    async with db.acquire() as conn:
+        await conn.execute("""
+            DELETE FROM steam_auth_states
+            WHERE created_at < NOW() - INTERVAL '30 minutes'
+               OR consumed_at IS NOT NULL
+        """)
+        await conn.execute("""
+            INSERT INTO steam_auth_states(state,user_id)
+            VALUES($1,$2)
+        """, state, user["id"])
+    return web.json_response({
+        "ok": True,
+        "auth_url": "https://steamcommunity.com/openid/login?" + urlencode(params)
+    })
+
+
+async def steam_auth_callback(request):
+    state = request.query.get("state", "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", state):
+        raise web.HTTPBadRequest(text="Ссылка авторизации недействительна. Вернитесь в ShirpDrop и попробуйте ещё раз.")
+
+    identity = request.query.get("openid.claimed_id", "")
+    steam_match = re.fullmatch(r"https://steamcommunity.com/openid/id/(\\d{17})", identity)
+    if not steam_match:
+        raise web.HTTPUnauthorized(text="Steam не вернул корректный SteamID64.")
+
+    expected_return_to = f"{PUBLIC_BASE_URL}/api/steam/callback?state={state}"
+    if request.query.get("openid.return_to") != expected_return_to:
+        raise web.HTTPUnauthorized(text="Не совпадает адрес возврата Steam OpenID.")
+    if request.query.get("openid.identity") != identity:
+        raise web.HTTPUnauthorized(text="Steam identity не совпадает с claimed_id.")
+    if request.query.get("openid.op_endpoint") != "https://steamcommunity.com/openid/login":
+        raise web.HTTPUnauthorized(text="Неизвестный OpenID endpoint.")
+
+    verification = {
+        key: value for key, value in request.query.items()
+        if key.startswith("openid.")
+    }
+    verification["openid.mode"] = "check_authentication"
+    timeout = aiohttp.ClientTimeout(total=15)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://steamcommunity.com/openid/login",
+                data=verification,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            ) as response:
+                body = await response.text()
+                if response.status != 200 or not re.search(r"(?m)^is_valid:true\\s*$", body):
+                    raise web.HTTPUnauthorized(text="Steam не подтвердил подлинность авторизации.")
+    except web.HTTPException:
+        raise
+    except Exception:
+        logger.exception("Steam OpenID verification failed")
+        raise web.HTTPBadGateway(text="Не удалось проверить ответ Steam. Попробуйте позже.")
+
+    steam_id64 = steam_match.group(1)
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            auth = await conn.fetchrow("""
+                UPDATE steam_auth_states
+                SET consumed_at=NOW()
+                WHERE state=$1 AND consumed_at IS NULL
+                  AND created_at > NOW() - INTERVAL '10 minutes'
+                RETURNING user_id
+            """, state)
+            if not auth:
+                raise web.HTTPUnauthorized(text="Ссылка авторизации истекла или уже использована.")
+            try:
+                await conn.execute("""
+                    INSERT INTO steam_identities(user_id,steam_id64,verified_at)
+                    VALUES($1,$2,NOW())
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        steam_id64=EXCLUDED.steam_id64,
+                        verified_at=NOW(),
+                        updated_at=NOW()
+                """, auth["user_id"], steam_id64)
+            except asyncpg.UniqueViolationError:
+                raise web.HTTPConflict(text="Этот Steam-аккаунт уже привязан к другому пользователю ShirpDrop.")
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id,action,details)
+                VALUES($1,'steam_account_linked',$2::jsonb)
+            """, auth["user_id"], json.dumps({"steam_id64": steam_id64}))
+    return web.Response(
+        text="<html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Steam подключён</title><body style='background:#101010;color:#f5e7c2;font:16px sans-serif;text-align:center;padding:48px 20px'><h2>Steam успешно привязан</h2><p>Аккаунт подтверждён. Вернитесь в Telegram и откройте профиль ShirpDrop.</p></body></html>",
+        content_type="text/html",
+    )
+
+
 async def get_my_profile(request):
     user = verify_telegram_user(request)
     async with db.acquire() as conn:
@@ -3131,6 +3242,9 @@ async def get_my_profile(request):
             "SELECT COALESCE(SUM(points_delta),0)::INTEGER FROM loyalty_ledger WHERE user_id=$1",
             user["id"],
         )
+        steam = await conn.fetchrow("""
+            SELECT steam_id64, verified_at FROM steam_identities WHERE user_id=$1
+        """, user["id"])
         referrals = await conn.fetchval(
             "SELECT COUNT(*)::INTEGER FROM customer_profiles WHERE referred_by=$1",
             user["id"],
@@ -3149,7 +3263,7 @@ async def get_my_profile(request):
             ORDER BY co.id DESC LIMIT 50
         """, user["id"])
     return web.json_response({
-        "user_id": user["id"], "referral_code": profile["referral_code"],
+        "user_id": user["id"], "referral_code": profile["referral_code"],\n        "steam": {"connected": bool(steam), "steam_id64": steam["steam_id64"] if steam else None, "verified_at": steam["verified_at"].isoformat() if steam and steam["verified_at"] else None},
         "has_referrer": profile["referred_by"] is not None,
         "points": points, "orders_count": stats["orders_count"],
         "paid_orders_count": stats["paid_orders_count"], "referrals_count": referrals,
@@ -4774,6 +4888,8 @@ def create_app():
     app.router.add_post("/api/orders/bulk", create_bulk_orders)
     app.router.add_get("/api/orders", get_my_orders)
     app.router.add_get("/api/profile", get_my_profile)
+    app.router.add_post("/api/steam/connect", start_steam_auth)
+    app.router.add_get("/api/steam/callback", steam_auth_callback)
     app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
     app.router.add_get("/api/live-drops", get_live_drops)
