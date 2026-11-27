@@ -2413,6 +2413,17 @@ async def cmd_start(message: types.Message):
         )
         return
 
+    # Give the administrator a private Telegram chat menu button for the admin panel.
+    # The global menu button remains the public store for all customers.
+    if is_admin(message.from_user.id):
+        await bot.set_chat_menu_button(
+            chat_id=message.chat.id,
+            menu_button=MenuButtonWebApp(
+                text="Админ-панель",
+                web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/admin"),
+            ),
+        )
+
     buttons = [[
         InlineKeyboardButton(
             text="🛍 Открыть магазин",
