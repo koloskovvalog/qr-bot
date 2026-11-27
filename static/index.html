@@ -407,6 +407,9 @@ main{max-width:1180px;padding:22px 22px 62px}
 @media(max-width:600px){#caseStage .reel-card{width:116px;height:128px;flex-basis:116px}#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:64px}}
 @media(prefers-reduced-motion:reduce){#caseStage.rolling .case-caption{animation:none}}
 
+
+/* Caser-inspired dedicated case page */
+.case-detail-page{animation:casePageIn .28s ease both}.case-back{border:1px solid #454957;background:#171a21;color:#f0d48a;border-radius:12px;padding:11px 15px;font-weight:850;margin:2px 0 16px}.case-detail-heading{display:flex;align-items:center;gap:22px;text-align:left}.case-detail-cover{width:190px;height:176px;flex:0 0 190px;display:grid;place-items:center;border:1px solid #6c5730;border-radius:18px;background:radial-gradient(circle,#514027,#171a21 70%)}.case-detail-cover img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 12px 20px #0009)}.case-detail-cover span{font-size:38px;font-weight:1000;color:#e8c66f}.case-detail-info{min-width:0}.case-detail-info .case-caption{font-size:clamp(20px,4vw,30px);margin:10px 0}.case-detail-info .case-sub{margin:0 0 12px}.case-open-controls{margin:20px 0 14px;padding:16px;border:1px solid #454957;border-radius:16px;background:linear-gradient(145deg,#1d2028,#111319)}.case-open-controls>label{display:block;color:#c5cbd4;font-size:12px;font-weight:800;margin-bottom:8px}.case-open-controls select{width:100%;margin-bottom:12px}.case-open-actions{display:grid;grid-template-columns:1fr 1.3fr;gap:10px}.case-open-actions button{min-height:48px}.case-quick-btn,.case-upgrade-btn{border:1px solid #8a713d;border-radius:12px;background:#282315;color:#f6d987;font-weight:900;padding:12px}.case-demo-note{display:block;color:#a8adba;font-size:11px;margin-top:10px}.case-results-heading{display:flex;justify-content:space-between;align-items:center;margin:20px 2px 12px;color:#f1d58f}.case-results-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.case-win-card{min-width:0;padding:12px;border:1px solid #454957;border-radius:14px;background:linear-gradient(155deg,#20242d,#11141a);display:flex;flex-direction:column;gap:7px}.case-win-card>img,.case-win-card>.item-thumb-placeholder{width:100%;height:110px;object-fit:contain;background:radial-gradient(circle,#3c3528,#151820);border-radius:10px}.case-win-card>small{font-size:9px;color:#d4b96e;letter-spacing:1px}.case-win-card>strong{font-size:12px;line-height:1.35}.case-win-card>span{font-size:10px;color:#b9bfca}.case-win-card>b{color:#f2d98c}.case-win-actions{display:grid;gap:6px;margin-top:auto}.case-win-actions button{font-size:10px;padding:9px}.case-win-actions .sell-item{width:100%}.case-detail-contents{margin-top:24px}#caseDetailPanel .case-stage{padding:18px;margin-top:0}#caseDetailPanel .case-reel{margin:18px 0 4px}#caseDetailPanel .case-reel[hidden]{display:none}@keyframes casePageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@media(max-width:600px){.case-detail-heading{align-items:flex-start;gap:12px}.case-detail-cover{width:116px;height:126px;flex-basis:116px}.case-detail-info .case-caption{font-size:18px}.case-open-actions{grid-template-columns:1fr}.case-results-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
 <body><main>
@@ -454,16 +457,25 @@ main{max-width:1180px;padding:22px 22px 62px}
  <div class="muted purchase-footnote">Демо-режим: отображение заказа не означает фактическую оплату. Реальные списания отключены.</div>
 </section>
 <section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
+<div id="caseCatalogPanel">
 <div class="case-catalog-toolbar">
  <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
  <select id="caseSort" class="search" aria-label="Сортировка кейсов"><option value="featured">Рекомендуемые</option><option value="name">По названию</option><option value="items">Больше предметов</option><option value="newest">Сначала новые</option></select>
 </div>
 <div class="case-catalog-caption"><span id="caseCatalogCount">Загружаем кейсы…</span><span>CS2 · DEMO COLLECTION</span></div>
 <div id="caseCards" class="case-catalog-grid"><div class="empty">Загрузка каталога кейсов…</div></div>
-<div id="caseStage" class="case-stage"><div class="case-emblem">CS<span>2</span></div><div class="case-caption">ПРЕМИУМ КЕЙС</div><div class="case-sub">Нажми «Открыть кейс», чтобы испытать удачу</div><button id="openCase" class="goldbtn" disabled>Загрузка кейсов…</button></div>
+</div>
+<div id="caseDetailPanel" class="case-detail-page" hidden>
+ <button type="button" class="case-back" id="backToCases">← Все кейсы</button>
+ <div id="caseStage" class="case-stage"></div>
+ <div id="caseResult"></div>
+ <div class="case-detail-contents">
+  <div class="section"><h2>Содержимое кейса</h2><span class="count">Вероятности выпадения</span></div>
+  <div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
+ </div>
+</div>
 <button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
-<div class="muted" style="margin-top:7px">Один виртуальный кейс в день для режима «Апгрейд кейсов».</div>
-<div class="section"><h2>Содержимое кейса</h2><span class="count">Вероятности</span></div><div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
+<div class="muted" style="margin-top:7px">Один виртуальный тестовый кейс в день для режима «Апгрейд кейсов».</div>
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
@@ -641,19 +653,28 @@ function renderCaseCards(){
 }
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
+ $("caseCatalogPanel").hidden=true;$("caseDetailPanel").hidden=false;
  $("caseStage").dataset.caseId=c.id;
- renderCaseCards();
- $("caseStage").innerHTML=(c.image_url?'<img class="case-cover" src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true">':'<div class="case-emblem">CS<span>2</span></div>')+
-  '<div class="case-stage-kicker"><span>SELECTED CASE</span><span>'+(Number(c.price_minor||0)===0?'DEMO · 0 ₽':'СКОРО')+'</span></div>'+
-  '<div class="case-caption">'+esc(c.title.toUpperCase())+'</div><div class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</div>'+
-  '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов в составе</span><span>Результат фиксируется сервером</span></div>'+
-  '<div id="caseReel" class="case-reel"></div><button id="openCase" class="goldbtn">'+(Number(c.price_minor||0)===0?'✦ Открыть кейс':'Скоро будет доступно')+'</button><div id="caseResult"></div>';
- $("openCase").onclick=openCase;$("openCase").disabled=!c.items.length||Number(c.price_minor||0)!==0;$("claimDemoCase").onclick=claimDemoCase;
- renderCaseItems(c.items);
- if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
+ $("caseStage").innerHTML=
+  '<div class="case-detail-heading"><div class="case-detail-cover">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
+  '<div class="case-detail-info"><div class="case-stage-kicker"><span>QR CASE SERIES</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'СКОРО')+'</span></div>'+
+  '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</p>'+
+  '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>Серверный случайный результат</span></div></div></div>'+
+  '<div class="case-open-controls"><label for="caseOpenCount">Количество открытий</label><select id="caseOpenCount" class="search"><option value="1">1 кейс</option><option value="2">2 кейса</option><option value="3">3 кейса</option><option value="4">4 кейса</option><option value="5">5 кейсов</option></select>'+
+  '<div class="case-open-actions"><button id="quickOpenCase" class="case-quick-btn" type="button">⚡ Быстро открыть</button><button id="openCase" class="goldbtn" type="button">✦ Открыть с прокруткой</button></div>'+
+  '<small class="case-demo-note">'+(Number(c.price_minor||0)===0?'Демо-открытие · виртуальные предметы':'Этот кейс пока недоступен для открытия')+'</small></div>'+
+  '<div id="caseReel" class="case-reel" hidden></div>';
+ const disabled=!c.items?.length||Number(c.price_minor||0)!==0;
+ $("openCase").disabled=disabled;$("quickOpenCase").disabled=disabled;
+ $("openCase").onclick=()=>openCase("spin");$("quickOpenCase").onclick=()=>openCase("quick");
+ $("backToCases").onclick=()=>{$("caseDetailPanel").hidden=true;$("caseCatalogPanel").hidden=false;$("caseResult").innerHTML="";};
+ $("claimDemoCase").onclick=claimDemoCase;
+ renderCaseCards();renderCaseItems(c.items||[]);
+ if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы рассчитаны по полному составу кейса.</div>')}
+ window.scrollTo?.({top:0,behavior:"smooth"});
 }
 async function loadCases(force=false){
- if(!force&&casesData.length&&Date.now()-casesLoadedAt<60000){renderCaseCards();if(!$("caseStage").dataset.caseId)selectCase((casesData.find(c=>c.id===Number(homeCasePendingId))||casesData[0]).id);return}
+ if(!force&&casesData.length&&Date.now()-casesLoadedAt<60000){renderCaseCards();if(homeCasePendingId){const c=casesData.find(x=>x.id===Number(homeCasePendingId));if(c)selectCase(c.id);homeCasePendingId=null;}return}
  if(casesLoadPromise)return casesLoadPromise;
  casesLoadPromise=(async()=>{try{
   const d=await api("/api/cases");casesData=d.items||[];casesLoadedAt=Date.now();
@@ -661,8 +682,8 @@ async function loadCases(force=false){
   $("caseSort").onchange=renderCaseCards;
   if(!casesData.length){$("caseCatalogCount").textContent="0 кейсов";$("caseCards").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';$("caseStage").innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
   renderCaseCards();
-  const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));
-  selectCase((preferred||casesData[0]).id);homeCasePendingId=null;
+  if(homeCasePendingId){const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));if(preferred)selectCase(preferred.id);homeCasePendingId=null;}
+  else {$("caseCatalogPanel").hidden=false;$("caseDetailPanel").hidden=true;}
  }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}finally{casesLoadPromise=null}})();
  return casesLoadPromise;
 }
@@ -677,67 +698,47 @@ function skinMetaTags(x){
 }
 function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
-async function openCase(){
+async function openCase(mode="spin"){
  if(!initData){toast("Откройте приложение через Telegram.");return}
- const stage=$("caseStage"),id=stage.dataset.caseId,button=$("openCase"),reel=$("caseReel");
- if(!id||button.disabled)return;
- button.disabled=true;stage.classList.add("rolling");
+ const stage=$("caseStage"),id=stage.dataset.caseId,reel=$("caseReel");
+ const quick=$("quickOpenCase"),spin=$("openCase");
+ if(!id||quick.disabled||spin.disabled)return;
+ const count=Math.max(1,Math.min(5,Number($("caseOpenCount")?.value||1)));
  const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
- if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
- const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" fetchpriority="low" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
- const winnerIndex=38;
- const reelItems=Array.from({length:45},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
- const trackHtml=items=>items.map((item,index)=>cardHtml(item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("");
- reel.classList.remove("spinning","stopping");
- reel.innerHTML='<div class="reel-track">'+trackHtml(reelItems)+'</div>';
- reel.classList.add("ready");
- $("caseResult").innerHTML='<div class="case-result"><small>ОПРЕДЕЛЯЕМ ВЫПАДЕНИЕ…</small><p class="muted">Сервер уже выбирает предмет. Результат не зависит от анимации.</p></div>';
+ if(!pool.length){toast("В этом кейсе пока нет предметов.");return}
+ quick.disabled=true;spin.disabled=true;stage.classList.add("rolling");
+ $("caseResult").innerHTML='<div class="case-result"><small>'+(mode==="quick"?'ОТКРЫВАЕМ '+count+' КЕЙС(ОВ)…':'РУЛЕТКА ЗАПУЩЕНА…')+'</small><p class="muted">Сервер определяет результат каждого открытия.</p></div>';
+ const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
  try{
-  const d=await api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
-  if(Number(d.case_id)!==Number(id))throw new Error("Сервер вернул результат другого кейса. Открытие остановлено.");
-  const x=d.item;
-  if(!x||!x.name)throw new Error("Сервер не вернул выигрышный предмет");
-  // Keep the same track in the DOM; only replace its cards, then make one smooth stop.
-  reelItems[winnerIndex]=x;
-  const track=reel.querySelector(".reel-track");
-  track.innerHTML=trackHtml(reelItems.map((item,index)=>index===winnerIndex?x:item));
-  reel.classList.remove("ready");
-  reel.classList.add("stopping");
-  const winnerCard=track.children[winnerIndex];
-  const reelRect=reel.getBoundingClientRect();
-  const winnerRect=winnerCard.getBoundingClientRect();
-  const stopX=Math.round(reelRect.left+reel.clientWidth/2-(winnerRect.left+winnerRect.width/2));
-  const targetTransform="translateX("+stopX+"px)";
-  if(typeof track.animate==="function"){
-   const animation=track.animate(
-    [{transform:"translateX(0px)"},{transform:targetTransform}],
-    {duration:4600,easing:"cubic-bezier(.12,.76,.14,1)",fill:"forwards"}
-   );
-   await animation.finished;
-   track.style.transform=targetTransform;
-   animation.cancel();
-  }else{
-   track.style.transition="transform 4.6s cubic-bezier(.12,.76,.14,1)";
-   track.style.transform="translateX(0px)";
-   void track.offsetWidth;
-   requestAnimationFrame(()=>{track.style.transform=targetTransform});
-   await new Promise(resolve=>setTimeout(resolve,4700));
-  }
+  const d=await api("/api/cases/"+id+"/open",{method:"POST",body:JSON.stringify({count})});
+  if(Number(d.case_id)!==Number(id))throw new Error("Сервер вернул результат другого кейса.");
+  const wins=Array.isArray(d.items)?d.items:(d.item?[d.item]:[]);
+  if(wins.length!==count)throw new Error("Сервер вернул неполный список выигрышей.");
+  if(mode==="spin"){
+   const winnerIndex=38,reelItems=Array.from({length:45},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
+   reel.classList.remove("spinning","stopping");reel.hidden=false;
+   reel.innerHTML='<div class="reel-track">'+reelItems.map((item,index)=>cardHtml(item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("")+'</div>';
+   reel.classList.add("ready");
+   const track=reel.querySelector(".reel-track");reelItems[winnerIndex]=wins[0];
+   track.innerHTML=reelItems.map((item,index)=>cardHtml(index===winnerIndex?wins[0]:item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("");
+   reel.classList.remove("ready");reel.classList.add("stopping");
+   const winnerCard=track.children[winnerIndex],rr=reel.getBoundingClientRect(),wr=winnerCard.getBoundingClientRect();
+   const stopX=Math.round(rr.left+reel.clientWidth/2-(wr.left+wr.width/2)),target="translateX("+stopX+"px)";
+   if(typeof track.animate==="function"){const anim=track.animate([{transform:"translateX(0px)"},{transform:target}],{duration:count>1?3200:4600,easing:"cubic-bezier(.12,.76,.14,1)",fill:"forwards"});await anim.finished;track.style.transform=target;anim.cancel();}
+   else {track.style.transition="transform 4.6s cubic-bezier(.12,.76,.14,1)";void track.offsetWidth;track.style.transform=target;await new Promise(r=>setTimeout(r,4700));}
+  } else {reel.hidden=true;}
   stage.classList.remove("rolling");
-  const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется";
-  const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
-  $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
-   (x.image_url?'<img class="case-result-image" src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'">':'')+
-   '<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · шанс '+Number(x.chance_percent).toFixed(2)+'%</small>'+
-   skinMetaTags(x)+'<div class="case-result-price">'+price+'</div>'+
-   '<div class="case-result-actions"><button class="goldbtn" onclick="upgradeInventoryItem('+x.inventory_id+',&quot;skin&quot;)">В апгрейд</button>'+sell+'</div>'+
-   '<small>Цена внешнего маркетплейса · RUB. Продажа начисляет виртуальный баланс.</small></div>';
-  toast("Скин добавлен в инвентарь");
+  $("caseResult").innerHTML='<div class="case-results-heading"><strong>'+(wins.length===1?'ТВОЙ ВЫИГРЫШ':'ТВОИ ВЫИГРЫШИ')+'</strong><span>'+wins.length+' из '+count+'</span></div><div class="case-results-grid">'+wins.map((x,index)=>{
+   const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена уточняется";
+   const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Цена уточняется</button>';
+   return '<article class="case-win-card">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy">':'<div class="item-thumb-placeholder">CS2</div>')+'<small>ПРЕДМЕТ '+(index+1)+'</small><strong>'+esc(x.name)+'</strong><span>'+esc(x.rarity)+' · '+Number(x.chance_percent).toFixed(2)+'%</span>'+skinMetaTags(x)+'<b>'+price+'</b><div class="case-win-actions"><button class="case-upgrade-btn" onclick="upgradeInventoryItem('+x.inventory_id+',&quot;skin&quot;)">В апгрейд</button>'+sell+'</div></article>';
+  }).join("")+'</div><p class="case-demo-note">Виртуальные предметы демо-режима. Не являются предметами Steam и не выводятся на Steam.</p>';
+  toast(wins.length===1?"Предмет добавлен в инвентарь":wins.length+" предмета добавлены в инвентарь");
   await showInventory();await refreshWalletBalance();
  }catch(e){
-  stage.classList.remove("rolling");reel.classList.remove("ready","spinning","stopping");
+  stage.classList.remove("rolling");reel.hidden=true;
   $("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>';
- }finally{button.disabled=false}
+ }finally{quick.disabled=false;spin.disabled=false}
 }
 async function refreshWalletBalance(){
  try{const d=await api("/api/wallet");$("walletBalance").textContent=money(d.balance_minor||0,"₽");}
