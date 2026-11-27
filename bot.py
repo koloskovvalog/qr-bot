@@ -1442,7 +1442,7 @@ async def _fetch_apiskins_prices(session, batch):
 async def cs2_steam_price_worker():
     """Refresh market quotes in one batch, preferring OpenSkin over quota-limited API Skins."""
     timeout = aiohttp.ClientTimeout(total=35, connect=10)
-    headers = {"Accept": "application/json", "Accept-Encoding": "gzip, deflate, br"}
+    headers = {"Accept": "application/json"}
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
         while True:
             first = await CS2_PRICE_QUEUE.get()
@@ -1456,9 +1456,9 @@ async def cs2_steam_price_worker():
                 updates = await _fetch_openskin_prices(session, batch)
                 updated_names = {row[0] for row in updates}
                 missing = [name for name in batch if name not in updated_names]
-                if missing and not updates:
-                    # API Skins remains a secondary source only. Its 429 cooldown
-                    # cannot block the worker or prevent other users from pricing.
+                if missing:
+                    # Use API Skins only for gaps, never for items already priced
+                    # by OpenSkin. A 429 is remembered and never stalls the queue.
                     updates.extend(await _fetch_apiskins_prices(session, missing))
                 saved = await _save_market_price_updates(updates)
                 logger.info(
