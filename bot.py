@@ -3509,6 +3509,16 @@ async def cmd_start(message: types.Message):
             text="🛍 Открыть магазин",
             web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
         )
+    ], [
+        InlineKeyboardButton(
+            text="📄 Пользовательское соглашение",
+            url="https://telegra.ph/POLZOVATELSKOE-SOGLASHENIE-11-27-36",
+        )
+    ], [
+        InlineKeyboardButton(
+            text="🔒 Политика конфиденциальности",
+            url="https://telegra.ph/Politika-konfidencialnosti-11-27-110",
+        )
     ]]
     if is_admin(message.from_user.id):
         buttons.append([
