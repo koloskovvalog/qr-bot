@@ -37,14 +37,18 @@ jobs:
           from pathlib import Path
           import re
 
-          html = Path("static/index.html").read_text(encoding="utf-8")
           class Validator(HTMLParser):
               pass
-          Validator().feed(html)
-          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
-          if not scripts:
-              raise SystemExit("No inline application script found")
-          Path("/tmp/miniapp.js").write_text(scripts[-1], encoding="utf-8")
-          print("HTML parsed; inline JavaScript extracted")
+
+          for page in ("static/index.html", "static/admin.html"):
+              html = Path(page).read_text(encoding="utf-8")
+              Validator().feed(html)
+              scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+              if not scripts:
+                  raise SystemExit(f"No inline application script found in {page}")
+              output = Path("/tmp") / (Path(page).stem + ".js")
+              output.write_text(scripts[-1], encoding="utf-8")
+              print(f"{page}: HTML parsed; inline JavaScript extracted")
           PY
-          node --check /tmp/miniapp.js
+          node --check /tmp/index.js
+          node --check /tmp/admin.js
