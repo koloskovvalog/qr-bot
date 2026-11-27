@@ -1624,6 +1624,8 @@ async def suggest_upgrade_target(request):
         fresh_source = bool(source_price and
             (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
         source_value = steam_price_to_minor(source_price["lowest_price"]) if fresh_source else None
+        if source_value and (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+            queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
         if not source_value:
             if not source_market_name:
                 raise web.HTTPBadRequest(text="Не удалось однозначно сопоставить этот предмет с каталогом CS2. Выберите другой скин.")
@@ -1668,6 +1670,8 @@ async def suggest_upgrade_target(request):
             prices[row["market_hash_name"]] = minor
         elif not fresh:
             stale_names.add(row["market_hash_name"])
+    if stale_names:
+        queue_cs2_price_refresh([{"market_hash_name": name} for name in list(stale_names)[:100]])
     candidates = [x for x in catalog if x.get("market_hash_name") in prices]
     if not candidates:
         if not APISKINS_API_KEY:
@@ -1760,6 +1764,8 @@ async def create_upgrade_attempt(request):
                 source_fresh = bool(source_price and
                     (datetime.now(timezone.utc) - source_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
                 source_market_minor = steam_price_to_minor(source_price["lowest_price"]) if source_fresh else None
+                if source_market_minor and (datetime.now(timezone.utc)-source_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+                    queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
                 if not source_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
                     return web.json_response({"pending": True, "message": "Обновляем цену исходного скина. Повторите через несколько секунд."}, status=202)
@@ -1771,6 +1777,8 @@ async def create_upgrade_attempt(request):
                 target_fresh = bool(target_price and
                     (datetime.now(timezone.utc) - target_price["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
                 target_market_minor = steam_price_to_minor(target_price["lowest_price"]) if target_fresh else None
+                if target_market_minor and (datetime.now(timezone.utc)-target_price["fetched_at"]).total_seconds() > CS2_PRICE_REFRESH_TTL_SECONDS:
+                    queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
                 if not target_market_minor:
                     queue_cs2_price_refresh([{"market_hash_name": target["market_hash_name"]}])
                     return web.json_response({"pending": True, "message": "Обновляем цену целевого скина. Повторите через несколько секунд."}, status=202)
