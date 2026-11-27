@@ -1620,11 +1620,26 @@ async def suggest_upgrade_target(request):
                 raise web.HTTPBadRequest(text="Не удалось однозначно сопоставить этот предмет с каталогом CS2. Выберите другой скин.")
             if not APISKINS_API_KEY:
                 raise web.HTTPServiceUnavailable(text="Цены временно недоступны: не настроен ключ API Skins на сервере.")
-            queue_cs2_price_refresh([{"market_hash_name": source_market_name}])
+            # Fetch the source quote and a useful target sample in the SAME
+            # marketplace batch. Previously these were requested sequentially,
+            # costing users two complete API round trips before an X2 target appeared.
+            provisional_source = int(source["value_minor"] or 0)
+            provisional_desired = (
+                provisional_source * raw_value if mode == "multiplier"
+                else provisional_source * 75.0 / raw_value
+            ) if provisional_source > 0 else 0
+            ranked_targets = sorted(
+                (x for x in catalog if x.get("market_hash_name") and x.get("market_hash_name") != source_market_name),
+                key=lambda x: abs(cs2_virtual_value({"name": x.get("rarity", "")}) - provisional_desired) / max(provisional_desired, 1)
+            ) if provisional_desired else []
+            queue_cs2_price_refresh(
+                [{"market_hash_name": source_market_name}] +
+                [{"market_hash_name": x["market_hash_name"]} for x in ranked_targets[:99]]
+            )
             return web.json_response({
                 "pending": True,
-                "stage": "source_price",
-                "message": "Получаем актуальную цену исходного скина. Это может занять несколько секунд."
+                "stage": "source_and_target_prices",
+                "message": "Одновременно получаем цену ставки и подходящих целей."
             }, status=202)
         desired = source_value * raw_value if mode == "multiplier" else source_value * 75.0 / raw_value
         names = [x.get("market_hash_name") for x in catalog if x.get("market_hash_name")]
