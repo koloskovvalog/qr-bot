@@ -2705,6 +2705,18 @@ async def claim_demo_case(request):
         "demo_only": True,
     })
 
+async def get_demo_claim_status(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        claimed = await conn.fetchval("""
+            SELECT EXISTS(
+                SELECT 1 FROM demo_case_claims
+                WHERE user_id=$1 AND claim_date=CURRENT_DATE
+            )
+        """, user["id"])
+    return web.json_response({"claimed_today": bool(claimed)})
+
+
 async def suggest_upgrade_target(request):
     user = verify_telegram_user(request)
     try:
@@ -4941,6 +4953,7 @@ def create_app():
     app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
     app.router.add_post("/api/cases/{case_id}/claim", claim_demo_case)
+    app.router.add_get("/api/demo-claim-status", get_demo_claim_status)
     app.router.add_get("/api/live-drops", get_live_drops)
     app.router.add_get("/api/creator-cases", get_creator_cases)
     app.router.add_post("/api/creator-cases", create_creator_case)
