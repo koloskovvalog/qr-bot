@@ -1303,14 +1303,8 @@ async def get_cs2_skins(request):
     except ValueError:
         page, limit = 0, 48
 
-    # Search-first UX: never dump the full 10k+ catalogue into the scrolling UI.
-    if len(query) < 2:
-        return web.json_response({
-            "items": [], "total": len(catalog), "matched": 0,
-            "page": 0, "limit": 24, "has_more": False,
-            "search_required": True, "price_currency": "RUB",
-            "price_source": "Lis-Skins / Market.CSGO",
-        })
+    # Search is optional: with an empty query the UI can browse the entire
+    # paginated CS2 catalog; no giant response is sent to the client.
     terms = [term for term in query.split() if term]
     items = [
         item for item in catalog
