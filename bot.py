@@ -3161,7 +3161,7 @@ async def steam_auth_callback(request):
         raise web.HTTPBadRequest(text="Ссылка авторизации недействительна. Вернитесь в ShirpDrop и попробуйте ещё раз.")
 
     identity = request.query.get("openid.claimed_id", "")
-    steam_match = re.fullmatch(r"https://steamcommunity.com/openid/id/(\\d{17})", identity)
+    steam_match = re.fullmatch(r"https://steamcommunity.com/openid/id/(\d{17})", identity)
     if not steam_match:
         raise web.HTTPUnauthorized(text="Steam не вернул корректный SteamID64.")
 
@@ -3187,7 +3187,7 @@ async def steam_auth_callback(request):
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             ) as response:
                 body = await response.text()
-                if response.status != 200 or not re.search(r"(?m)^is_valid:true\\s*$", body):
+                if response.status != 200 or not re.search(r"(?m)^is_valid:true\s*$", body):
                     raise web.HTTPUnauthorized(text="Steam не подтвердил подлинность авторизации.")
     except web.HTTPException:
         raise
