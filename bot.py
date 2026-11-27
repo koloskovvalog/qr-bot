@@ -38,6 +38,13 @@ CASES_APP_URL = os.getenv("CASES_APP_URL", f"{PUBLIC_BASE_URL}/cases").rstrip("/
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 CASES_WEBHOOK_SECRET = os.getenv("CASES_WEBHOOK_SECRET", "").strip()
 APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
+CS2SELL_API_KEY = os.getenv("CS2SELL_API_KEY", "").strip()
+CS2SELL_WEBHOOK_SECRET = os.getenv("CS2SELL_WEBHOOK_SECRET", "").strip()
+SKINSNODE_CLIENT_ID = os.getenv("SKINSNODE_CLIENT_ID", "").strip()
+SKINSNODE_CLIENT_SECRET = os.getenv("SKINSNODE_CLIENT_SECRET", "").strip()
+CS2SELL_PARTNER_DEPOSITS_CONFIRMED = os.getenv("CS2SELL_PARTNER_DEPOSITS_CONFIRMED", "").lower() == "true"
+SKINSNODE_DEPOSITS_CONFIRMED = os.getenv("SKINSNODE_DEPOSITS_CONFIRMED", "").lower() == "true"
+SKINSNODE_WITHDRAWALS_CONFIRMED = os.getenv("SKINSNODE_WITHDRAWALS_CONFIRMED", "").lower() == "true"
 APISKINS_COOLDOWN_UNTIL = 0
 USD_RUB_RATE = None
 USD_RUB_RATE_AT = 0
@@ -213,6 +220,72 @@ async def init_db():
                     ON wallet_ledger(user_id, created_at DESC);
 
 
+
+                CREATE TABLE IF NOT EXISTS steam_identities (
+                    user_id BIGINT PRIMARY KEY,
+                    steam_id64 TEXT NOT NULL UNIQUE,
+                    trade_url TEXT,
+                    verified_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS cs2_skin_deposits (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    provider TEXT NOT NULL,
+                    external_id TEXT NOT NULL UNIQUE,
+                    provider_deposit_id TEXT,
+                    steam_id64 TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'created',
+                    amount_usd_cents BIGINT,
+                    amount_rub_minor BIGINT,
+                    provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cs2_skin_deposits_user
+                    ON cs2_skin_deposits(user_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS cs2_skin_withdrawals (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    provider TEXT NOT NULL,
+                    external_id TEXT NOT NULL UNIQUE,
+                    provider_order_id TEXT,
+                    steam_id64 TEXT NOT NULL,
+                    market_hash_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'created',
+                    amount_usd_cents BIGINT,
+                    amount_rub_minor BIGINT,
+                    provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cs2_skin_withdrawals_user
+                    ON cs2_skin_withdrawals(user_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS cs2_provider_webhook_events (
+                    provider TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    processed_at TIMESTAMPTZ,
+                    PRIMARY KEY(provider, event_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS wallet_external_ledger (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    operation_id TEXT NOT NULL UNIQUE,
+                    delta_minor BIGINT NOT NULL CHECK (delta_minor <> 0),
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    reason TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_external_ledger_user
+                    ON wallet_external_ledger(user_id, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS admin_wallet_adjustments (
                     id BIGSERIAL PRIMARY KEY,
@@ -555,6 +628,92 @@ def require_admin(request: web.Request) -> dict:
         raise web.HTTPForbidden(text="Доступ запрещён")
 
     return user
+
+
+
+async def admin_get_cs2_provider_status(request):
+    """Read-only connectivity check for candidate CS2 skin providers."""
+    require_admin(request)
+    timeout = aiohttp.ClientTimeout(total=12)
+    result = {
+        "providers": {
+            "cs2sell": {
+                "name": "CS2Sell",
+                "credentials_configured": bool(CS2SELL_API_KEY),
+                "partner_deposits_confirmed": CS2SELL_PARTNER_DEPOSITS_CONFIRMED,
+                "connected": False,
+                "scopes": [],
+                "deposit_ready": False,
+                "withdrawal_ready": False,
+                "message": "Нужен API key с нужными scopes и подтверждённый доступ к partner deposits.",
+            },
+            "skinsnode": {
+                "name": "SkinsNode",
+                "credentials_configured": bool(SKINSNODE_CLIENT_ID and SKINSNODE_CLIENT_SECRET),
+                "deposits_confirmed": SKINSNODE_DEPOSITS_CONFIRMED,
+                "withdrawals_confirmed": SKINSNODE_WITHDRAWALS_CONFIRMED,
+                "connected": False,
+                "deposit_ready": False,
+                "withdrawal_ready": False,
+                "message": "Нужны client credentials и включённые поставщиком функции deposits/withdrawals.",
+            },
+        }
+    }
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        cs2sell = result["providers"]["cs2sell"]
+        if CS2SELL_API_KEY:
+            try:
+                async with session.get(
+                    "https://api.cs2sell.com/v1/public/me",
+                    headers={"Authorization": f"Bearer {CS2SELL_API_KEY}"},
+                ) as response:
+                    body = await response.json(content_type=None)
+                    if response.status == 200:
+                        scopes = body.get("scopes", []) if isinstance(body, dict) else []
+                        cs2sell["connected"] = True
+                        cs2sell["scopes"] = scopes
+                        cs2sell["deposit_ready"] = (
+                            CS2SELL_PARTNER_DEPOSITS_CONFIRMED
+                            and "deposits:read" in scopes
+                            and "deposits:write" in scopes
+                        )
+                        cs2sell["withdrawal_ready"] = (
+                            "orders:read" in scopes and "orders:write" in scopes
+                        )
+                        cs2sell["message"] = "API key проверен. Доступность partner deposits требует отдельного подтверждения CS2Sell."
+                    else:
+                        cs2sell["message"] = f"Проверка API не пройдена (HTTP {response.status})."
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                logger.warning("CS2Sell provider connectivity check failed", exc_info=True)
+                cs2sell["message"] = "Не удалось связаться с CS2Sell API."
+
+        skinsnode = result["providers"]["skinsnode"]
+        if SKINSNODE_CLIENT_ID and SKINSNODE_CLIENT_SECRET:
+            try:
+                async with session.get(
+                    "https://api.skinsnode.com/v1/wallet",
+                    headers={
+                        "x-client-id": SKINSNODE_CLIENT_ID,
+                        "x-client-secret": SKINSNODE_CLIENT_SECRET,
+                    },
+                ) as response:
+                    body = await response.json(content_type=None)
+                    if response.status == 200:
+                        skinsnode["connected"] = True
+                        skinsnode["deposit_ready"] = SKINSNODE_DEPOSITS_CONFIRMED
+                        skinsnode["withdrawal_ready"] = SKINSNODE_WITHDRAWALS_CONFIRMED
+                        # Do not expose provider balances or account identifiers in this status endpoint.
+                        skinsnode["message"] = "Credentials проверены. Коммерческий доступ к операциям должен быть подтверждён при onboarding."
+                    else:
+                        skinsnode["message"] = f"Проверка API не пройдена (HTTP {response.status})."
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                logger.warning("SkinsNode provider connectivity check failed", exc_info=True)
+                skinsnode["message"] = "Не удалось связаться с SkinsNode API."
+
+    return web.json_response(result)
+
+
 
 
 # ============================================================
@@ -3782,7 +3941,7 @@ async def store_boundary_middleware(request: web.Request, handler):
         case_only = (
             "/api/cases", "/api/cs2", "/api/live-drops",
             "/api/creator-cases", "/api/inventory", "/api/upgrades",
-            "/api/rewards", "/api/admin/cases",
+            "/api/rewards", "/api/admin/cases", "/api/admin/cs2-providers",
         )
         digital_only = (
             "/api/products", "/api/orders", "/api/payments",
@@ -3852,6 +4011,7 @@ def create_app():
     # Admin endpoints
     app.router.add_put("/api/admin/products/{product_id}", admin_update_product)
     app.router.add_get("/api/admin/cases", admin_get_cases)
+    app.router.add_get("/api/admin/cs2-providers", admin_get_cs2_provider_status)
     app.router.add_post("/api/admin/cases", admin_save_case)
     app.router.add_put("/api/admin/cases/{case_id}", admin_save_case)
     app.router.add_post("/api/admin/cases/{case_id}/toggle", admin_toggle_case)
