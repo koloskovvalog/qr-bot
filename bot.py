@@ -68,6 +68,10 @@ cases_dp = Dispatcher()
 db: asyncpg.Pool | None = None
 CS2_CATALOG_CACHE = {}
 CS2_CATALOG_CACHE_AT = {}
+CASES_RESPONSE_CACHE = None
+CASES_RESPONSE_CACHE_AT = 0
+CASES_RESPONSE_CACHE_TTL = 30
+CASES_RESPONSE_LOCK = asyncio.Lock()
 CS2_PRICE_QUEUE = asyncio.Queue()
 CS2_PRICE_QUEUED = set()
 CS2_PRICE_WORKER_TASK = None
@@ -843,7 +847,7 @@ async def create_order(request):
     })
 
 
-async def get_cases(request):
+async def build_cases_response(request):
     try:
         catalog_skins = await load_cs2_catalog("skins")
         skin_images = {item["name"]: item["image_url"] for item in catalog_skins}
@@ -1215,7 +1219,23 @@ async def get_cases(request):
                 "chance_percent": round(item["weight"] * 100 / total, 2) if total else 0
             } for item in visible_contents],
         })
-    return web.json_response({"items": result})
+    return {"items": result}
+
+
+async def get_cases(request):
+    global CASES_RESPONSE_CACHE, CASES_RESPONSE_CACHE_AT
+    now = time.monotonic()
+    if CASES_RESPONSE_CACHE is not None and now - CASES_RESPONSE_CACHE_AT < CASES_RESPONSE_CACHE_TTL:
+        return web.json_response(CASES_RESPONSE_CACHE, headers={"Cache-Control": "private, max-age=15"})
+    async with CASES_RESPONSE_LOCK:
+        now = time.monotonic()
+        if CASES_RESPONSE_CACHE is not None and now - CASES_RESPONSE_CACHE_AT < CASES_RESPONSE_CACHE_TTL:
+            return web.json_response(CASES_RESPONSE_CACHE, headers={"Cache-Control": "private, max-age=15"})
+        payload = await build_cases_response(request)
+        CASES_RESPONSE_CACHE = payload
+        CASES_RESPONSE_CACHE_AT = time.monotonic()
+        return web.json_response(payload, headers={"Cache-Control": "private, max-age=15"})
+
 
 async def open_case(request):
     user = verify_telegram_user(request)
