@@ -992,7 +992,7 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<article class="purchase-row"><div class="purchase-product"><span class="purchase-icon">✦</span><div><strong>'+esc(o.product_title)+'</strong><small>Заказ #'+o.id+'</small></div></div><strong class="purchase-amount">'+money(o.amount_minor,o.currency)+'</strong><span class="purchase-status status-'+esc(o.status)+'">'+esc(orderStatusLabel(o.status))+'</span><div class="purchase-date">'+new Date(o.created_at).toLocaleDateString("ru-RU")+'</div></article>').join("")}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
-let demoCaseClaimedToday=false,demoClaimStatusLoaded=false;
+let demoCaseClaimedToday=false,demoClaimStatusLoaded=false,demoClaimStatusFailed=false;
 let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
@@ -1027,25 +1027,33 @@ function updateDemoClaimButton(){
  const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
  const button=$("claimDemoCase");
  if(!button||!c)return;
- button.disabled=!demoClaimStatusLoaded||demoCaseClaimedToday||!c.demo_claim_available;
- button.textContent=!demoClaimStatusLoaded?"Проверяем доступность…":(demoCaseClaimedToday?"Тестовый скин получен сегодня":(c.demo_claim_available?"Получить бесплатный тестовый скин для апгрейда":"В этом кейсе нет предмета для демо-апгрейда"));
+ if(!initData){button.disabled=true;button.textContent="Открой приложение в Telegram";return}
+ if(!demoClaimStatusLoaded){
+  button.disabled=!demoClaimStatusFailed;
+  button.textContent=demoClaimStatusFailed?"Повторить проверку":"Проверяем доступность…";
+  button.onclick=loadDemoClaimStatus;
+  return;
+ }
+ button.disabled=demoCaseClaimedToday||!c.demo_claim_available;
+ button.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":(c.demo_claim_available?"Получить бесплатный тестовый скин для апгрейда":"В этом кейсе нет предмета для демо-апгрейда");
+ button.onclick=claimDemoCase;
 }
 async function loadDemoClaimStatus(){
- if(!initData){demoClaimStatusLoaded=false;updateDemoClaimButton();return}
+ if(!initData){demoClaimStatusLoaded=false;demoClaimStatusFailed=false;updateDemoClaimButton();return}
  try{
   const d=await api("/api/demo-claim-status");
   demoCaseClaimedToday=Boolean(d.claimed_today);
   demoClaimStatusLoaded=true;
- }catch(_){demoClaimStatusLoaded=false}
+  demoClaimStatusFailed=false;
+ }catch(_){demoClaimStatusLoaded=false;demoClaimStatusFailed=true}
  updateDemoClaimButton();
 }
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
+ $("caseStage").dataset.caseId=c.id;
  const demoClaim=$("claimDemoCase");
- if(demoClaim)demoClaim.onclick=claimDemoCase;
  updateDemoClaimButton();
  $("caseCatalogPanel").hidden=true;$("caseDetailPanel").hidden=false;
- $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
   '<div class="case-detail-heading"><div class="case-detail-cover">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
   '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+('КАТАЛОГ')+'</span></div>'+
