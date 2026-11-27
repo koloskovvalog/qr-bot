@@ -203,6 +203,20 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user
                     ON wallet_ledger(user_id, created_at DESC);
 
+
+
+                CREATE TABLE IF NOT EXISTS admin_wallet_adjustments (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    admin_id BIGINT NOT NULL,
+                    delta_minor BIGINT NOT NULL,
+                    balance_after_minor BIGINT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_admin_wallet_adjustments_user
+                    ON admin_wallet_adjustments(user_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS cs2_steam_prices (
                     market_hash_name TEXT PRIMARY KEY,
                     lowest_price TEXT,
@@ -2233,6 +2247,247 @@ async def admin_set_order_status(request):
 
 
 
+
+
+# ============================================================
+# FULL ADMIN EDITOR: PRODUCTS, CASES, CASE CONTENTS AND USERS
+# ============================================================
+
+def admin_json_body(request):
+    try:
+        return request._cached_json if request.has_body else {}
+    except Exception:
+        return {}
+
+async def admin_update_product(request):
+    user = require_admin(request)
+    try:
+        product_id = int(request.match_info["product_id"])
+        data = await request.json()
+        title = str(data.get("title", "")).strip()
+        description = str(data.get("description", "")).strip()
+        currency = str(data.get("currency", "RUB")).upper()
+        price_minor = price_to_minor(data.get("price"))
+        active = bool(data.get("active", True))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Проверьте название, цену и валюту")
+    if not title or len(title) > 120 or len(description) > 1500:
+        raise web.HTTPBadRequest(text="Название обязательно; описание до 1500 символов")
+    if currency not in {"RUB", "EUR", "USD"}:
+        raise web.HTTPBadRequest(text="Недопустимая валюта")
+    async with db.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE products SET title=$1, description=$2, price_minor=$3,
+                currency=$4, active=$5 WHERE id=$6 RETURNING id
+        """, title, description, price_minor, currency, active, product_id)
+    if not row:
+        raise web.HTTPNotFound(text="Товар не найден")
+    await write_audit(user["id"], "product_updated", {"product_id": product_id})
+    return web.json_response({"ok": True})
+
+async def admin_get_cases(request):
+    require_admin(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT c.id,c.title,c.description,c.price_minor,c.currency,c.active,
+                   c.image_url,c.created_at,
+                   COUNT(ci.id) FILTER (WHERE ci.is_active)::INTEGER AS active_items,
+                   COUNT(ci.id)::INTEGER AS total_items
+            FROM cases c LEFT JOIN case_items ci ON ci.case_id=c.id
+            GROUP BY c.id ORDER BY c.id DESC
+        """)
+    return web.json_response({"items":[{
+        "id":r["id"],"title":r["title"],"description":r["description"],
+        "price_minor":r["price_minor"],"currency":r["currency"],
+        "active":r["active"],"image_url":r["image_url"],
+        "active_items":r["active_items"],"total_items":r["total_items"],
+        "created_at":r["created_at"].isoformat()
+    } for r in rows]})
+
+async def admin_save_case(request):
+    user = require_admin(request)
+    try:
+        data = await request.json()
+        case_id = int(request.match_info["case_id"]) if request.match_info.get("case_id") else None
+        title = str(data.get("title","")).strip()[:120]
+        description = str(data.get("description","")).strip()[:1500]
+        currency = str(data.get("currency","RUB")).upper()
+        raw_price = Decimal(str(data.get("price","0")).replace(",","."))
+        price_minor = int(raw_price * 100)
+        image_url = str(data.get("image_url","")).strip()[:1000] or None
+        active = bool(data.get("active", True))
+    except (ValueError, TypeError, InvalidOperation, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Проверьте данные кейса")
+    if not title or currency not in {"RUB","EUR","USD"} or price_minor < 0:
+        raise web.HTTPBadRequest(text="Название обязательно, цена не может быть отрицательной")
+    if image_url and not image_url.startswith(("https://","http://")):
+        raise web.HTTPBadRequest(text="Ссылка на изображение должна начинаться с http:// или https://")
+    async with db.acquire() as conn:
+        if case_id:
+            row = await conn.fetchrow("""
+                UPDATE cases SET title=$1,description=$2,price_minor=$3,
+                    currency=$4,image_url=$5,active=$6 WHERE id=$7 RETURNING id
+            """,title,description,price_minor,currency,image_url,active,case_id)
+            if not row: raise web.HTTPNotFound(text="Кейс не найден")
+            saved_id=case_id
+        else:
+            saved_id = await conn.fetchval("""
+                INSERT INTO cases(title,description,price_minor,currency,image_url,active)
+                VALUES($1,$2,$3,$4,$5,$6) RETURNING id
+            """,title,description,price_minor,currency,image_url,active)
+    await write_audit(user["id"],"case_saved",{"case_id":saved_id})
+    return web.json_response({"ok":True,"case_id":saved_id})
+
+async def admin_toggle_case(request):
+    user=require_admin(request)
+    try: case_id=int(request.match_info["case_id"])
+    except ValueError: raise web.HTTPBadRequest(text="Некорректный ID кейса")
+    async with db.acquire() as conn:
+        active=await conn.fetchval("UPDATE cases SET active=NOT active WHERE id=$1 RETURNING active",case_id)
+    if active is None: raise web.HTTPNotFound(text="Кейс не найден")
+    await write_audit(user["id"],"case_toggled",{"case_id":case_id,"active":active})
+    return web.json_response({"ok":True,"active":active})
+
+async def admin_get_case_items(request):
+    require_admin(request)
+    try: case_id=int(request.match_info["case_id"])
+    except ValueError: raise web.HTTPBadRequest(text="Некорректный ID кейса")
+    async with db.acquire() as conn:
+        rows=await conn.fetch("""
+            SELECT id,case_id,name,rarity,weight,image_url,value_minor,
+                   market_hash_name,wear,stattrak,souvenir,phase,is_active
+            FROM case_items WHERE case_id=$1 ORDER BY id
+        """,case_id)
+    return web.json_response({"items":[dict(r) for r in rows]})
+
+async def admin_save_case_item(request):
+    user=require_admin(request)
+    try:
+        data=await request.json()
+        case_id=int(request.match_info["case_id"])
+        item_id=int(request.match_info["item_id"]) if request.match_info.get("item_id") else None
+        name=str(data.get("name","")).strip()[:180]
+        rarity=str(data.get("rarity","Обычный")).strip()[:80]
+        weight=int(data.get("weight",1))
+        value_minor=int(Decimal(str(data.get("price","0")).replace(",", "."))*100)
+        image_url=str(data.get("image_url","")).strip()[:1000] or None
+        market_hash_name=str(data.get("market_hash_name","")).strip()[:220] or None
+        wear=str(data.get("wear","")).strip()[:80] or None
+        phase=str(data.get("phase","")).strip()[:80] or None
+        stattrak=bool(data.get("stattrak",False))
+        souvenir=bool(data.get("souvenir",False))
+        active=bool(data.get("active",True))
+    except (ValueError,TypeError,InvalidOperation,json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Проверьте поля предмета")
+    if not name or weight < 1 or weight > 1000000000 or value_minor < 0:
+        raise web.HTTPBadRequest(text="Название обязательно; вес должен быть положительным")
+    if image_url and not image_url.startswith(("https://","http://")):
+        raise web.HTTPBadRequest(text="Ссылка на изображение должна начинаться с http:// или https://")
+    async with db.acquire() as conn:
+        exists=await conn.fetchval("SELECT id FROM cases WHERE id=$1",case_id)
+        if not exists: raise web.HTTPNotFound(text="Кейс не найден")
+        if item_id:
+            row=await conn.fetchrow("""
+                UPDATE case_items SET name=$1,rarity=$2,weight=$3,image_url=$4,
+                    value_minor=$5,market_hash_name=$6,wear=$7,stattrak=$8,
+                    souvenir=$9,phase=$10,is_active=$11
+                WHERE id=$12 AND case_id=$13 RETURNING id
+            """,name,rarity,weight,image_url,value_minor,market_hash_name,wear,
+                stattrak,souvenir,phase,active,item_id,case_id)
+            if not row: raise web.HTTPNotFound(text="Предмет кейса не найден")
+            saved_id=item_id
+        else:
+            saved_id=await conn.fetchval("""
+                INSERT INTO case_items(case_id,name,rarity,weight,image_url,value_minor,
+                    market_hash_name,wear,stattrak,souvenir,phase,is_active)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id
+            """,case_id,name,rarity,weight,image_url,value_minor,market_hash_name,
+                wear,stattrak,souvenir,phase,active)
+    await write_audit(user["id"],"case_item_saved",{"case_id":case_id,"item_id":saved_id})
+    return web.json_response({"ok":True,"item_id":saved_id})
+
+async def admin_toggle_case_item(request):
+    user=require_admin(request)
+    try:
+        case_id=int(request.match_info["case_id"]); item_id=int(request.match_info["item_id"])
+    except ValueError: raise web.HTTPBadRequest(text="Некорректный ID")
+    async with db.acquire() as conn:
+        active=await conn.fetchval("""
+            UPDATE case_items SET is_active=NOT is_active
+            WHERE id=$1 AND case_id=$2 RETURNING is_active
+        """,item_id,case_id)
+    if active is None: raise web.HTTPNotFound(text="Предмет не найден")
+    await write_audit(user["id"],"case_item_toggled",{"case_id":case_id,"item_id":item_id,"active":active})
+    return web.json_response({"ok":True,"active":active})
+
+async def admin_get_wallet_users(request):
+    require_admin(request)
+    q = str(request.query.get("q", "")).strip()[:100]
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            WITH known_users AS (
+                SELECT user_id FROM wallet_accounts
+                UNION SELECT user_id FROM orders
+                UNION SELECT user_id FROM user_inventory
+                UNION SELECT user_id FROM customer_profiles
+            )
+            SELECT u.user_id, COALESCE(w.balance_minor, 0)::BIGINT AS balance_minor,
+                   COALESCE(w.updated_at, NOW()) AS updated_at,
+                   (SELECT COUNT(*) FROM orders o WHERE o.user_id=u.user_id) AS orders_count
+            FROM known_users u
+            LEFT JOIN wallet_accounts w ON w.user_id=u.user_id
+            WHERE ($1='' OR u.user_id::text ILIKE '%'||$1||'%')
+            ORDER BY COALESCE(w.updated_at, NOW()) DESC
+            LIMIT 100
+        """, q)
+    return web.json_response({"items":[{
+        "user_id":r["user_id"],"balance_minor":r["balance_minor"],
+        "orders_count":r["orders_count"],"updated_at":r["updated_at"].isoformat()
+    } for r in rows]})
+
+
+async def admin_adjust_wallet(request):
+    admin=require_admin(request)
+    try:
+        user_id=int(request.match_info["user_id"])
+        data=await request.json()
+        delta=int(Decimal(str(data.get("amount","0")).replace(",", "."))*100)
+        reason=str(data.get("reason","Ручная корректировка администратором")).strip()[:250]
+    except (ValueError,TypeError,InvalidOperation,json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Укажите пользователя и сумму")
+    if delta == 0 or abs(delta) > 100000000:
+        raise web.HTTPBadRequest(text="Сумма должна быть ненулевой и не превышать 1 000 000 ₽")
+    async with db.acquire() as conn:
+        known_user = await conn.fetchval("""
+            SELECT EXISTS(SELECT 1 FROM orders WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM user_inventory WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM customer_profiles WHERE user_id=$1)
+                OR EXISTS(SELECT 1 FROM wallet_accounts WHERE user_id=$1)
+        """, user_id)
+        if not known_user:
+            raise web.HTTPNotFound(text="Пользователь не найден")
+        async with conn.transaction():
+            await conn.execute("""
+                INSERT INTO wallet_accounts(user_id,balance_minor)
+                VALUES($1,0) ON CONFLICT(user_id) DO NOTHING
+            """,user_id)
+            row=await conn.fetchrow("""
+                UPDATE wallet_accounts SET balance_minor=balance_minor+$1,updated_at=NOW()
+                WHERE user_id=$2 AND balance_minor+$1>=0
+                RETURNING balance_minor
+            """,delta,user_id)
+            if not row: raise web.HTTPBadRequest(text="Недостаточно средств для списания")
+            await conn.execute("""
+                INSERT INTO admin_wallet_adjustments(user_id,admin_id,delta_minor,
+                    balance_after_minor,reason) VALUES($1,$2,$3,$4,$5)
+            """,user_id,admin["id"],delta,row["balance_minor"],reason)
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id,action,details)
+                VALUES($1,'wallet_manually_adjusted',$2::jsonb)
+            """,admin["id"],json.dumps({"user_id":user_id,"delta_minor":delta,"balance_after_minor":row["balance_minor"],"reason":reason}))
+    return web.json_response({"ok":True,"balance_minor":row["balance_minor"]})
+
+
 # ============================================================
 # DEMO PAYMENT PROVIDER MANAGEMENT
 # ============================================================
@@ -2717,6 +2972,17 @@ def create_app():
     app.router.add_get("/api/upgrades/history", get_upgrade_history)
 
     # Admin endpoints
+    app.router.add_put("/api/admin/products/{product_id}", admin_update_product)
+    app.router.add_get("/api/admin/cases", admin_get_cases)
+    app.router.add_post("/api/admin/cases", admin_save_case)
+    app.router.add_put("/api/admin/cases/{case_id}", admin_save_case)
+    app.router.add_post("/api/admin/cases/{case_id}/toggle", admin_toggle_case)
+    app.router.add_get("/api/admin/cases/{case_id}/items", admin_get_case_items)
+    app.router.add_post("/api/admin/cases/{case_id}/items", admin_save_case_item)
+    app.router.add_put("/api/admin/cases/{case_id}/items/{item_id}", admin_save_case_item)
+    app.router.add_post("/api/admin/cases/{case_id}/items/{item_id}/toggle", admin_toggle_case_item)
+    app.router.add_get("/api/admin/wallet-users", admin_get_wallet_users)
+    app.router.add_post("/api/admin/wallet-users/{user_id}/adjust", admin_adjust_wallet)
     app.router.add_post("/api/admin/products", admin_add_product)
     app.router.add_post(
         "/api/admin/products/{product_id}/toggle",
