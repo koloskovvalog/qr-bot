@@ -1405,7 +1405,9 @@ async def build_cases_response(request):
             "estimated_rtp_percent": round((sum(int(x["weight"]) * int(x.get("market_price_minor") or x.get("value_minor") or 0) * 90 for x in contents) / (total * 100)) * 100 / case["reference_price_minor"], 2) if total and case["reference_price_minor"] else None,
             "currency": case["currency"],
             "image_url": case["image_url"] or fallback_case_image,
-            "demo_only": True,
+            "demo_only": False,
+            "catalog_only": True,
+            "opening_enabled": False,
             "items_total": len(contents),
             "items": [{
                 **item,
@@ -2787,8 +2789,8 @@ async def suggest_upgrade_target(request):
     chosen["suggested_chance_percent"] = round(source_value/chosen["market_price_minor"]*75, 2)
     return web.json_response({"item": chosen, "source_value_minor": source_value,
         "desired_target_minor": round(desired), "mode": mode, "value": raw_value,
-        "fresh_price_count": len(prices), "expected_return_percent": 75.0,
-        "house_edge_percent": 25.0, "demo_only": True})
+        "fresh_price_count": len(prices), "preview_only": True,
+        "demo_only": False})
 
 
 async def create_upgrade_attempt(request):
@@ -2917,8 +2919,7 @@ async def create_upgrade_attempt(request):
     return web.json_response({
         "ok": True, "attempt_id": attempt_id, "success": success,
         "chance_percent": chance, "roll_percent": roll / 100.0, "source_name": source["item_name"],
-        "target": target, "expected_return_percent": 75.0,
-        "house_edge_percent": 25.0, "demo_only": True,
+        "target": target, "preview_only": True, "demo_only": False,
         "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
     })
 
@@ -4718,12 +4719,20 @@ async def store_boundary_middleware(request: web.Request, handler):
             return any(request.path == prefix or request.path.startswith(prefix + "/") for prefix in prefixes)
 
         disabled_demo = (
-            "/api/cases", "/api/live-drops", "/api/creator-cases",
-            "/api/upgrades", "/api/rewards", "/api/admin/cases",
-            "/api/admin/cs2-providers",
+            "/api/live-drops", "/api/creator-cases", "/api/rewards",
+            "/api/admin/cases", "/api/admin/cs2-providers",
         )
         if matches(disabled_demo):
             raise web.HTTPGone(text="Этот демонстрационный раздел ShirpDrop отключён.")
+        # Case catalogue and upgrade target suggestions are read-only previews.
+        # Opening cases and consuming inventory through an upgrade stay disabled
+        # until a real item-delivery provider and approved payment flow exist.
+        if request.path.startswith("/api/cases/"):
+            raise web.HTTPGone(text="Открытие кейсов пока недоступно: подключение реальной выдачи предметов ещё не завершено.")
+        if request.path.startswith("/api/upgrades/") and not (
+            request.path == "/api/upgrades/suggest" and request.method == "POST"
+        ):
+            raise web.HTTPGone(text="Реальные апгрейды пока отключены. Можно просматривать каталог и рассчитывать цель.")
         if request.path.startswith("/api/inventory/") and request.path.endswith("/sell"):
             raise web.HTTPGone(text="Продажа виртуальных предметов отключена. Денежные средства доступны только через подтверждённые платежи.")
 
