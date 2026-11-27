@@ -63,7 +63,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .upgrade-wheel-pointer{position:absolute;z-index:5;inset:0;width:100%;height:100%;border:0;background:transparent;transform:rotate(0deg);transform-origin:50% 50%;pointer-events:none;filter:drop-shadow(0 2px 4px #000)}
 .upgrade-wheel-pointer:before{content:"";position:absolute;left:calc(50% - 2px);top:5%;width:4px;height:45%;border-radius:4px;background:linear-gradient(180deg,#fff3bd,#d7a83e)}
 .upgrade-wheel-pointer:after{content:"";position:absolute;left:50%;top:2%;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:15px solid #fff0b2}
-.upgrade-wheel{transform:none!important;transition:none!important}
+.upgrade-wheel{transform:rotate(0deg);transition:none}
 .upgrade-preset-panel{border:1px solid #4d4027;border-radius:14px;background:#100f0c;padding:12px;margin:12px 0}
 .preset-heading{font-size:12px;font-weight:900;color:var(--gold2);margin-bottom:9px}
 .preset-label{font-size:10px;color:var(--muted);font-weight:800;margin:8px 0 6px}
@@ -383,6 +383,30 @@ main{max-width:1180px;padding:22px 22px 62px}
 @media(max-width:600px){#caseStage .case-reel{min-height:158px;padding:8px}#caseStage .reel-card{width:120px;height:132px;flex-basis:120px}#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:66px}}
 @media(prefers-reduced-motion:reduce){#caseStage.rolling .case-caption,#caseStage.rolling .case-reel{animation:none}#upgradeView .upgrade-result{animation:none}}
 
+/* QR BOT PRO · Cases & Upgrader visual correction */
+.case-reel.ready,.case-reel.stopping{display:block}
+.case-reel.ready{border-color:#9c7a3d;box-shadow:inset 0 0 24px #0008,0 0 16px #d8b45a18}
+.case-reel.ready .reel-track{transform:translateX(0)}
+#caseStage .reel-card{width:142px;height:142px;flex-basis:142px}
+#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:72px}
+#caseStage .case-reel.stopping{border-color:#e8c77e;box-shadow:inset 0 0 30px #0009,0 0 30px #d8b45a55}
+#caseStage .case-reel.stopping:after{width:4px;background:linear-gradient(180deg,#fff3bd,#d7a83e);box-shadow:0 0 14px #ffe7a2,0 0 28px #d8b45a}
+#caseStage.rolling .case-caption{animation:caseTitleGlow .9s ease-in-out infinite alternate}
+#upgradeView .upgrade-wheel-box{isolation:isolate;filter:drop-shadow(0 10px 24px #0009)}
+#upgradeView .upgrade-wheel{will-change:transform;transform:rotate(0deg);transition:none!important}
+#upgradeView .upgrade-wheel-pointer{position:absolute;z-index:8;top:-11px;left:50%;right:auto;bottom:auto;inset:auto;width:36px;height:43px;transform:translateX(-50%);transform-origin:50% 50%;filter:drop-shadow(0 3px 4px #000c);pointer-events:none}
+#upgradeView .upgrade-wheel-pointer:before{content:"";position:absolute;top:0;left:50%;width:0;height:0;transform:translateX(-50%);border-left:15px solid transparent;border-right:15px solid transparent;border-top:27px solid #d5a84e;background:none;border-radius:0;box-shadow:0 0 12px #f4d98a88}
+#upgradeView .upgrade-wheel-pointer:after{content:"";position:absolute;top:0;left:50%;width:0;height:0;transform:translateX(-50%);border-left:9px solid transparent;border-right:9px solid transparent;border-top:17px solid #fff0b8;border-bottom:0}
+#upgradeView .upgrade-wheel-center{z-index:5}
+#upgradeView .upgrade-result.is-success{border-color:#70d59b;box-shadow:0 0 0 1px #70d59b55,0 0 28px #48b87933}
+#upgradeView .upgrade-result.is-fail{border-color:#c87979;box-shadow:0 0 0 1px #c8797944}
+#upgradeView .upgrade-result.is-success strong{color:#8ce0aa}
+#upgradeView .upgrade-result.is-fail strong{color:#e6a1a1}
+#upgradeView .upgrade-target.unpriced{opacity:.72;filter:saturate(.55)}
+#upgradeView .upgrade-target:disabled{cursor:not-allowed;border-style:dashed}
+@media(max-width:600px){#caseStage .reel-card{width:116px;height:128px;flex-basis:116px}#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:64px}}
+@media(prefers-reduced-motion:reduce){#caseStage.rolling .case-caption{animation:none}}
+
 </style>
 </head>
 <body><main>
@@ -486,7 +510,11 @@ main{max-width:1180px;padding:22px 22px 62px}
  <div class="skin-tools">
   <input id="upgradeMinPrice" type="number" min="2" max="100000" step="1" placeholder="От 2 ₽">
   <input id="upgradeMaxPrice" type="number" min="2" max="100000" step="1" placeholder="До 100 000 ₽">
-  <select id="upgradeSort"><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option><option value="name">По названию</option></select>
+  <select id="upgradeWear"><option value="">Любой износ</option><option>Factory New</option><option>Minimal Wear</option><option>Field-Tested</option><option>Well-Worn</option><option>Battle-Scarred</option></select>
+  <select id="upgradeRarity"><option value="">Любая редкость</option><option>Consumer Grade</option><option>Industrial Grade</option><option>Mil-Spec Grade</option><option>Restricted</option><option>Classified</option><option>Covert</option><option>Contraband</option></select>
+  <label class="skin-check"><input id="upgradeStatTrak" type="checkbox"> StatTrak™</label>
+  <label class="skin-check"><input id="upgradeSouvenir" type="checkbox"> Souvenir</label>
+  <select id="upgradeSort"><option value="name">По названию</option><option value="rarity">По редкости</option><option value="price_asc">Сначала дешевле</option><option value="price_desc">Сначала дороже</option></select>
  </div>
  <div class="muted" id="upgradePriceNote">Цены берутся с Lis-Skins (резерв — Market.CSGO) и конвертируются в RUB. Для выбора доступны только скины с полученной ценой; остальные отображаются как «Цена уточняется».</div>
 </div>
@@ -656,29 +684,26 @@ async function openCase(){
  button.disabled=true;stage.classList.add("rolling");
  const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
  if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
- const spinStartedAt=performance.now();
  const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" fetchpriority="low" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
- reel.classList.remove("stopping");
- reel.innerHTML='<div class="reel-track">'+Array.from({length:24},(_,n)=>cardHtml(pool[n%pool.length],n%6===0)).join("")+'</div>';
- reel.classList.add("spinning");
- $("caseResult").innerHTML='<div class="case-result">Открываем кейс…</div>';
+ const winnerIndex=38;
+ const reelItems=Array.from({length:45},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
+ const trackHtml=items=>items.map((item,index)=>cardHtml(item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("");
+ reel.classList.remove("spinning","stopping");
+ reel.innerHTML='<div class="reel-track">'+trackHtml(reelItems)+'</div>';
+ reel.classList.add("ready");
+ $("caseResult").innerHTML='<div class="case-result"><small>ОПРЕДЕЛЯЕМ ВЫПАДЕНИЕ…</small><p class="muted">Сервер уже выбирает предмет. Результат не зависит от анимации.</p></div>';
  try{
   const d=await api("/api/cases/"+id+"/open",{method:"POST",body:"{}"});
   if(Number(d.case_id)!==Number(id))throw new Error("Сервер вернул результат другого кейса. Открытие остановлено.");
   const x=d.item;
   if(!x||!x.name)throw new Error("Сервер не вернул выигрышный предмет");
-  // Keep the preview moving briefly, then build a long reel with the authoritative server result.
-  const previewElapsed=performance.now()-spinStartedAt;
-  if(previewElapsed<750)await new Promise(resolve=>setTimeout(resolve,750-previewElapsed));
-  const winnerIndex=60;
-  const reelItems=Array.from({length:69},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
+  // Keep the same track in the DOM; only replace its cards, then make one smooth stop.
   reelItems[winnerIndex]=x;
-  reel.innerHTML='<div class="reel-track">'+reelItems.map((item,index)=>cardHtml(item,Math.abs(index-winnerIndex)<=5)).join("")+'</div>';
-  reel.classList.remove("spinning");
-  reel.classList.add("stopping");
   const track=reel.querySelector(".reel-track");
+  track.innerHTML=trackHtml(reelItems.map((item,index)=>index===winnerIndex?x:item));
+  reel.classList.remove("ready");
+  reel.classList.add("stopping");
   const winnerCard=track.children[winnerIndex];
-  // Measure actual rendered geometry; offsetLeft is relative to different offset parents on iOS WebView.
   const reelRect=reel.getBoundingClientRect();
   const winnerRect=winnerCard.getBoundingClientRect();
   const stopX=Math.round(reelRect.left+reel.clientWidth/2-(winnerRect.left+winnerRect.width/2));
@@ -686,20 +711,19 @@ async function openCase(){
   if(typeof track.animate==="function"){
    const animation=track.animate(
     [{transform:"translateX(0px)"},{transform:targetTransform}],
-    {duration:6200,easing:"cubic-bezier(0.10,0.72,0.12,1)",fill:"forwards"}
+    {duration:4600,easing:"cubic-bezier(.12,.76,.14,1)",fill:"forwards"}
    );
    await animation.finished;
    track.style.transform=targetTransform;
    animation.cancel();
   }else{
-   track.style.transition="transform 6.2s cubic-bezier(0.10,0.72,0.12,1)";
+   track.style.transition="transform 4.6s cubic-bezier(.12,.76,.14,1)";
    track.style.transform="translateX(0px)";
    void track.offsetWidth;
    requestAnimationFrame(()=>{track.style.transform=targetTransform});
-   await new Promise(resolve=>setTimeout(resolve,6300));
+   await new Promise(resolve=>setTimeout(resolve,4700));
   }
   stage.classList.remove("rolling");
-  // The result card and the centered reel card are rendered from the same server response object.
   const price=x.market_price_minor?money(x.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется";
   const sell=x.sell_value_minor?'<button class="sell-item" onclick="sellInventoryItem('+x.inventory_id+',true)">Продать за '+money(x.sell_value_minor,"₽")+'</button>':'<button class="sell-item" disabled>Продажа после обновления цены</button>';
   $("caseResult").innerHTML='<div class="case-result"><small>ТВОЙ ВЫПАВШИЙ СКИН</small>'+
@@ -711,7 +735,7 @@ async function openCase(){
   toast("Скин добавлен в инвентарь");
   await showInventory();await refreshWalletBalance();
  }catch(e){
-  stage.classList.remove("rolling");reel.classList.remove("spinning");reel.classList.remove("stopping");
+  stage.classList.remove("rolling");reel.classList.remove("ready","spinning","stopping");
   $("caseResult").innerHTML='<div class="case-result">'+esc(e.message)+'</div>';
  }finally{button.disabled=false}
 }
@@ -757,6 +781,10 @@ async function loadUpgradeView(){
  $("upgradeSearch").oninput=()=>{clearTimeout(upgradeSearchTimer);upgradeSearchTimer=setTimeout(()=>loadUpgradeTargets(true),250)};
  $("upgradeMinPrice").onchange=()=>loadUpgradeTargets(true);
  $("upgradeMaxPrice").onchange=()=>loadUpgradeTargets(true);
+ $("upgradeWear").onchange=()=>loadUpgradeTargets(true);
+ $("upgradeRarity").onchange=()=>loadUpgradeTargets(true);
+ $("upgradeStatTrak").onchange=()=>loadUpgradeTargets(true);
+ $("upgradeSouvenir").onchange=()=>loadUpgradeTargets(true);
  $("upgradeSort").onchange=()=>loadUpgradeTargets(true);
  $("upgradeLoadMore").onclick=()=>loadUpgradeTargets(false);
  document.querySelectorAll("[data-upgrade-mult]").forEach(b=>b.onclick=()=>applyUpgradePreset("multiplier",Number(b.dataset.upgradeMult)));
@@ -837,10 +865,14 @@ async function loadUpgradeTargets(reset=true){
    const params=new URLSearchParams({q,page:String(upgradeTargetPage),limit:"24",sort:$("upgradeSort").value});
    if($("upgradeMinPrice").value)params.set("min_price",$("upgradeMinPrice").value);
    if($("upgradeMaxPrice").value)params.set("max_price",$("upgradeMaxPrice").value);
+   if($("upgradeWear").value)params.set("wear",$("upgradeWear").value);
+   if($("upgradeRarity").value)params.set("rarity",$("upgradeRarity").value);
+   if($("upgradeStatTrak").checked)params.set("stattrak","1");
+   if($("upgradeSouvenir").checked)params.set("souvenir","1");
    const d=await api("/api/cs2/skins?"+params.toString());
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
    upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
-   $("upgradePriceNote").textContent="Lis-Skins / Market.CSGO · RUB. Кэш цен до 12 часов; неизвестные цены не используются для расчёта.";
+   $("upgradePriceNote").textContent="Полный каталог CS2: износ, редкость, StatTrak™ и Souvenir. Цены Lis-Skins / Market.CSGO обновляются постепенно; скины без цены видны, но станут доступны для апгрейда после обновления котировки.";
   }
   renderUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
@@ -852,18 +884,18 @@ function renderUpgradeTargets(){
  const list=upgradeTargets.filter(x=>{
   const price=Number(x.market_price_minor||0),targetValue=$("upgradeMode").value==="skin"?price:Number(x.value_minor||0);
   const sourceValue=Number($("upgradeMode").value==="skin"?(source?.market_price_minor||0):(source?.value_minor||0));
-  const inSteamRange=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);
-  return inSteamRange&&(!source||(!sourceValue?false:targetValue>sourceValue))&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
+  const inSteamRange=price===0||(price>=200&&price<=10000000);
+  return inSteamRange&&(!source||!sourceValue||!price||targetValue>sourceValue)&&(!q||(x.name+" "+x.rarity+" "+(x.weapon||"")).toLowerCase().includes(q));
  });
  $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":list.length+" на странице";
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=!selectedUpgradeTarget;return}
- $("upgradeTargets").innerHTML=list.map(x=>'<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+'" data-target="'+esc(x.id)+'">'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+money(x.market_price_minor||x.value_minor,$("upgradeMode").value==="skin"?"₽":"V")+'</small>'+skinMetaTags(x)+'</button>').join("");
+ $("upgradeTargets").innerHTML=list.map(x=>{const price=Number(x.market_price_minor||0),available=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);return '<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+(!available?' unpriced':'')+'" data-target="'+esc(x.id)+'" '+(!available?'disabled aria-disabled="true"':'')+'>'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+(available?money(price,"₽"):"Цена обновляется")+'</small>'+skinMetaTags(x)+'</button>'}).join("");
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
 function renderUpgradeChance(){
  const source=currentUpgradeSource();
- if(!source||!selectedUpgradeTarget){$("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";$("upgradeWheel").style.setProperty("--chance","0%");$("upgradeWheelPointer").style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Выбери предмет и цель — колесо покажет шанс";$("upgradeTargetInfo").textContent="Выбери цель улучшения";$("doUpgrade").disabled=true;return}
+ if(!source||!selectedUpgradeTarget){$("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";$("upgradeWheel").style.setProperty("--chance","0%");$("upgradeWheel").style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Выбери предмет и цель — колесо покажет шанс";$("upgradeTargetInfo").textContent="Выбери цель улучшения";$("doUpgrade").disabled=true;return}
  const sourceValue=Number($("upgradeMode").value==="skin"?source.market_price_minor:source.value_minor);
  const targetValue=Number($("upgradeMode").value==="skin"?selectedUpgradeTarget.market_price_minor:selectedUpgradeTarget.value_minor);
  if(!sourceValue||!targetValue){$("upgradeChance").textContent="Цена уточняется";$("doUpgrade").disabled=true;return}
@@ -878,7 +910,8 @@ async function doUpgrade(){
  if(!source||!target)return;
  if(!confirm("Подтвердить демо-апгрейд? При неудаче предмет «"+source.item_name+"» будет списан из виртуального инвентаря. Это действие нельзя отменить."))return;
  $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';$("upgradeWheelStatus").textContent="Запрашиваем результат…";
- const wheel=$("upgradeWheel"),pointer=$("upgradeWheelPointer");pointer.style.transition="none";pointer.style.transform="rotate(0deg)";void pointer.offsetWidth;
+ const wheel=$("upgradeWheel");
+ wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;
  try{
   let d=null;
   for(let attempt=0;attempt<15;attempt++){
@@ -888,15 +921,27 @@ async function doUpgrade(){
    await new Promise(resolve=>setTimeout(resolve,2000));
   }
   if(!d||d.pending)throw new Error("Цены ещё обновляются. Предмет не списан — повтори апгрейд чуть позже.");
-  const stopAngle=Number(d.roll_percent||0)*3.6;const finalAngle=2160+stopAngle;
-  if(typeof pointer.animate==="function"){const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:5200,easing:"cubic-bezier(.08,.76,.12,1)",fill:"forwards"});await spin.finished;pointer.style.transform="rotate("+stopAngle+"deg)";spin.cancel();}
-  else{pointer.style.transition="transform 5.2s cubic-bezier(.08,.76,.12,1)";requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");await new Promise(r=>setTimeout(r,5300));pointer.style.transition="none";pointer.style.transform="rotate("+stopAngle+"deg)";}
-  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — стрелка остановилась в секторе":"✕ НЕУДАЧА — стрелка остановилась вне сектора";
-  $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
+  // Server roll is 0..99.99. The wheel rotates beneath a fixed top marker:
+  // the server's roll angle is brought exactly to the marker at the end.
+  const rollAngle=Number(d.roll_percent||0)*3.6;
+  const finalAngle=2160+360-rollAngle;
+  if(typeof wheel.animate==="function"){
+   const spin=wheel.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:4800,easing:"cubic-bezier(.12,.78,.12,1)",fill:"forwards"});
+   await spin.finished;
+   wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
+   spin.cancel();
+  }else{
+   wheel.style.transition="transform 4.8s cubic-bezier(.12,.78,.12,1)";
+   requestAnimationFrame(()=>wheel.style.transform="rotate("+finalAngle+"deg)");
+   await new Promise(resolve=>setTimeout(resolve,4900));
+   wheel.style.transition="none";wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
+  }
+  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — маркер остановился в золотом секторе":"✕ НЕУДАЧА — маркер остановился в тёмном секторе";
+  $("upgradeResult").innerHTML='<div class="upgrade-result '+(d.success?'is-success':'is-fail')+'"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'% · результат сервера: '+(d.success?'успех':'неудача')+'</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
   await showInventory();
   await loadUpgradeTargets(true);
- }catch(e){pointer.style.transition="none";pointer.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
+ }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
 async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
 const drops=d.case_drops||[];
