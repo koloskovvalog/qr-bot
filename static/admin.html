@@ -49,7 +49,7 @@ async function loadProducts(){
 }
 window.toggleProduct=async id=>{try{await api("/api/admin/products/"+id+"/toggle",{method:"POST"});await loadProducts()}catch(e){alert(e.message)}};
 
-let currentCaseId=null,currentCaseTitle="";
+let currentCaseId=null,currentCaseTitle="",caseData={},caseItemData={};
 function field(name,label,value,type="text",extra=""){return '<div class="field"><label>'+label+'</label><input name="'+name+'" type="'+type+'" value="'+esc(value??"")+'" '+extra+'></div>'}
 function openEditor(title,fields,onSave){$("editorTitle").textContent=title;$("editorFields").innerHTML=fields;$("editorDialog").showModal();$("editorForm").onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),v=Object.fromEntries(fd.entries());try{await onSave(v);closeEditor();await refresh()}catch(err){alert(err.message)}}}
 function closeEditor(){$("editorDialog").close()}
