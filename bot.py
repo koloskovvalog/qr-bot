@@ -1419,7 +1419,14 @@ async def build_cases_response(request):
             "opening_enabled": False,
             "items_total": len(contents),
             "items": [{
-                **item,
+                "name": item["name"],
+                "rarity": item["rarity"],
+                "image_url": item["image_url"],
+                "market_price_minor": item["market_price_minor"],
+                "wear": item["wear"],
+                "stattrak": item["stattrak"],
+                "souvenir": item["souvenir"],
+                "phase": item["phase"],
                 "chance_percent": round(item["weight"] * 100 / total, 2) if total else 0
             } for item in visible_contents],
         })
