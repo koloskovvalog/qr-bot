@@ -2329,7 +2329,8 @@ async def cs2_steam_price_worker():
         while True:
             first = await CS2_PRICE_QUEUE.get()
             batch = [first]
-            while len(batch) < 500:
+            # Keep provider requests and in-memory batches small on Render Free (512 MiB).
+            while len(batch) < 100:
                 try:
                     batch.append(CS2_PRICE_QUEUE.get_nowait())
                 except asyncio.QueueEmpty:
@@ -4812,13 +4813,11 @@ async def on_startup(app: web.Application):
     else:
         logger.warning("CASES_BOT_TOKEN is not set; QR CASES Mini App is deployed but its Telegram bot is not connected")
 
-    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WORKER_TASK_2, CS2_PRICE_WARMUP_TASK
+    # Render Free has a 512 MiB memory ceiling. Run one bounded worker and
+    # avoid a full-catalog warmup at boot, which can spike memory during deploy.
+    global CS2_PRICE_WORKER_TASK
     if CS2_PRICE_WORKER_TASK is None or CS2_PRICE_WORKER_TASK.done():
         CS2_PRICE_WORKER_TASK = asyncio.create_task(cs2_steam_price_worker())
-    if CS2_PRICE_WORKER_TASK_2 is None or CS2_PRICE_WORKER_TASK_2.done():
-        CS2_PRICE_WORKER_TASK_2 = asyncio.create_task(cs2_steam_price_worker())
-    if CS2_PRICE_WARMUP_TASK is None or CS2_PRICE_WARMUP_TASK.done():
-        CS2_PRICE_WARMUP_TASK = asyncio.create_task(cs2_price_catalog_warmup())
     logger.info("QR BOT PRO started")
 
 
