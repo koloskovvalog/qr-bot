@@ -8,7 +8,7 @@ import time
 import secrets
 import re
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qsl
 
 import asyncpg
@@ -1084,10 +1084,13 @@ async def get_inventory(request):
             SELECT i.id, i.item_type, i.item_name, i.rarity, i.image_url,
                    i.value_minor, i.source, i.created_at, i.market_hash_name,
                    i.wear, i.stattrak, i.souvenir, i.phase,
-                   p.lowest_price, p.fetched_at
+                   p.lowest_price, p.fetched_at,
+                   (f.inventory_id IS NOT NULL) AS is_favorite
             FROM user_inventory i
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=i.market_hash_name
                 AND p.price_source <> 'steam'
+            LEFT JOIN user_inventory_favorites f
+                ON f.inventory_id=i.id AND f.user_id=i.user_id
             WHERE i.user_id = $1 AND i.consumed_at IS NULL
             ORDER BY i.id DESC LIMIT 100
         """, user["id"])
@@ -1111,7 +1114,7 @@ async def get_inventory(request):
             "source": row["source"], "created_at": row["created_at"].isoformat(),
             "market_hash_name": row["market_hash_name"], "wear": row["wear"],
             "stattrak": row["stattrak"], "souvenir": row["souvenir"],
-            "phase": row["phase"]
+            "phase": row["phase"], "is_favorite": row["is_favorite"]
         })
     return web.json_response({"items": items})
 
