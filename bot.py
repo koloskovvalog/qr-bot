@@ -2305,6 +2305,7 @@ async def get_my_orders(request):
     for row in rows:
         item = dict(row)
         item["created_at"] = row["created_at"].isoformat()
+        item["amount"] = int(item["amount_minor"] or 0) / 100
         items.append(item)
 
     return web.json_response({"items": items})
@@ -2910,7 +2911,7 @@ async def admin_export_finance(request):
     columns = [
         ("Дата и время", "created_at"), ("Тип", "title"),
         ("Telegram ID", "user_id"), ("Username", "username"),
-        ("Сумма в минимальных единицах", "amount_minor"),
+        ("Сумма", "amount"),
         ("Валюта", "currency"), ("Направление", "direction"),
         ("Статус", "status"), ("Источник", "details"),
         ("DEMO / виртуально", "demo"), ("ID записи", "ref")
