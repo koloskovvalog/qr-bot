@@ -75,6 +75,7 @@ CASES_RESPONSE_LOCK = asyncio.Lock()
 CS2_PRICE_QUEUE = asyncio.Queue()
 CS2_PRICE_QUEUED = set()
 CS2_PRICE_WORKER_TASK = None
+CS2_PRICE_WARMUP_TASK = None
 
 
 # ============================================================
@@ -1981,6 +1982,38 @@ def queue_cs2_price_refresh(items):
         if market_name and market_name not in CS2_PRICE_QUEUED:
             CS2_PRICE_QUEUED.add(market_name)
             CS2_PRICE_QUEUE.put_nowait(market_name)
+
+
+async def cs2_price_catalog_warmup():
+    """Warm all CS2 skin quotes in the background without delaying app startup."""
+    try:
+        catalog = await load_cs2_catalog("skins")
+        names = [item["market_hash_name"] for item in catalog if item.get("market_hash_name")]
+        async with db.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT market_hash_name
+                FROM cs2_steam_prices
+                WHERE fetched_at > NOW() - INTERVAL '12 hours'
+                  AND price_source <> 'steam'
+            """)
+        fresh = {row["market_hash_name"] for row in rows}
+        pending = [name for name in names if name not in fresh]
+        logger.info(
+            "CS2 catalog price warmup: %s total skins, %s already fresh, %s queued",
+            len(names), len(fresh), len(pending)
+        )
+        for offset in range(0, len(pending), 500):
+            # Leave room for user-triggered refreshes and keep the worker queue bounded.
+            while CS2_PRICE_QUEUE.qsize() > 500:
+                await asyncio.sleep(0.5)
+            queue_cs2_price_refresh(
+                {"market_hash_name": name} for name in pending[offset:offset + 500]
+            )
+            await asyncio.sleep(0.25)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("CS2 catalog price warmup failed", exc_info=True)
 
 
 async def get_cs2_skins(request):
@@ -4262,21 +4295,25 @@ async def on_startup(app: web.Application):
     else:
         logger.warning("CASES_BOT_TOKEN is not set; QR CASES Mini App is deployed but its Telegram bot is not connected")
 
-    global CS2_PRICE_WORKER_TASK
+    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WARMUP_TASK
     if CS2_PRICE_WORKER_TASK is None or CS2_PRICE_WORKER_TASK.done():
         CS2_PRICE_WORKER_TASK = asyncio.create_task(cs2_steam_price_worker())
+    if CS2_PRICE_WARMUP_TASK is None or CS2_PRICE_WARMUP_TASK.done():
+        CS2_PRICE_WARMUP_TASK = asyncio.create_task(cs2_price_catalog_warmup())
     logger.info("QR BOT PRO started")
 
 
 async def on_cleanup(app: web.Application):
-    global CS2_PRICE_WORKER_TASK
-    if CS2_PRICE_WORKER_TASK is not None:
-        CS2_PRICE_WORKER_TASK.cancel()
-        try:
-            await CS2_PRICE_WORKER_TASK
-        except asyncio.CancelledError:
-            pass
-        CS2_PRICE_WORKER_TASK = None
+    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WARMUP_TASK
+    for task in (CS2_PRICE_WARMUP_TASK, CS2_PRICE_WORKER_TASK):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    CS2_PRICE_WARMUP_TASK = None
+    CS2_PRICE_WORKER_TASK = None
     if db is not None:
         await db.close()
 
