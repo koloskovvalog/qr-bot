@@ -976,22 +976,113 @@ async def get_cases(request):
             item["name"] for item in catalog_cases
             if "case" in str(item.get("name", "")).casefold()
         ]
+        # Previous generic weapon-by-weapon shelf is retired. Preserve its rows and history.
+        legacy_shirpdrop_case_titles = [
+            "АК-47: КАЛИБР", "AWP: ОДИН ВЫСТРЕЛ", "M4: ТАКТИЧЕСКИЙ ОТРЯД",
+            "ПИСТОЛЕТНЫЙ КАЛИБР", "НОЖЕВОЙ: КОЛЛЕКЦИЯ КЛИНКОВ",
+            "ПЕРЧАТОЧНЫЙ: BLACK GOLD", "НЕОНОВАЯ НОЧЬ", "ТАЙНЫЙ УРОВЕНЬ",
+            "ЗОЛОТОЙ ЧАС",
+        ]
         themed_case_specs = [
-            ("АК-47: КАЛИБР", "Тематическая подборка раскрасок AK-47 — от армейских до тайных.", lambda x: "ak-47" in str(x.get("weapon", "")).casefold()),
-            ("AWP: ОДИН ВЫСТРЕЛ", "Снайперская серия с раскрасками AWP разных уровней редкости.", lambda x: str(x.get("weapon", "")).casefold() == "awp"),
-            ("M4: ТАКТИЧЕСКИЙ ОТРЯД", "Подборка M4A4 и M4A1-S для тех, кто играет от контроля карты.", lambda x: str(x.get("weapon", "")).casefold() in {"m4a4", "m4a1-s"}),
-            ("ПИСТОЛЕТНЫЙ КАЛИБР", "Пистолетные раскраски: быстрый дроп с разными уровнями редкости.", lambda x: str(x.get("weapon", "")).casefold() in {"glock-18", "usp-s", "p2000", "p250", "five-seven", "tec-9", "cz75-auto", "dual berettas", "desert eagle", "r8 revolver"}),
-            ("НОЖЕВОЙ: КОЛЛЕКЦИЯ КЛИНКОВ", "Клинки и редкие ножевые модели CS2. Только виртуальные демо-предметы.", lambda x: any(k in str(x.get("weapon", "")).casefold() for k in ("knife", "karambit", "bayonet", "daggers", "talon", "stiletto", "kukri", "ursus", "navaja", "nomad", "paracord", "skeleton", "survival", "falchion", "bowie", "flip", "gut"))),
-            ("ПЕРЧАТОЧНЫЙ: BLACK GOLD", "Коллекция перчаток с разными вариантами износа.", lambda x: "glove" in str(x.get("weapon", "")).casefold() or "перчат" in str(x.get("weapon", "")).casefold()),
-            ("НЕОНОВАЯ НОЧЬ", "Яркие и контрастные раскраски: Asiimov, Hyper Beast, Neo-Noir и другие.", lambda x: any(k in str(x.get("name", "")).casefold() for k in ("neon", "asiimov", "hyper beast", "neo-noir", "printstream", "cyrex", "decimator", "pulse", "mecha industries", "vivid"))),
-            ("ТАЙНЫЙ УРОВЕНЬ", "Подборка предметов высшей редкости — шанс каждого предмета показан в кейсе.", lambda x: any(k in str(x.get("rarity", "")).casefold() for k in ("covert", "тайное", "extraordinary", "контрабанд"))),
-            ("ЗОЛОТОЙ ЧАС", "Золотые, градиентные и переливающиеся покрытия.", lambda x: any(k in str(x.get("name", "")).casefold() for k in ("fade", "doppler", "tiger tooth", "marble fade", "gamma doppler", "gold", "lore", "ruby", "sapphire", "emerald", "black pearl", "case hardened"))),
+            (
+                "GTA VI: VICE CITY",
+                "Вайс-Сити уже ждёт: неон, скорость, яркие цвета и редкие ножи. Авторская подборка ShirpDrop по мотивам GTA VI.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "ultra violet", "vice", "doppler", "player two", "neon rider",
+                    "neon revolution", "berries and cherries", "marble fade", "fade",
+                    "decimator", "sugar rush", "crime scene", "momentum", "ocean drive",
+                    "the oligarch", "wasteland princess", "full throttle", "starcade",
+                    "frontside misty", "crimson web", "phosphor", "target acquired",
+                    "amber fade", "nightwish", "neo-noir"
+                )),
+            ),
+            (
+                "CYBERPUNK 2077",
+                "Ночной город, неоновые улицы и футуристичные раскраски. Подборка ярких технологичных скинов.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "neon", "neo-noir", "printstream", "cyber", "mecha industries",
+                    "phosphor", "decimator", "nightwish", "ocean drive", "hyper beast",
+                    "pulse", "momentum", "asiimov", "blue phosphor"
+                )),
+            ),
+            (
+                "МИНЬОНЫ: ЖЁЛТЫЙ ХАОС",
+                "Жёлтая коллекция с солнечными, золотыми и контрастными раскрасками.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "banana", "yellow", "bulldozer", "tiger tooth", "saffron",
+                    "sand dune", "nuclear", "hazard", "sundown", "gold"
+                )),
+            ),
+            (
+                "МАЛИБУ: BEACH PARTY",
+                "Розовый закат, бирюзовый океан и летний вайб. Яркие скины и редкие градиенты.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "vice", "fade", "doppler", "marble fade", "ocean drive",
+                    "berries and cherries", "neon rider", "neo-noir", "pink",
+                    "sugar rush", "vogue", "starlight protector"
+                )),
+            ),
+            (
+                "МОРФЕЙ: СОН НАЯВУ",
+                "Фиолетовые и синие оттенки, космические эффекты и загадочные раскраски.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "doppler", "sapphire", "blue", "night", "nightmare",
+                    "cobalt", "lunar", "phosphor", "nebula", "purple",
+                    "blue steel", "ultraviolet"
+                )),
+            ),
+            (
+                "КРАСНЫЙ КОД",
+                "Красная тревога: кровавые узоры, огонь и агрессивные красные раскраски.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "crimson", "bloodsport", "redline", "slaughter", "cardiac",
+                    "hot rod", "ruby", "the empress", "燃", "sang"
+                )),
+            ),
+            (
+                "БОГИ И ЧУДОВИЩА",
+                "Мифы, древние боги и легендарные существа. Подборка редких тематических скинов.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "medusa", "poseidon", "hades", "zeus", "hydra", "cerberus",
+                    "dragon lore", "eye of horus", "anubis", "mjolnir", "gungnir",
+                    "icarus", "myth", "gods"
+                )),
+            ),
+            (
+                "ОПЕРАЦИЯ: ПОСЛЕДНИЙ РУБЕЖ",
+                "Постапокалипсис, опасные зоны и выживание. Контрастные военные и токсичные расцветки.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "wasteland", "containment", "toxic", "radiation", "fallout",
+                    "nuclear", "hazard", "jungle", "survival", "outbreak",
+                    "scavenger", "green"
+                )),
+            ),
+            (
+                "НОЖЕВОЙ РЕЙД",
+                "Отдельная охота за ножами и перчатками: в пуле только ножевые и перчаточные предметы.",
+                lambda x: any(k in str(x.get("weapon", "")).casefold() for k in (
+                    "knife", "karambit", "bayonet", "daggers", "talon", "stiletto",
+                    "kukri", "ursus", "navaja", "nomad", "paracord", "skeleton",
+                    "survival", "falchion", "bowie", "flip", "gut", "gloves"
+                )),
+            ),
+            (
+                "ЗОЛОТОЙ БИЛЕТ",
+                "Золотые покрытия, градиенты и драгоценные фазы. Премиальная тематическая подборка.",
+                lambda x: any(k in str(x.get("name", "")).casefold() for k in (
+                    "fade", "doppler", "tiger tooth", "marble fade", "gamma doppler",
+                    "gold", "lore", "ruby", "sapphire", "emerald", "black pearl",
+                    "case hardened", "the prince", "medusa"
+                )),
+            ),
         ]
         async with conn.transaction():
             await conn.execute("""
                 UPDATE cases SET active=FALSE
-                WHERE title = ANY($1::text[]) OR title='Премиум кейс'
-            """, standard_case_titles)
+                WHERE title = ANY($1::text[])
+                   OR title = ANY($2::text[])
+                   OR title='Премиум кейс'
+            """, standard_case_titles, legacy_shirpdrop_case_titles)
             for title, description, predicate in themed_case_specs:
                 selected = [
                     skin for skin in catalog_skins
