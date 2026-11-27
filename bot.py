@@ -1642,6 +1642,7 @@ async def create_telebotly_topup(request):
     payload = {
         "amount": amount,
         "currency": "RUB",
+        "methods": ["sbp"],
         "description": f"Пополнение баланса ShirpDrop #{topup_id}",
         "order_id": str(topup_id),
         "customer": {"id": str(user["id"]), "telegram_id": user["id"]},
