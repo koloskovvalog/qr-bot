@@ -1165,6 +1165,8 @@ async def build_cases_response(request):
             "prisma 2 case": 33300,
             "horizon case": 33500,
             "dreams nightmares case": 35000,
+            "dreams and nightmares case": 35000,
+            "operation riptide case": 58000,
             "kilowatt case": 35000,
             "cs20 case": 38000,
             "shadow case": 39000,
