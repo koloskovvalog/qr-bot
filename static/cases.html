@@ -789,7 +789,7 @@ let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
  try{
-  const d=await api("/api/cases");casesData=d.items||[];
+  await loadCases();
   if(!casesData.length){host.innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
   host.innerHTML=casesData.slice(0,8).map(c=>'<button class="home-case-card" type="button" data-home-case="'+esc(c.id)+'">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy">':'<div class="home-case-art">CS2</div>')+'<strong>'+esc(c.title)+'</strong><small>Открыть кейс <span>→</span></small></button>').join("");
   host.querySelectorAll("[data-home-case]").forEach(b=>b.onclick=()=>{homeCasePendingId=Number(b.dataset.homeCase);switchTab("cases")});
@@ -939,10 +939,10 @@ function upgradeInventoryItem(id,type){
 }
 
 let pendingUpgradeSourceId=null;
-let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetTotal=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null,upgradePricePollAttempts=0,upgradePricePollTimer=null,upgradePricePendingCount=0;
+let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetTotal=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null,upgradePricePollAttempts=0,upgradePricePollTimer=null,upgradePricePendingCount=0,upgradeInventoryLoadedAt=0,upgradeTargetsLoadedAt=0;
 async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте приложение через Telegram.</div>';return}
- $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";loadUpgradeView()};
+ $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";renderUpgradeSources();loadUpgradeTargets(true)};
  $("upgradeSearch").oninput=()=>{clearTimeout(upgradeSearchTimer);upgradeSearchTimer=setTimeout(()=>loadUpgradeTargets(true),250)};
  $("upgradeMinPrice").onchange=()=>loadUpgradeTargets(true);
  $("upgradeMaxPrice").onchange=()=>loadUpgradeTargets(true);
@@ -957,11 +957,13 @@ async function loadUpgradeView(){
  $("applyCustomMultiplier").onclick=()=>applyUpgradePreset("multiplier",Number($("upgradeCustomMultiplier").value));
  $("applyCustomChance").onclick=()=>applyUpgradePreset("chance",Number($("upgradeCustomChance").value));
  try{
-  const inv=await api("/api/inventory");
-  upgradeInventory=inv.items||[];renderUpgradeSources();
+  if(!upgradeInventoryLoadedAt||Date.now()-upgradeInventoryLoadedAt>15000){
+   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];upgradeInventoryLoadedAt=Date.now();
+  }
+  renderUpgradeSources();
   if(pendingUpgradeSourceId!==null){$("upgradeSource").value=String(pendingUpgradeSourceId);pendingUpgradeSourceId=null;}
-  // Upgrade history is not shown on this page; skip the extra API request.
-  await loadUpgradeTargets(true);
+  if(!upgradeTargets.length||Date.now()-upgradeTargetsLoadedAt>30000)await loadUpgradeTargets(true);
+  else renderUpgradeTargets();
   renderUpgradeChance();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
 }
@@ -1043,6 +1045,7 @@ async function loadUpgradeTargets(reset=true,autoRefresh=false){
    if(!autoRefresh)upgradeTargetPage=Number(d.page||0)+1;
    $("upgradePriceNote").textContent="Полный каталог CS2, загрузка по 40 скинов. Цены берутся из кэша до 7 дней, обновление выполняется в фоне; знак ≈ означает сохранённую цену, которая может быть не самой свежей. Скины без котировки не допускаются к апгрейду.";
   }
+  upgradeTargetsLoadedAt=Date.now();
   renderUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
  finally{
