@@ -1620,9 +1620,13 @@ async def get_cash_wallet(request):
 async def create_telebotly_topup(request):
     user = verify_telegram_user(request)
     if not TELEBOTLY_PAY_KEY:
-        raise web.HTTPServiceUnavailable(text="TeleBotly Pay API key не настроен на сервере")
+        raise web.HTTPServiceUnavailable(text="TELEBOTLY_PAY_KEY не задан в Render")
+    if not (TELEBOTLY_PAY_KEY.startswith("tbp_test_") or TELEBOTLY_PAY_KEY.startswith("tbp_live_")):
+        logger.error("Invalid TeleBotly Pay key format: expected tbp_test_ or tbp_live_; received prefix=%s",
+                     TELEBOTLY_PAY_KEY[:4] if len(TELEBOTLY_PAY_KEY) >= 4 else "short")
+        raise web.HTTPServiceUnavailable(text="Неверный тип ключа: нужен именно TeleBotly Pay API key с префиксом tbp_live_ или tbp_test_. Ключ tbk_live_ не подходит.")
     if not TELEBOTLY_WEBHOOK_SECRET or not TELEBOTLY_WEBHOOK_SECRET.startswith("whsec_"):
-        raise web.HTTPServiceUnavailable(text="TeleBotly webhook secret не настроен на сервере")
+        raise web.HTTPServiceUnavailable(text="TELEBOTLY_WEBHOOK_SECRET отсутствует или имеет неверный формат (ожидается whsec_)")
     try:
         data = await request.json()
         amount_minor = int(data.get("amount_minor"))
@@ -1652,8 +1656,6 @@ async def create_telebotly_topup(request):
             "purpose": "cash_wallet_topup"
         }
     }
-    if not (TELEBOTLY_PAY_KEY.startswith("tbp_test_") or TELEBOTLY_PAY_KEY.startswith("tbp_live_")):
-        raise web.HTTPServiceUnavailable(text="Нужен ключ TeleBotly Pay API с префиксом tbp_test_ или tbp_live_")
     timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -1663,8 +1665,16 @@ async def create_telebotly_topup(request):
             ) as project_response:
                 project_result = await project_response.json(content_type=None)
                 if project_response.status != 200:
-                    logger.warning("TeleBotly project check failed: status=%s", project_response.status)
-                    raise web.HTTPBadGateway(text="TeleBotly не подтвердил Pay API Key")
+                    err = project_result.get("error") if isinstance(project_result, dict) else None
+                    if not isinstance(err, dict):
+                        err = {}
+                    logger.warning(
+                        "TeleBotly project check failed: status=%s code=%s message=%s request_id=%s",
+                        project_response.status, err.get("code"), err.get("message"), err.get("request_id")
+                    )
+                    raise web.HTTPBadGateway(
+                        text=f"TeleBotly не подтвердил Pay API Key (HTTP {project_response.status}, {err.get('code') or 'ошибка ключа'})"
+                    )
                 project = project_result.get("data") or project_result
                 if TELEBOTLY_PAY_KEY.startswith("tbp_live_") and not project.get("accepts_live_payments"):
                     raise web.HTTPServiceUnavailable(text="TeleBotly пока не разрешил проекту принимать реальные платежи")
@@ -1679,8 +1689,16 @@ async def create_telebotly_topup(request):
             ) as response:
                 result = await response.json(content_type=None)
                 if response.status not in {200, 201}:
-                    logger.warning("TeleBotly create payment rejected: status=%s", response.status)
-                    raise web.HTTPBadGateway(text="TeleBotly не создал платёж. Проверь Pay API Key и одобрение проекта.")
+                    err = result.get("error") if isinstance(result, dict) else None
+                    if not isinstance(err, dict):
+                        err = {}
+                    logger.warning(
+                        "TeleBotly create payment rejected: status=%s code=%s message=%s request_id=%s",
+                        response.status, err.get("code"), err.get("message"), err.get("request_id")
+                    )
+                    raise web.HTTPBadGateway(
+                        text=f"TeleBotly отклонил создание платежа (HTTP {response.status}, {err.get('code') or 'ошибка API'}). Проверь статус проекта и доступность СБП."
+                    )
     except web.HTTPException:
         async with db.acquire() as conn:
             await conn.execute("UPDATE wallet_topups SET status='failed', updated_at=NOW() WHERE id=$1", topup_id)
