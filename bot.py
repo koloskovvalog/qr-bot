@@ -1801,7 +1801,7 @@ async def _fetch_openskin_prices(session, batch):
     """Fetch up to 500 exact market names from OpenSkin's public batch endpoint."""
     try:
         async with session.post(
-            "https://api-v2.openskin.dev/v1/prices/batch",
+            "https://api.openskin.dev/v1/prices/batch",
             json={"items": batch},
             headers={"Accept": "application/json"},
         ) as response:
