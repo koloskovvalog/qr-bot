@@ -8,7 +8,7 @@ import time
 import secrets
 import re
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import parse_qsl
 
 import asyncpg
@@ -324,6 +324,70 @@ async def init_db():
                     claim_date DATE NOT NULL DEFAULT CURRENT_DATE,
                     PRIMARY KEY(user_id, claim_date)
                 );
+
+                CREATE TABLE IF NOT EXISTS creator_cases (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    image_url TEXT,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_creator_cases_active
+                    ON creator_cases(active, created_at DESC);
+                CREATE TABLE IF NOT EXISTS creator_case_items (
+                    id BIGSERIAL PRIMARY KEY,
+                    creator_case_id BIGINT NOT NULL REFERENCES creator_cases(id) ON DELETE CASCADE,
+                    market_hash_name TEXT NOT NULL,
+                    item_name TEXT NOT NULL,
+                    rarity TEXT NOT NULL DEFAULT 'Обычный',
+                    chance_bp INTEGER NOT NULL CHECK (chance_bp BETWEEN 1 AND 10000),
+                    image_url TEXT,
+                    value_minor BIGINT NOT NULL DEFAULT 0,
+                    wear TEXT,
+                    stattrak BOOLEAN NOT NULL DEFAULT FALSE,
+                    souvenir BOOLEAN NOT NULL DEFAULT FALSE,
+                    phase TEXT,
+                    UNIQUE(creator_case_id, market_hash_name)
+                );
+                CREATE TABLE IF NOT EXISTS creator_case_openings (
+                    id BIGSERIAL PRIMARY KEY,
+                    creator_case_id BIGINT NOT NULL REFERENCES creator_cases(id),
+                    user_id BIGINT NOT NULL,
+                    item_id BIGINT NOT NULL REFERENCES creator_case_items(id),
+                    item_name TEXT NOT NULL,
+                    rarity TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_creator_case_openings_created
+                    ON creator_case_openings(created_at DESC);
+                CREATE TABLE IF NOT EXISTS creator_case_favorites (
+                    user_id BIGINT NOT NULL,
+                    creator_case_id BIGINT NOT NULL REFERENCES creator_cases(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY(user_id, creator_case_id)
+                );
+                CREATE TABLE IF NOT EXISTS user_inventory_favorites (
+                    user_id BIGINT NOT NULL,
+                    inventory_id BIGINT NOT NULL REFERENCES user_inventory(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY(user_id, inventory_id)
+                );
+                CREATE TABLE IF NOT EXISTS user_reward_points (
+                    user_id BIGINT PRIMARY KEY,
+                    points BIGINT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS weekly_reward_claims (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    points INTEGER NOT NULL DEFAULT 100,
+                    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_weekly_reward_claims_user
+                    ON weekly_reward_claims(user_id, claimed_at DESC);
 
                 INSERT INTO user_inventory(user_id, item_type, item_name, rarity, value_minor, source, created_at)
                 SELECT co.user_id, 'skin', co.item_name, co.rarity,
@@ -1020,10 +1084,13 @@ async def get_inventory(request):
             SELECT i.id, i.item_type, i.item_name, i.rarity, i.image_url,
                    i.value_minor, i.source, i.created_at, i.market_hash_name,
                    i.wear, i.stattrak, i.souvenir, i.phase,
-                   p.lowest_price, p.fetched_at
+                   p.lowest_price, p.fetched_at,
+                   (f.inventory_id IS NOT NULL) AS is_favorite
             FROM user_inventory i
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=i.market_hash_name
                 AND p.price_source <> 'steam'
+            LEFT JOIN user_inventory_favorites f
+                ON f.inventory_id=i.id AND f.user_id=i.user_id
             WHERE i.user_id = $1 AND i.consumed_at IS NULL
             ORDER BY i.id DESC LIMIT 100
         """, user["id"])
@@ -1047,7 +1114,7 @@ async def get_inventory(request):
             "source": row["source"], "created_at": row["created_at"].isoformat(),
             "market_hash_name": row["market_hash_name"], "wear": row["wear"],
             "stattrak": row["stattrak"], "souvenir": row["souvenir"],
-            "phase": row["phase"]
+            "phase": row["phase"], "is_favorite": row["is_favorite"]
         })
     return web.json_response({"items": items})
 
@@ -1870,6 +1937,23 @@ async def get_live_drops(request):
                     ua.success,
                     ua.created_at
                 FROM upgrade_attempts ua
+
+                UNION ALL
+
+                SELECT
+                    'creator_case:' || co.id::text AS event_id,
+                    co.user_id,
+                    'case'::text AS event_type,
+                    co.item_name AS title,
+                    co.rarity,
+                    ci.image_url,
+                    COALESCE(ci.value_minor, 0)::BIGINT AS value_minor,
+                    c.title AS context,
+                    NULL::BOOLEAN AS success,
+                    co.created_at
+                FROM creator_case_openings co
+                JOIN creator_cases c ON c.id=co.creator_case_id
+                LEFT JOIN creator_case_items ci ON ci.id=co.item_id
             ) events
             ORDER BY created_at DESC
             LIMIT 40
@@ -2977,6 +3061,307 @@ async def cmd_set_status(message: types.Message):
 
 
 # ============================================================
+# CASER-INSPIRED CREATOR CASES, FAVORITES AND WEEKLY REWARDS
+# Demo-only: no real payments, cashout or Steam item transfers.
+# ============================================================
+
+async def get_creator_cases(request):
+    user = verify_telegram_user(request)
+    mine_only = request.query.get("mine") == "1"
+    favorites_only = request.query.get("favorites") == "1"
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT c.id, c.user_id, c.title, c.description, c.image_url,
+                   c.created_at,
+                   COUNT(ci.id)::INTEGER AS items_count,
+                   COALESCE(SUM(ci.value_minor * ci.chance_bp)::BIGINT / 10000, 0)::BIGINT AS estimated_value_minor,
+                   EXISTS(SELECT 1 FROM creator_case_favorites f
+                          WHERE f.creator_case_id=c.id AND f.user_id=$1) AS is_favorite
+            FROM creator_cases c
+            LEFT JOIN creator_case_items ci ON ci.creator_case_id=c.id
+            WHERE c.active=TRUE
+              AND ($2::BOOLEAN=FALSE OR c.user_id=$1)
+              AND ($3::BOOLEAN=FALSE OR EXISTS(
+                  SELECT 1 FROM creator_case_favorites f
+                  WHERE f.creator_case_id=c.id AND f.user_id=$1
+              ))
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+            LIMIT 100
+        """, user["id"], mine_only, favorites_only)
+        items = []
+        for row in rows:
+            contents = await conn.fetch("""
+                SELECT item_name, rarity, chance_bp, image_url, value_minor,
+                       wear, stattrak, souvenir, phase
+                FROM creator_case_items
+                WHERE creator_case_id=$1
+                ORDER BY chance_bp DESC, id
+            """, row["id"])
+            items.append({
+                "id": row["id"], "title": row["title"],
+                "description": row["description"], "image_url": row["image_url"],
+                "creator": "Вы" if row["user_id"] == user["id"] else "Игрок",
+                "is_mine": row["user_id"] == user["id"],
+                "is_favorite": row["is_favorite"],
+                "items_count": row["items_count"],
+                "estimated_value_minor": row["estimated_value_minor"],
+                "created_at": row["created_at"].isoformat(),
+                "items": [{
+                    "name": x["item_name"], "rarity": x["rarity"],
+                    "chance_percent": round(x["chance_bp"] / 100, 2),
+                    "image_url": x["image_url"], "value_minor": x["value_minor"],
+                    "wear": x["wear"], "stattrak": x["stattrak"],
+                    "souvenir": x["souvenir"], "phase": x["phase"]
+                } for x in contents]
+            })
+    return web.json_response({"items": items, "demo_only": True})
+
+
+async def create_creator_case(request):
+    user = verify_telegram_user(request)
+    try:
+        data = await request.json()
+        title = str(data.get("title", "")).strip()[:48]
+        description = str(data.get("description", "")).strip()[:240]
+        raw_items = data.get("items")
+        if not title or not isinstance(raw_items, list) or not 2 <= len(raw_items) <= 30:
+            raise ValueError()
+        items = []
+        seen = set()
+        total_bp = 0
+        for raw in raw_items:
+            market_name = str(raw.get("market_hash_name", "")).strip()
+            chance_bp = int(raw.get("chance_bp", 0))
+            if not market_name or market_name in seen or not 1 <= chance_bp <= 10000:
+                raise ValueError()
+            seen.add(market_name)
+            total_bp += chance_bp
+            items.append((market_name, chance_bp))
+        if total_bp != 10000:
+            raise ValueError()
+    except (ValueError, TypeError, json.JSONDecodeError, AttributeError):
+        raise web.HTTPBadRequest(text="Укажите название, от 2 до 30 разных скинов и вероятности в сумме ровно 100%.")
+    catalog = await load_cs2_catalog("skins")
+    by_market = {x.get("market_hash_name"): x for x in catalog}
+    if any(name not in by_market for name, _ in items):
+        raise web.HTTPBadRequest(text="Один из скинов отсутствует в каталоге CS2. Обновите список и попробуйте снова.")
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            case_id = await conn.fetchval("""
+                INSERT INTO creator_cases(user_id, title, description, image_url)
+                VALUES($1,$2,$3,$4) RETURNING id
+            """, user["id"], title, description,
+                 by_market[items[0][0]].get("image_url"))
+            names = [name for name, _ in items]
+            prices = await conn.fetch("""
+                SELECT market_hash_name, lowest_price, fetched_at
+                FROM cs2_steam_prices
+                WHERE market_hash_name=ANY($1::text[]) AND price_source <> 'steam'
+            """, names)
+            price_map = {
+                x["market_hash_name"]: steam_price_to_minor(x["lowest_price"])
+                for x in prices
+                if (datetime.now(timezone.utc)-x["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS
+            }
+            records = []
+            for market_name, chance_bp in items:
+                skin = by_market[market_name]
+                records.append((
+                    case_id, market_name, skin["name"], skin.get("rarity") or "Обычный",
+                    chance_bp, skin.get("image_url"), price_map.get(market_name) or 0,
+                    skin.get("wear"), bool(skin.get("stattrak")),
+                    bool(skin.get("souvenir")), skin.get("phase")
+                ))
+            await conn.executemany("""
+                INSERT INTO creator_case_items(
+                    creator_case_id, market_hash_name, item_name, rarity, chance_bp,
+                    image_url, value_minor, wear, stattrak, souvenir, phase
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            """, records)
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id, action, details)
+                VALUES($1,'creator_case_created',$2::jsonb)
+            """, user["id"], json.dumps({"creator_case_id": case_id, "items": len(items)}))
+    return web.json_response({
+        "ok": True, "id": case_id,
+        "message": "Авторский кейс создан в демо-режиме. Открытия не списывают деньги."
+    })
+
+
+async def toggle_creator_case_favorite(request):
+    user = verify_telegram_user(request)
+    case_id = int(request.match_info["case_id"])
+    async with db.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM creator_cases WHERE id=$1 AND active=TRUE)",
+            case_id
+        )
+        if not exists:
+            raise web.HTTPNotFound(text="Авторский кейс не найден")
+        removed = await conn.fetchval("""
+            DELETE FROM creator_case_favorites
+            WHERE user_id=$1 AND creator_case_id=$2
+            RETURNING TRUE
+        """, user["id"], case_id)
+        if not removed:
+            await conn.execute("""
+                INSERT INTO creator_case_favorites(user_id, creator_case_id)
+                VALUES($1,$2) ON CONFLICT DO NOTHING
+            """, user["id"], case_id)
+    return web.json_response({"ok": True, "is_favorite": not bool(removed)})
+
+
+async def open_creator_case(request):
+    user = verify_telegram_user(request)
+    case_id = int(request.match_info["case_id"])
+    try:
+        data = await request.json()
+        count = int(data.get("count", 1))
+        if not 1 <= count <= 5:
+            raise ValueError()
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Можно открыть от 1 до 5 кейсов за раз.")
+    results = []
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            case = await conn.fetchrow("""
+                SELECT id, title FROM creator_cases
+                WHERE id=$1 AND active=TRUE FOR SHARE
+            """, case_id)
+            if not case:
+                raise web.HTTPNotFound(text="Авторский кейс не найден")
+            contents = await conn.fetch("""
+                SELECT id, market_hash_name, item_name, rarity, chance_bp,
+                       image_url, value_minor, wear, stattrak, souvenir, phase
+                FROM creator_case_items WHERE creator_case_id=$1
+                ORDER BY id
+            """, case_id)
+            if not contents or sum(x["chance_bp"] for x in contents) != 10000:
+                raise web.HTTPConflict(text="Состав кейса не прошёл проверку вероятностей.")
+            for _ in range(count):
+                roll = secrets.randbelow(10000)
+                cursor = 0
+                selected = contents[-1]
+                for item in contents:
+                    cursor += item["chance_bp"]
+                    if roll < cursor:
+                        selected = item
+                        break
+                inventory_id = await conn.fetchval("""
+                    INSERT INTO user_inventory(
+                        user_id,item_type,item_name,rarity,image_url,value_minor,source,
+                        market_hash_name,wear,stattrak,souvenir,phase
+                    ) VALUES($1,'skin',$2,$3,$4,$5,'creator_case',$6,$7,$8,$9,$10)
+                    RETURNING id
+                """, user["id"], selected["item_name"], selected["rarity"],
+                     selected["image_url"], selected["value_minor"],
+                     selected["market_hash_name"], selected["wear"],
+                     selected["stattrak"], selected["souvenir"], selected["phase"])
+                opening_id = await conn.fetchval("""
+                    INSERT INTO creator_case_openings(
+                        creator_case_id,user_id,item_id,item_name,rarity
+                    ) VALUES($1,$2,$3,$4,$5) RETURNING id
+                """, case_id, user["id"], selected["id"],
+                     selected["item_name"], selected["rarity"])
+                results.append({
+                    "opening_id": opening_id, "inventory_id": inventory_id,
+                    "item_name": selected["item_name"], "rarity": selected["rarity"],
+                    "image_url": selected["image_url"],
+                    "market_hash_name": selected["market_hash_name"],
+                    "value_minor": selected["value_minor"],
+                    "chance_percent": round(selected["chance_bp"]/100, 2)
+                })
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id,action,details)
+                VALUES($1,'creator_case_opened',$2::jsonb)
+            """, user["id"], json.dumps({"creator_case_id": case_id, "count": count}))
+    return web.json_response({
+        "ok": True, "case_title": case["title"], "items": results,
+        "demo_only": True, "message": "Демо-открытие завершено. Предметы добавлены в виртуальный инвентарь."
+    })
+
+
+async def toggle_inventory_favorite(request):
+    user = verify_telegram_user(request)
+    try:
+        inventory_id = int(request.match_info["inventory_id"])
+    except (ValueError, TypeError):
+        raise web.HTTPBadRequest(text="Некорректный предмет")
+    async with db.acquire() as conn:
+        owned = await conn.fetchval("""
+            SELECT EXISTS(SELECT 1 FROM user_inventory
+            WHERE id=$1 AND user_id=$2 AND consumed_at IS NULL)
+        """, inventory_id, user["id"])
+        if not owned:
+            raise web.HTTPNotFound(text="Предмет не найден в инвентаре")
+        removed = await conn.fetchval("""
+            DELETE FROM user_inventory_favorites
+            WHERE user_id=$1 AND inventory_id=$2 RETURNING TRUE
+        """, user["id"], inventory_id)
+        if not removed:
+            await conn.execute("""
+                INSERT INTO user_inventory_favorites(user_id,inventory_id)
+                VALUES($1,$2) ON CONFLICT DO NOTHING
+            """, user["id"], inventory_id)
+    return web.json_response({"ok": True, "is_favorite": not bool(removed)})
+
+
+async def get_rewards(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        points = await conn.fetchval(
+            "SELECT points FROM user_reward_points WHERE user_id=$1", user["id"]
+        ) or 0
+        last = await conn.fetchrow("""
+            SELECT claimed_at, points FROM weekly_reward_claims
+            WHERE user_id=$1 ORDER BY claimed_at DESC LIMIT 1
+        """, user["id"])
+    available = not last or (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() >= 7*86400
+    next_at = (last["claimed_at"] + timedelta(days=7)).isoformat() if last and not available else None
+    return web.json_response({
+        "points": int(points), "weekly_points": 100,
+        "available": available, "next_claim_at": next_at,
+        "last_claim_at": last["claimed_at"].isoformat() if last else None,
+        "demo_only": True
+    })
+
+
+async def claim_weekly_reward(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("""
+                INSERT INTO user_reward_points(user_id,points) VALUES($1,0)
+                ON CONFLICT(user_id) DO NOTHING
+            """, user["id"])
+            await conn.fetchrow("""
+                SELECT user_id FROM user_reward_points WHERE user_id=$1 FOR UPDATE
+            """, user["id"])
+            last = await conn.fetchrow("""
+                SELECT claimed_at FROM weekly_reward_claims
+                WHERE user_id=$1 ORDER BY claimed_at DESC LIMIT 1
+            """, user["id"])
+            if last and (datetime.now(timezone.utc)-last["claimed_at"]).total_seconds() < 7*86400:
+                raise web.HTTPConflict(text="Еженедельная награда уже получена. Загляните позже.")
+            await conn.execute("""
+                INSERT INTO weekly_reward_claims(user_id,points) VALUES($1,100)
+            """, user["id"])
+            points = await conn.fetchval("""
+                UPDATE user_reward_points SET points=points+100,updated_at=NOW()
+                WHERE user_id=$1 RETURNING points
+            """, user["id"])
+            await conn.execute("""
+                INSERT INTO audit_log(actor_id,action,details)
+                VALUES($1,'weekly_demo_reward_claimed',$2::jsonb)
+            """, user["id"], json.dumps({"points":100}))
+    return web.json_response({
+        "ok": True, "points": int(points), "added_points": 100,
+        "message": "Начислено 100 демонстрационных бонусных баллов. Они не являются деньгами и не выводятся."
+    })
+
+
+# ============================================================
 # APPLICATION
 # ============================================================
 
@@ -3040,6 +3425,13 @@ def create_app():
     app.router.add_post("/api/referrals/apply", apply_referral_code)
     app.router.add_get("/api/cases", get_cases)
     app.router.add_get("/api/live-drops", get_live_drops)
+    app.router.add_get("/api/creator-cases", get_creator_cases)
+    app.router.add_post("/api/creator-cases", create_creator_case)
+    app.router.add_post("/api/creator-cases/{case_id}/favorite", toggle_creator_case_favorite)
+    app.router.add_post("/api/creator-cases/{case_id}/open", open_creator_case)
+    app.router.add_post("/api/inventory/{inventory_id}/favorite", toggle_inventory_favorite)
+    app.router.add_get("/api/rewards", get_rewards)
+    app.router.add_post("/api/rewards/weekly/claim", claim_weekly_reward)
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
     app.router.add_get("/api/wallet", get_wallet)
