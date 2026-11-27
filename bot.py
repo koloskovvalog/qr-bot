@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, MenuButtonWebApp
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 
@@ -2609,6 +2609,17 @@ async def on_startup(app: web.Application):
 
     if not WEBHOOK_SECRET:
         raise RuntimeError("Не задан WEBHOOK_SECRET")
+
+    # Force Telegram's bottom-left menu button to open QR BOT PRO itself.
+    # This overrides any stale BotFather menu URL that may still point to another bot.
+    bot_identity = await bot.get_me()
+    logger.info("Telegram bot identity: @%s (id=%s)", bot_identity.username, bot_identity.id)
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="Открыть магазин",
+            web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
+        )
+    )
 
     await bot.set_webhook(
         url=f"{PUBLIC_BASE_URL}{WEBHOOK_PATH}",
