@@ -2292,7 +2292,8 @@ async def suggest_upgrade_target(request):
     chosen["suggested_chance_percent"] = round(source_value/chosen["market_price_minor"]*75, 2)
     return web.json_response({"item": chosen, "source_value_minor": source_value,
         "desired_target_minor": round(desired), "mode": mode, "value": raw_value,
-        "fresh_price_count": len(prices), "demo_only": True})
+        "fresh_price_count": len(prices), "expected_return_percent": 75.0,
+        "house_edge_percent": 25.0, "demo_only": True})
 
 
 async def create_upgrade_attempt(request):
@@ -2421,7 +2422,8 @@ async def create_upgrade_attempt(request):
     return web.json_response({
         "ok": True, "attempt_id": attempt_id, "success": success,
         "chance_percent": chance, "roll_percent": roll / 100.0, "source_name": source["item_name"],
-        "target": target, "demo_only": True,
+        "target": target, "expected_return_percent": 75.0,
+        "house_edge_percent": 25.0, "demo_only": True,
         "message": "Успех! Предмет добавлен в инвентарь." if success else "Неудача. Виртуальный предмет ставки списан.",
     })
 
