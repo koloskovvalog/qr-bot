@@ -2788,6 +2788,179 @@ async def admin_adjust_wallet(request):
     return web.json_response({"ok":True,"balance_minor":row["balance_minor"]})
 
 
+
+
+# ============================================================
+# FINANCIAL MOVEMENT REPORTS
+# ============================================================
+
+async def admin_finance_rows(request):
+    require_admin(request)
+    mode = request.headers.get("X-Store-Mode", "digital").strip().lower()
+    if mode not in {"digital", "cases"}:
+        raise web.HTTPBadRequest(text="Неизвестный магазин")
+    date_from = request.query.get("from", "").strip()
+    date_to = request.query.get("to", "").strip()
+    user_q = request.query.get("user", "").strip()[:40]
+    kind = request.query.get("type", "").strip()[:40]
+    try:
+        from_dt = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+        to_dt = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1) if date_to else None
+        user_id = int(user_q) if user_q else None
+    except ValueError:
+        raise web.HTTPBadRequest(text="Некорректный фильтр даты или Telegram ID")
+
+    if mode == "digital":
+        sql = """
+            SELECT 'order'::text AS event_type, o.id::text AS ref,
+                   o.user_id, COALESCE(o.username,'') AS username,
+                   CASE WHEN o.status IN ('paid','delivered') THEN 'Покупка подтверждена'
+                        WHEN o.status='refunded' THEN 'Возврат'
+                        WHEN o.status='cancelled' THEN 'Заказ отменён'
+                        ELSE 'Заказ создан — ожидает оплаты' END AS title,
+                   CASE WHEN o.status='refunded' THEN -o.amount_minor
+                        WHEN o.status IN ('paid','delivered') THEN o.amount_minor ELSE 0 END::bigint AS amount_minor,
+                   o.currency, o.status AS status,
+                   CASE WHEN o.status='refunded' THEN 'out'
+                        WHEN o.status IN ('paid','delivered') THEN 'in' ELSE 'info' END AS direction,
+                   o.updated_at AS created_at,
+                   'Заказ #' || o.id || ': ' || o.product_title AS details,
+                   FALSE AS demo
+            FROM orders o
+            WHERE ($1::timestamptz IS NULL OR o.updated_at >= $1)
+              AND ($2::timestamptz IS NULL OR o.updated_at < $2)
+              AND ($3::bigint IS NULL OR o.user_id=$3)
+              AND ($4::text='' OR 'order'=$4)
+            UNION ALL
+            SELECT 'payment'::text, pt.id::text, pt.user_id, ''::text,
+                   'Платёжная транзакция DEMO', 0::bigint, pt.currency,
+                   pt.status, 'info', pt.updated_at,
+                   'Транзакция #' || pt.id || ' · заказ #' || pt.order_id || ' · ' || pt.external_reference,
+                   TRUE
+            FROM payment_transactions pt
+            WHERE ($1::timestamptz IS NULL OR pt.updated_at >= $1)
+              AND ($2::timestamptz IS NULL OR pt.updated_at < $2)
+              AND ($3::bigint IS NULL OR pt.user_id=$3)
+              AND ($4::text='' OR 'payment'=$4)
+            ORDER BY created_at DESC LIMIT 2000
+        """
+    else:
+        sql = """
+            SELECT 'skin_sale'::text AS event_type, wl.id::text AS ref,
+                   wl.user_id, ''::text AS username,
+                   'Продажа скина — виртуальное зачисление' AS title,
+                   wl.amount_minor::bigint AS amount_minor, wl.currency,
+                   'completed'::text AS status, 'in'::text AS direction,
+                   wl.created_at, 'Инвентарь #' || wl.inventory_id AS details,
+                   TRUE AS demo
+            FROM wallet_ledger wl
+            WHERE ($1::timestamptz IS NULL OR wl.created_at >= $1)
+              AND ($2::timestamptz IS NULL OR wl.created_at < $2)
+              AND ($3::bigint IS NULL OR wl.user_id=$3)
+              AND ($4::text='' OR 'skin_sale'=$4)
+            UNION ALL
+            SELECT 'adjustment', aw.id::text, aw.user_id, '',
+                   CASE WHEN aw.delta_minor>=0 THEN 'Ручное пополнение администратором'
+                        ELSE 'Ручное списание администратором' END,
+                   aw.delta_minor, 'RUB',
+                   'completed', CASE WHEN aw.delta_minor>=0 THEN 'in' ELSE 'out' END,
+                   aw.created_at,
+                   'Администратор #' || aw.admin_id || ' · ' || aw.reason,
+                   TRUE
+            FROM admin_wallet_adjustments aw
+            WHERE ($1::timestamptz IS NULL OR aw.created_at >= $1)
+              AND ($2::timestamptz IS NULL OR aw.created_at < $2)
+              AND ($3::bigint IS NULL OR aw.user_id=$3)
+              AND ($4::text='' OR 'adjustment'=$4)
+            ORDER BY created_at DESC LIMIT 2000
+        """
+    async with db.acquire() as conn:
+        rows = await conn.fetch(sql, from_dt, to_dt, user_id, kind)
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = row["created_at"].isoformat()
+        items.append(item)
+    return items
+
+
+async def admin_get_finance(request):
+    items = await admin_finance_rows(request)
+    incoming = {}
+    outgoing = {}
+    for item in items:
+        currency = item["currency"]
+        if item["direction"] == "in":
+            incoming[currency] = incoming.get(currency, 0) + item["amount_minor"]
+        elif item["direction"] == "out":
+            outgoing[currency] = outgoing.get(currency, 0) + abs(item["amount_minor"])
+    return web.json_response({
+        "items": items,
+        "count": len(items),
+        "incoming": incoming,
+        "outgoing": outgoing,
+        "store": request.headers.get("X-Store-Mode", "digital"),
+        "note": "DEMO и виртуальные операции не являются реальными денежными платежами."
+    })
+
+
+async def admin_export_finance(request):
+    items = await admin_finance_rows(request)
+    fmt = request.query.get("format", "xlsx").lower()
+    columns = [
+        ("Дата и время", "created_at"), ("Тип", "title"),
+        ("Telegram ID", "user_id"), ("Username", "username"),
+        ("Сумма в минимальных единицах", "amount_minor"),
+        ("Валюта", "currency"), ("Направление", "direction"),
+        ("Статус", "status"), ("Источник", "details"),
+        ("DEMO / виртуально", "demo"), ("ID записи", "ref")
+    ]
+    if fmt in {"csv", "txt"}:
+        import csv
+        import io
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, delimiter=";" if fmt == "csv" else "\\t")
+        writer.writerow([x[0] for x in columns])
+        for item in items:
+            writer.writerow([item.get(key, "") for _, key in columns])
+        body = output.getvalue().encode("utf-8-sig")
+        content_type = "text/csv; charset=utf-8" if fmt == "csv" else "text/plain; charset=utf-8"
+        filename = "finance_report.csv" if fmt == "csv" else "finance_report.txt"
+    elif fmt == "xlsx":
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            raise web.HTTPServiceUnavailable(text="Экспорт XLSX временно недоступен")
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Движение средств"
+        sheet.append([x[0] for x in columns])
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="262626")
+        for item in items:
+            sheet.append([item.get(key, "") for _, key in columns])
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for col in sheet.columns:
+            width = min(48, max(12, max(len(str(cell.value or "")) for cell in col) + 2))
+            sheet.column_dimensions[get_column_letter(col[0].column)].width = width
+        import io
+        output = io.BytesIO()
+        workbook.save(output)
+        body = output.getvalue()
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "finance_report.xlsx"
+    else:
+        raise web.HTTPBadRequest(text="Формат должен быть xlsx, csv или txt")
+    return web.Response(
+        body=body, content_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
 # ============================================================
 # DEMO PAYMENT PROVIDER MANAGEMENT
 # ============================================================
@@ -3693,6 +3866,8 @@ def create_app():
         admin_toggle_product,
     )
     app.router.add_get("/api/admin/dashboard", admin_get_dashboard)
+    app.router.add_get("/api/admin/finance", admin_get_finance)
+    app.router.add_get("/api/admin/finance/export", admin_export_finance)
     app.router.add_get("/api/admin/products", admin_get_products)
     app.router.add_get("/api/admin/orders", admin_get_orders)
     app.router.add_post(
@@ -3727,6 +3902,7 @@ def create_app():
         # the initial document navigation; every admin API request verifies it.
         return web.FileResponse("static/admin.html")
 
+    app.router.add_get("/admin/finance", admin_page_handler)
     app.router.add_get("/admin", admin_page_handler)
     app.router.add_get("/admin/", admin_page_handler)
     app.router.add_get("/cases", cases_page_handler)
