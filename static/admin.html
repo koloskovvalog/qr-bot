@@ -8,6 +8,41 @@
 @media(max-width:760px){#finance .formgrid{grid-template-columns:1fr 1fr}#finance .grid{grid-template-columns:repeat(2,minmax(0,1fr)}}
 body.cases-admin [data-page="overview"],body.cases-admin [data-page="orders"],body.cases-admin [data-page="products"],body.cases-admin [data-page="payments"]{display:none!important}
 body.cases-admin #overview{display:none!important}
+
+/* SHIRPDROP ADMIN — matching premium control room */
+body.cases-admin{--gold:#c8f36b;--gold2:#dcff91;--line:#2c3948;--muted:#9eacbd;background:radial-gradient(ellipse at 80% -10%,#263d30 0,transparent 34%),radial-gradient(ellipse at 0% 40%,#172637 0,transparent 30%),#080b10;color:#f4f7fb}
+body.cases-admin .shell{max-width:1320px;padding:26px 20px 70px}
+body.cases-admin .top{padding-bottom:18px;border-bottom:1px solid #293847}
+body.cases-admin .brand{font-size:21px;letter-spacing:2px}
+body.cases-admin .brand span{color:var(--gold)}
+body.cases-admin .top a{border:1px solid #40533c;background:#15221b;color:#dfff9a;border-radius:12px}
+body.cases-admin .eyebrow{color:var(--gold);letter-spacing:3px}
+body.cases-admin .heading{font-size:clamp(32px,5vw,52px);letter-spacing:-1.8px}
+body.cases-admin .sub{color:#9eacbd}
+body.cases-admin .tabs{position:sticky;top:0;z-index:10;padding:10px 0;background:#080d12eF;backdrop-filter:blur(16px);border-bottom:1px solid #2a3946}
+body.cases-admin .tabs button,body.cases-admin .btn{border:1px solid #344252;background:#141e28;color:#d9e2ec;border-radius:12px;padding:11px 15px;transition:.18s}
+body.cases-admin .tabs button.active,body.cases-admin .btn.gold{background:linear-gradient(135deg,#dfff9a,#9fce4f);border-color:transparent;color:#10180c}
+body.cases-admin .tabs button:hover,body.cases-admin .btn:hover{border-color:#91bf5b}
+body.cases-admin .metric,body.cases-admin .panel{background:linear-gradient(145deg,#18232d,#101720);border:1px solid #2d3c4b;border-radius:18px;box-shadow:0 12px 28px #0002}
+body.cases-admin .metric small,body.cases-admin .muted,body.cases-admin th{color:#9eacbd}
+body.cases-admin .metric strong{color:#f4f7fb;font-size:clamp(24px,3vw,34px)}
+body.cases-admin .panel h2{font-weight:900;letter-spacing:-.3px}
+body.cases-admin input,body.cases-admin textarea,body.cases-admin select{background:#0d151e!important;border:1px solid #344252!important;color:#f4f7fb!important;border-radius:11px!important}
+body.cases-admin input:focus,body.cases-admin textarea:focus,body.cases-admin select:focus{outline:2px solid #c8f36b55;border-color:#c8f36b!important}
+body.cases-admin .product{background:linear-gradient(145deg,#1b2731,#111922);border:1px solid #2e3d4b;border-radius:15px;transition:transform .18s,border-color .18s}
+body.cases-admin .product:hover{transform:translateY(-2px);border-color:#739b50}
+body.cases-admin .status{background:#202c36;color:#b9c7d5;border:1px solid #354655}
+body.cases-admin .status.paid,body.cases-admin .status.delivered{background:#172d25;color:#8ce4ad;border-color:#38684c}
+body.cases-admin .notice{background:#19251c;border:1px solid #536e3c;color:#d8efb7;border-radius:13px}
+body.cases-admin table{border-collapse:separate;border-spacing:0}
+body.cases-admin th{background:#111a23}
+body.cases-admin td,body.cases-admin th{border-bottom:1px solid #2a3946}
+body.cases-admin .empty{color:#9eacbd;border:1px dashed #3c4b59;border-radius:14px;padding:28px}
+body.cases-admin .catalog-tools input,body.cases-admin .catalog-tools select{background:#0d151e;border-color:#344252}
+body.cases-admin .skin-option{background:#17222c;border-color:#344252;border-radius:14px}
+body.cases-admin .skin-option img{background:radial-gradient(circle,#2c4337,#0d151e)}
+@media(max-width:760px){body.cases-admin .shell{padding:17px 12px 55px}body.cases-admin .tabs{overflow-x:auto;flex-wrap:nowrap}body.cases-admin .tabs button{white-space:nowrap}body.cases-admin .metric,body.cases-admin .panel{border-radius:15px}}
+
 </style></head><body><main class="shell">
 <header class="top"><div class="brand">QR <span>BOT PRO</span> / ADMIN</div><a href="/">← В магазин</a></header>
 <div class="eyebrow">CONTROL CENTER</div><h1 class="heading">Панель управления</h1><p class="sub">Заказы, оборот, товары и платёжные операции в одном месте.</p>
