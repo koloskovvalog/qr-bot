@@ -75,6 +75,7 @@ CASES_RESPONSE_LOCK = asyncio.Lock()
 CS2_PRICE_QUEUE = asyncio.Queue()
 CS2_PRICE_QUEUED = set()
 CS2_PRICE_WORKER_TASK = None
+CS2_PRICE_WORKER_TASK_2 = None
 CS2_PRICE_WARMUP_TASK = None
 
 
@@ -317,6 +318,38 @@ async def init_db():
                     ADD COLUMN IF NOT EXISTS image_url TEXT;
                 CREATE INDEX IF NOT EXISTS idx_cs2_steam_prices_fetched
                     ON cs2_steam_prices(fetched_at);
+
+                -- Persistent canonical CS2 catalog; additive and independent from user data.
+                CREATE TABLE IF NOT EXISTS cs2_skin_catalog (
+                    market_hash_name TEXT PRIMARY KEY,
+                    base_name TEXT NOT NULL DEFAULT '',
+                    weapon TEXT NOT NULL DEFAULT '',
+                    wear TEXT NOT NULL DEFAULT '',
+                    rarity TEXT NOT NULL DEFAULT '',
+                    phase TEXT NOT NULL DEFAULT '',
+                    stattrak BOOLEAN NOT NULL DEFAULT FALSE,
+                    souvenir BOOLEAN NOT NULL DEFAULT FALSE,
+                    image_url TEXT,
+                    value_minor BIGINT NOT NULL DEFAULT 0,
+                    catalog_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cs2_skin_catalog_weapon
+                    ON cs2_skin_catalog(weapon);
+                CREATE INDEX IF NOT EXISTS idx_cs2_skin_catalog_rarity
+                    ON cs2_skin_catalog(rarity);
+                CREATE INDEX IF NOT EXISTS idx_cs2_skin_catalog_wear
+                    ON cs2_skin_catalog(wear);
+
+                -- Records successful and empty quote lookups, preventing endless retries
+                -- for skins that currently have no marketplace listing.
+                CREATE TABLE IF NOT EXISTS cs2_price_checks (
+                    market_hash_name TEXT PRIMARY KEY,
+                    last_checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    has_quote BOOLEAN NOT NULL DEFAULT FALSE,
+                    price_source TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_cs2_price_checks_checked
+                    ON cs2_price_checks(last_checked_at);
 
                 INSERT INTO payment_providers(code, title, mode, enabled, public_config)
                 VALUES
@@ -953,7 +986,7 @@ async def build_cases_response(request):
                         SELECT market_hash_name, lowest_price
                         FROM cs2_steam_prices
                         WHERE market_hash_name = ANY($1::text[])
-                          AND price_source <> 'steam'
+                          
                     """, market_names)
                     cached_prices = {
                         row["market_hash_name"]: steam_price_to_minor(row["lowest_price"])
@@ -1645,6 +1678,43 @@ def cs2_case_weight(rarity) -> int:
         return 150
     return 220
 
+async def persist_cs2_skin_catalog(items):
+    """Persist the complete normalized skin catalog in small additive batches."""
+    if not items or db is None:
+        return 0
+    rows = [
+        (
+            item["market_hash_name"], item.get("base_name", ""),
+            item.get("weapon", ""), item.get("wear", ""),
+            item.get("rarity", ""), item.get("phase", ""),
+            bool(item.get("stattrak")), bool(item.get("souvenir")),
+            item.get("image_url"), int(item.get("value_minor") or 0),
+        )
+        for item in items if item.get("market_hash_name")
+    ]
+    async with db.acquire() as conn:
+        for offset in range(0, len(rows), 500):
+            await conn.executemany("""
+                INSERT INTO cs2_skin_catalog(
+                    market_hash_name, base_name, weapon, wear, rarity, phase,
+                    stattrak, souvenir, image_url, value_minor, catalog_updated_at
+                ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+                ON CONFLICT (market_hash_name) DO UPDATE SET
+                    base_name=EXCLUDED.base_name,
+                    weapon=EXCLUDED.weapon,
+                    wear=EXCLUDED.wear,
+                    rarity=EXCLUDED.rarity,
+                    phase=EXCLUDED.phase,
+                    stattrak=EXCLUDED.stattrak,
+                    souvenir=EXCLUDED.souvenir,
+                    image_url=COALESCE(EXCLUDED.image_url, cs2_skin_catalog.image_url),
+                    value_minor=EXCLUDED.value_minor,
+                    catalog_updated_at=NOW()
+            """, rows[offset:offset + 500])
+    logger.info("CS2 skin catalog persisted: %s variants", len(rows))
+    return len(rows)
+
+
 async def load_cs2_catalog(kind: str):
     if kind not in CS2_CATALOG_URLS:
         raise web.HTTPBadRequest(text="Неизвестный тип каталога")
@@ -1712,6 +1782,8 @@ async def load_cs2_catalog(kind: str):
             }
             normalized.append(item)
         normalized.sort(key=lambda x: (x["value_minor"], x["name"]))
+        if kind == "skins":
+            await persist_cs2_skin_catalog(normalized)
         CS2_CATALOG_CACHE[kind] = normalized
         CS2_CATALOG_CACHE_AT[kind] = now
         return normalized
@@ -1958,6 +2030,20 @@ async def cs2_steam_price_worker():
                     # by OpenSkin. A 429 is remembered and never stalls the queue.
                     updates.extend(await _fetch_apiskins_prices(session, missing))
                 saved = await _save_market_price_updates(updates)
+                updated_names = {row[0] for row in updates}
+                async with db.acquire() as conn:
+                    await conn.executemany("""
+                        INSERT INTO cs2_price_checks(market_hash_name, last_checked_at, has_quote, price_source)
+                        VALUES($1, NOW(), $2, $3)
+                        ON CONFLICT (market_hash_name) DO UPDATE SET
+                            last_checked_at=NOW(),
+                            has_quote=EXCLUDED.has_quote,
+                            price_source=EXCLUDED.price_source
+                    """, [
+                        (name, name in updated_names,
+                         next((row[3] for row in updates if row[0] == name), None))
+                        for name in batch
+                    ])
                 logger.info(
                     "CS2 market price batch completed: %s requested, %s updated (OpenSkin primary)",
                     len(batch), saved
@@ -1991,10 +2077,12 @@ async def cs2_price_catalog_warmup():
         names = [item["market_hash_name"] for item in catalog if item.get("market_hash_name")]
         async with db.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT market_hash_name
-                FROM cs2_steam_prices
+                SELECT market_hash_name FROM cs2_price_checks
+                WHERE last_checked_at > NOW() - INTERVAL '12 hours'
+                UNION
+                SELECT market_hash_name FROM cs2_steam_prices
                 WHERE fetched_at > NOW() - INTERVAL '12 hours'
-                  AND price_source <> 'steam'
+                  AND lowest_price IS NOT NULL
             """)
         fresh = {row["market_hash_name"] for row in rows}
         pending = [name for name in names if name not in fresh]
@@ -4295,17 +4383,19 @@ async def on_startup(app: web.Application):
     else:
         logger.warning("CASES_BOT_TOKEN is not set; QR CASES Mini App is deployed but its Telegram bot is not connected")
 
-    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WARMUP_TASK
+    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WORKER_TASK_2, CS2_PRICE_WARMUP_TASK
     if CS2_PRICE_WORKER_TASK is None or CS2_PRICE_WORKER_TASK.done():
         CS2_PRICE_WORKER_TASK = asyncio.create_task(cs2_steam_price_worker())
+    if CS2_PRICE_WORKER_TASK_2 is None or CS2_PRICE_WORKER_TASK_2.done():
+        CS2_PRICE_WORKER_TASK_2 = asyncio.create_task(cs2_steam_price_worker())
     if CS2_PRICE_WARMUP_TASK is None or CS2_PRICE_WARMUP_TASK.done():
         CS2_PRICE_WARMUP_TASK = asyncio.create_task(cs2_price_catalog_warmup())
     logger.info("QR BOT PRO started")
 
 
 async def on_cleanup(app: web.Application):
-    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WARMUP_TASK
-    for task in (CS2_PRICE_WARMUP_TASK, CS2_PRICE_WORKER_TASK):
+    global CS2_PRICE_WORKER_TASK, CS2_PRICE_WORKER_TASK_2, CS2_PRICE_WARMUP_TASK
+    for task in (CS2_PRICE_WARMUP_TASK, CS2_PRICE_WORKER_TASK, CS2_PRICE_WORKER_TASK_2):
         if task is not None:
             task.cancel()
             try:
@@ -4314,6 +4404,7 @@ async def on_cleanup(app: web.Application):
                 pass
     CS2_PRICE_WARMUP_TASK = None
     CS2_PRICE_WORKER_TASK = None
+    CS2_PRICE_WORKER_TASK_2 = None
     if db is not None:
         await db.close()
 
