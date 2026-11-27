@@ -39,6 +39,9 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 CASES_WEBHOOK_SECRET = os.getenv("CASES_WEBHOOK_SECRET", "").strip()
 APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
 CS2SELL_API_KEY = os.getenv("CS2SELL_API_KEY", "").strip()
+TELEBOTLY_PAY_KEY = os.getenv("TELEBOTLY_PAY_KEY", "").strip()
+TELEBOTLY_WEBHOOK_SECRET = os.getenv("TELEBOTLY_WEBHOOK_SECRET", "").strip()
+TELEBOTLY_API_BASE = "https://api.telebotly.app/v1"
 CS2SELL_WEBHOOK_SECRET = os.getenv("CS2SELL_WEBHOOK_SECRET", "").strip()
 SKINSNODE_CLIENT_ID = os.getenv("SKINSNODE_CLIENT_ID", "").strip()
 SKINSNODE_CLIENT_SECRET = os.getenv("SKINSNODE_CLIENT_SECRET", "").strip()
@@ -292,6 +295,47 @@ async def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_wallet_external_ledger_user
                     ON wallet_external_ledger(user_id, created_at DESC);
+
+                -- Separate cash balance: never mix real deposits with legacy demo credits.
+                CREATE TABLE IF NOT EXISTS cash_wallet_accounts (
+                    user_id BIGINT PRIMARY KEY,
+                    balance_minor BIGINT NOT NULL DEFAULT 0 CHECK (balance_minor >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS cash_wallet_ledger (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    operation_id TEXT NOT NULL UNIQUE,
+                    amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    reason TEXT NOT NULL DEFAULT 'telebotly_topup',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cash_wallet_ledger_user
+                    ON cash_wallet_ledger(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS wallet_topups (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    amount_minor BIGINT NOT NULL CHECK (amount_minor >= 1000),
+                    currency TEXT NOT NULL DEFAULT 'RUB',
+                    status TEXT NOT NULL DEFAULT 'creating',
+                    provider_payment_id TEXT UNIQUE,
+                    payment_url TEXT,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    livemode BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    credited_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_topups_user
+                    ON wallet_topups(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS telebotly_webhook_events (
+                    event_id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    processed_at TIMESTAMPTZ
+                );
 
                 CREATE TABLE IF NOT EXISTS admin_wallet_adjustments (
                     id BIGSERIAL PRIMARY KEY,
@@ -1536,6 +1580,231 @@ async def get_wallet(request):
             "created_at": item["created_at"].isoformat()
         } for item in ledger]
     })
+
+
+
+
+async def get_cash_wallet(request):
+    user = verify_telegram_user(request)
+    async with db.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO cash_wallet_accounts(user_id) VALUES($1)
+            ON CONFLICT (user_id) DO NOTHING
+        """, user["id"])
+        account = await conn.fetchrow("""
+            SELECT balance_minor, updated_at FROM cash_wallet_accounts WHERE user_id=$1
+        """, user["id"])
+        rows = await conn.fetch("""
+            SELECT amount_minor, reason, created_at FROM cash_wallet_ledger
+            WHERE user_id=$1 ORDER BY id DESC LIMIT 20
+        """, user["id"])
+        topups = await conn.fetch("""
+            SELECT id, amount_minor, status, created_at, credited_at
+            FROM wallet_topups WHERE user_id=$1 ORDER BY id DESC LIMIT 10
+        """, user["id"])
+    return web.json_response({
+        "balance_minor": account["balance_minor"], "currency": "RUB",
+        "updated_at": account["updated_at"].isoformat(),
+        "ledger": [{
+            "amount_minor": row["amount_minor"], "reason": row["reason"],
+            "created_at": row["created_at"].isoformat()
+        } for row in rows],
+        "topups": [{
+            "id": row["id"], "amount_minor": row["amount_minor"],
+            "status": row["status"], "created_at": row["created_at"].isoformat(),
+            "credited_at": row["credited_at"].isoformat() if row["credited_at"] else None
+        } for row in topups]
+    })
+
+
+async def create_telebotly_topup(request):
+    user = verify_telegram_user(request)
+    if not TELEBOTLY_PAY_KEY:
+        raise web.HTTPServiceUnavailable(text="TeleBotly Pay API key не настроен на сервере")
+    try:
+        data = await request.json()
+        amount_minor = int(data.get("amount_minor"))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Укажи сумму пополнения")
+    if amount_minor < 1000 or amount_minor > 10000000:
+        raise web.HTTPBadRequest(text="Сумма пополнения должна быть от 10 до 100 000 ₽")
+
+    idempotency_key = "shirpd-topup-" + secrets.token_urlsafe(24)
+    async with db.acquire() as conn:
+        topup_id = await conn.fetchval("""
+            INSERT INTO wallet_topups(user_id, amount_minor, idempotency_key)
+            VALUES($1, $2, $3) RETURNING id
+        """, user["id"], amount_minor, idempotency_key)
+
+    amount = f"{Decimal(amount_minor) / Decimal(100):.2f}"
+    payload = {
+        "amount": amount,
+        "currency": "RUB",
+        "description": f"Пополнение баланса ShirpDrop #{topup_id}",
+        "order_id": str(topup_id),
+        "customer": {"id": str(user["id"]), "telegram_id": user["id"]},
+        "metadata": {
+            "wallet_topup_id": str(topup_id),
+            "user_id": str(user["id"]),
+            "purpose": "cash_wallet_topup"
+        }
+    }
+    timeout = aiohttp.ClientTimeout(total=20)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{TELEBOTLY_API_BASE}/payments",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {TELEBOTLY_PAY_KEY}",
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": idempotency_key
+                }
+            ) as response:
+                result = await response.json(content_type=None)
+                if response.status not in {200, 201}:
+                    logger.warning("TeleBotly create payment rejected: status=%s", response.status)
+                    raise web.HTTPBadGateway(text="TeleBotly не создал платёж. Проверь Pay API Key и одобрение проекта.")
+    except web.HTTPException:
+        async with db.acquire() as conn:
+            await conn.execute("UPDATE wallet_topups SET status='failed', updated_at=NOW() WHERE id=$1", topup_id)
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        async with db.acquire() as conn:
+            await conn.execute("UPDATE wallet_topups SET status='failed', updated_at=NOW() WHERE id=$1", topup_id)
+        raise web.HTTPBadGateway(text="Не удалось связаться с TeleBotly Pay")
+
+    payment = result.get("data") or result.get("payment") or {}
+    payment_id = payment.get("id")
+    payment_url = payment.get("url")
+    if not payment_id or not payment_url or payment.get("status") != "pending":
+        async with db.acquire() as conn:
+            await conn.execute("UPDATE wallet_topups SET status='failed', updated_at=NOW() WHERE id=$1", topup_id)
+        raise web.HTTPBadGateway(text="TeleBotly вернул неполные данные платежа")
+    returned_minor = payment.get("amount_minor")
+    if returned_minor is not None and int(returned_minor) != amount_minor:
+        raise web.HTTPBadGateway(text="Сумма платежа в ответе TeleBotly не совпала")
+    livemode = bool(payment.get("livemode", False))
+    async with db.acquire() as conn:
+        await conn.execute("""
+            UPDATE wallet_topups SET status='pending', provider_payment_id=$2,
+                payment_url=$3, livemode=$4, updated_at=NOW()
+            WHERE id=$1
+        """, topup_id, str(payment_id), str(payment_url), livemode)
+    return web.json_response({
+        "ok": True, "topup_id": topup_id, "payment_url": payment_url,
+        "amount_minor": amount_minor, "currency": "RUB",
+        "livemode": livemode, "status": "pending"
+    })
+
+
+def verify_telebotly_signature(secret: str, headers, body: bytes) -> bool:
+    if not secret or not secret.startswith("whsec_"):
+        return False
+    event_id = headers.get("webhook-id", "")
+    timestamp = headers.get("webhook-timestamp", "")
+    signatures = headers.get("webhook-signature", "")
+    try:
+        if not event_id or not timestamp or abs(time.time() - int(timestamp)) > 300:
+            return False
+        key = __import__("base64").b64decode(secret.removeprefix("whsec_"), validate=True)
+        expected = hmac.new(
+            key, f"{event_id}.{timestamp}.".encode("utf-8") + body, hashlib.sha256
+        ).digest()
+        for part in signatures.split():
+            if not part.startswith("v1,"):
+                continue
+            supplied = __import__("base64").b64decode(part[3:], validate=True)
+            if hmac.compare_digest(expected, supplied):
+                return True
+    except (ValueError, TypeError):
+        return False
+    return False
+
+
+async def telebotly_webhook(request):
+    if not TELEBOTLY_WEBHOOK_SECRET:
+        raise web.HTTPServiceUnavailable(text="Webhook secret is not configured")
+    raw_body = await request.read()
+    if not verify_telebotly_signature(TELEBOTLY_WEBHOOK_SECRET, request.headers, raw_body):
+        raise web.HTTPUnauthorized(text="Invalid webhook signature")
+    try:
+        event = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Invalid event JSON")
+    event_id = str(event.get("id") or request.headers.get("webhook-id") or "")
+    event_type = str(event.get("type") or "")
+    if not event_id:
+        raise web.HTTPBadRequest(text="Missing event ID")
+    if event_type == "test.ping":
+        return web.json_response({"ok": True, "received": True})
+    payment = (event.get("data") or {}).get("payment") or {}
+    if event_type != "payment.paid":
+        async with db.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO telebotly_webhook_events(event_id, event_type, payload, processed_at)
+                VALUES($1, $2, $3::jsonb, NOW()) ON CONFLICT(event_id) DO NOTHING
+            """, event_id, event_type, json.dumps(event))
+        return web.json_response({"ok": True, "ignored": True})
+
+    try:
+        topup_id = int(payment.get("order_id"))
+        payment_minor = int(payment.get("amount_minor"))
+    except (ValueError, TypeError):
+        raise web.HTTPBadRequest(text="Payment is missing order or amount")
+    if payment.get("status") != "paid" or payment.get("currency") != "RUB":
+        raise web.HTTPBadRequest(text="Payment is not confirmed in RUB")
+    if not payment.get("id"):
+        raise web.HTTPBadRequest(text="Payment ID is missing")
+
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            inserted = await conn.fetchval("""
+                INSERT INTO telebotly_webhook_events(event_id, event_type, payload)
+                VALUES($1, $2, $3::jsonb)
+                ON CONFLICT(event_id) DO NOTHING RETURNING event_id
+            """, event_id, event_type, json.dumps(event))
+            if not inserted:
+                return web.json_response({"ok": True, "duplicate": True})
+            topup = await conn.fetchrow("""
+                SELECT id, user_id, amount_minor, currency, status,
+                       provider_payment_id, livemode
+                FROM wallet_topups WHERE id=$1 FOR UPDATE
+            """, topup_id)
+            if not topup or topup["provider_payment_id"] != str(payment["id"]):
+                raise web.HTTPBadRequest(text="Top-up reference does not match")
+            if topup["amount_minor"] != payment_minor or topup["currency"] != payment["currency"]:
+                raise web.HTTPBadRequest(text="Payment amount does not match top-up")
+            if bool(event.get("livemode", False)) != bool(topup["livemode"]):
+                raise web.HTTPBadRequest(text="Payment mode does not match top-up")
+            if topup["status"] == "credited":
+                await conn.execute("""
+                    UPDATE telebotly_webhook_events SET processed_at=NOW() WHERE event_id=$1
+                """, event_id)
+                return web.json_response({"ok": True, "already_credited": True})
+            await conn.execute("""
+                INSERT INTO cash_wallet_accounts(user_id) VALUES($1)
+                ON CONFLICT(user_id) DO NOTHING
+            """, topup["user_id"])
+            ledger_id = await conn.fetchval("""
+                INSERT INTO cash_wallet_ledger(user_id, operation_id, amount_minor, currency, reason)
+                VALUES($1, $2, $3, 'RUB', 'telebotly_topup')
+                ON CONFLICT(operation_id) DO NOTHING RETURNING id
+            """, topup["user_id"], "telebotly:" + str(payment["id"]), payment_minor)
+            if ledger_id:
+                await conn.execute("""
+                    UPDATE cash_wallet_accounts SET balance_minor=balance_minor+$2, updated_at=NOW()
+                    WHERE user_id=$1
+                """, topup["user_id"], payment_minor)
+            await conn.execute("""
+                UPDATE wallet_topups SET status='credited', credited_at=NOW(), updated_at=NOW()
+                WHERE id=$1
+            """, topup_id)
+            await conn.execute("""
+                UPDATE telebotly_webhook_events SET processed_at=NOW() WHERE event_id=$1
+            """, event_id)
+    return web.json_response({"ok": True, "credited": True})
+
 
 
 async def sell_inventory_item(request):
@@ -4466,6 +4735,9 @@ def create_app():
     app.router.add_post("/api/cases/{case_id}/open", open_case)
     app.router.add_get("/api/inventory", get_inventory)
     app.router.add_get("/api/wallet", get_wallet)
+    app.router.add_get("/api/wallet/cash", get_cash_wallet)
+    app.router.add_post("/api/wallet/topups", create_telebotly_topup)
+    app.router.add_post("/api/webhooks/telebotly", telebotly_webhook)
     app.router.add_post("/api/inventory/{inventory_id}/sell", sell_inventory_item)
 
     # Demo payment endpoints
