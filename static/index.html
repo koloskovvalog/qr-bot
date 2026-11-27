@@ -394,9 +394,9 @@ main{max-width:1180px;padding:22px 22px 62px}
 #caseStage.rolling .case-caption{animation:caseTitleGlow .9s ease-in-out infinite alternate}
 #upgradeView .upgrade-wheel-box{isolation:isolate;filter:drop-shadow(0 10px 24px #0009)}
 #upgradeView .upgrade-wheel{will-change:transform;transform:rotate(0deg);transition:none!important}
-#upgradeView .upgrade-wheel-pointer{position:absolute;z-index:8;top:-11px;left:50%;right:auto;bottom:auto;inset:auto;width:36px;height:43px;transform:translateX(-50%);transform-origin:50% 50%;filter:drop-shadow(0 3px 4px #000c);pointer-events:none}
-#upgradeView .upgrade-wheel-pointer:before{content:"";position:absolute;top:0;left:50%;width:0;height:0;transform:translateX(-50%);border-left:15px solid transparent;border-right:15px solid transparent;border-top:27px solid #d5a84e;background:none;border-radius:0;box-shadow:0 0 12px #f4d98a88}
-#upgradeView .upgrade-wheel-pointer:after{content:"";position:absolute;top:0;left:50%;width:0;height:0;transform:translateX(-50%);border-left:9px solid transparent;border-right:9px solid transparent;border-top:17px solid #fff0b8;border-bottom:0}
+#upgradeView .upgrade-wheel-pointer{position:absolute;z-index:8;inset:0;width:100%;height:100%;border:0;background:transparent;transform:rotate(0deg);transform-origin:50% 50%;filter:drop-shadow(0 3px 5px #000c);pointer-events:none;will-change:transform}
+#upgradeView .upgrade-wheel-pointer:before{content:"";position:absolute;top:6.5%;left:50%;width:0;height:0;transform:translateX(-50%);border-left:14px solid transparent;border-right:14px solid transparent;border-top:24px solid #d5a84e;background:none;border-radius:0;filter:drop-shadow(0 0 9px #f4d98a88)}
+#upgradeView .upgrade-wheel-pointer:after{content:"";position:absolute;top:6.5%;left:50%;width:0;height:0;transform:translateX(-50%);border-left:8px solid transparent;border-right:8px solid transparent;border-top:15px solid #fff0b8;border-bottom:0}
 #upgradeView .upgrade-wheel-center{z-index:5}
 #upgradeView .upgrade-result.is-success{border-color:#70d59b;box-shadow:0 0 0 1px #70d59b55,0 0 28px #48b87933}
 #upgradeView .upgrade-result.is-fail{border-color:#c87979;box-shadow:0 0 0 1px #c8797944}
@@ -1000,20 +1000,21 @@ async function doUpgrade(){
    await new Promise(resolve=>setTimeout(resolve,2000));
   }
   if(!d||d.pending)throw new Error("Цены ещё обновляются. Предмет не списан — повтори апгрейд чуть позже.");
-  // Server roll is 0..99.99. The wheel rotates beneath a fixed top marker:
-  // the server's roll angle is brought exactly to the marker at the end.
+  // Caser-style: keep the wheel and sectors stationary; rotate the pointer
+  // around the inner rim so its tip lands exactly on the server's roll angle.
+  const pointer=wheel.parentElement.querySelector(".upgrade-wheel-pointer");
   const rollAngle=Number(d.roll_percent||0)*3.6;
-  const finalAngle=2160+360-rollAngle;
-  if(typeof wheel.animate==="function"){
-   const spin=wheel.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:5600,easing:"cubic-bezier(.10,.78,.12,1)",fill:"forwards"});
+  const finalAngle=2160+rollAngle;
+  if(pointer&&typeof pointer.animate==="function"){
+   const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:5600,easing:"cubic-bezier(.10,.78,.12,1)",fill:"forwards"});
    await spin.finished;
-   wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
+   pointer.style.transform="rotate("+rollAngle+"deg)";
    spin.cancel();
-  }else{
-   wheel.style.transition="transform 4.8s cubic-bezier(.12,.78,.12,1)";
-   requestAnimationFrame(()=>wheel.style.transform="rotate("+finalAngle+"deg)");
+  }else if(pointer){
+   pointer.style.transition="transform 4.8s cubic-bezier(.12,.78,.12,1)";
+   requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");
    await new Promise(resolve=>setTimeout(resolve,4900));
-   wheel.style.transition="none";wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
+   pointer.style.transition="none";pointer.style.transform="rotate("+rollAngle+"deg)";
   }
   wheelPanel?.classList.remove("wheel-spinning");
   wheelPanel?.classList.toggle("wheel-success",!!d.success);
@@ -1023,7 +1024,7 @@ async function doUpgrade(){
   await showInventory();
   await loadUpgradeTargets(true);
   renderUpgradeChance();
- }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>';renderUpgradeChance()}
+ }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";const pointer=wheel.parentElement.querySelector(".upgrade-wheel-pointer");if(pointer){pointer.getAnimations().forEach(a=>a.cancel());pointer.style.transition="none";pointer.style.transform="rotate(0deg)"}$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>';renderUpgradeChance()}
 }
 async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
 const drops=d.case_drops||[];
