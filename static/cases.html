@@ -1021,7 +1021,7 @@ function renderCaseCards(){
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
  const demoClaim=$("claimDemoCase");
- if(demoClaim){demoClaim.disabled=demoCaseClaimedToday||!c.items?.length;demoClaim.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":"Получить бесплатный тестовый скин для апгрейда";demoClaim.onclick=claimDemoCase;}
+ if(demoClaim){demoClaim.disabled=demoCaseClaimedToday||!c.demo_claim_available;demoClaim.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":(c.demo_claim_available?"Получить бесплатный тестовый скин для апгрейда":"В этом кейсе нет предмета для демо-апгрейда");demoClaim.onclick=claimDemoCase;}
  $("caseCatalogPanel").hidden=true;$("caseDetailPanel").hidden=false;
  $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
@@ -1070,7 +1070,7 @@ async function claimDemoCase(){
  if(!initData){toast("Открой приложение через Telegram.");return}
  const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
  const button=$("claimDemoCase");
- if(!c||!c.items?.length||demoCaseClaimedToday)return;
+ if(!c||!c.demo_claim_available||demoCaseClaimedToday)return;
  button.disabled=true;
  try{
   const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});
