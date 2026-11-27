@@ -333,6 +333,7 @@ async def init_db():
                 );
 
                 ALTER TABLE cases ADD COLUMN IF NOT EXISTS image_url TEXT;
+                ALTER TABLE cases ADD COLUMN IF NOT EXISTS reference_price_minor BIGINT NOT NULL DEFAULT 0;
 
                 CREATE TABLE IF NOT EXISTS case_items (
                     id BIGSERIAL PRIMARY KEY,
@@ -1149,8 +1150,54 @@ async def build_cases_response(request):
                         WHERE market_hash_name IS NOT NULL DO NOTHING
                     """, records)
 
+        # Public Caser price points are stored separately from the playable price.
+        # The app remains demo-only: no money is charged and no paid opening is enabled.
+        caser_case_prices = {
+            "snakebite case": 18000,
+            "revolution case": 20000,
+            "clutch case": 21000,
+            "recoil case": 21900,
+            "fracture case": 23500,
+            "falchion case": 24000,
+            "danger zone case": 26000,
+            "gallery case": 29500,
+            "prisma case": 32000,
+            "prisma 2 case": 33300,
+            "horizon case": 33500,
+            "dreams nightmares case": 35000,
+            "kilowatt case": 35000,
+            "cs20 case": 38000,
+            "shadow case": 39000,
+            "shattered web case": 45000,
+            "operation phoenix weapon case": 55000,
+            "revolver case": 65000,
+            "spectrum 2 case": 69000,
+            "operation wildfire case": 69000,
+            "spectrum case": 80000,
+            "operation broken fang case": 105000,
+            "operation hydra case": 300000,
+        }
+        for catalog_case in catalog_cases:
+            normalized_title = re.sub(r"[^a-z0-9]+", " ", str(catalog_case.get("name") or "").casefold()).strip()
+            reference_price = caser_case_prices.get(normalized_title)
+            if not reference_price:
+                continue
+            existing_case = await conn.fetchrow("""
+                SELECT c.id, EXISTS(
+                    SELECT 1 FROM case_items ci
+                    WHERE ci.case_id=c.id AND ci.is_active=TRUE
+                ) AS has_items
+                FROM cases c WHERE c.title=$1 ORDER BY c.id LIMIT 1
+            """, catalog_case["name"])
+            if existing_case and existing_case["has_items"]:
+                await conn.execute("""
+                    UPDATE cases
+                    SET active=TRUE, reference_price_minor=$2
+                    WHERE id=$1
+                """, existing_case["id"], reference_price)
+
         cases = await conn.fetch("""
-            SELECT id, title, description, price_minor, currency, image_url
+            SELECT id, title, description, price_minor, reference_price_minor, currency, image_url
             FROM cases
             WHERE active = TRUE
             ORDER BY id
@@ -1210,6 +1257,9 @@ async def build_cases_response(request):
             "id": case["id"], "title": case["title"],
             "description": case["description"],
             "price_minor": case["price_minor"],
+            "reference_price_minor": case["reference_price_minor"],
+            "estimated_return_minor": (sum(int(x["weight"]) * int(x.get("market_price_minor") or x.get("value_minor") or 0) * 90 for x in contents) // (total * 100)) if total else 0,
+            "estimated_rtp_percent": round((sum(int(x["weight"]) * int(x.get("market_price_minor") or x.get("value_minor") or 0) * 90 for x in contents) / (total * 100)) * 100 / case["reference_price_minor"], 2) if total and case["reference_price_minor"] else None,
             "currency": case["currency"],
             "image_url": case["image_url"] or fallback_case_image,
             "demo_only": True,
@@ -2943,7 +2993,7 @@ async def admin_get_cases(request):
     require_admin(request)
     async with db.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT c.id,c.title,c.description,c.price_minor,c.currency,c.active,
+            SELECT c.id,c.title,c.description,c.price_minor,c.reference_price_minor,c.currency,c.active,
                    c.image_url,c.created_at,
                    COUNT(ci.id) FILTER (WHERE ci.is_active)::INTEGER AS active_items,
                    COUNT(ci.id)::INTEGER AS total_items
@@ -2952,7 +3002,7 @@ async def admin_get_cases(request):
         """)
     return web.json_response({"items":[{
         "id":r["id"],"title":r["title"],"description":r["description"],
-        "price_minor":r["price_minor"],"currency":r["currency"],
+        "price_minor":r["price_minor"],"reference_price_minor":r["reference_price_minor"],"currency":r["currency"],
         "active":r["active"],"image_url":r["image_url"],
         "active_items":r["active_items"],"total_items":r["total_items"],
         "created_at":r["created_at"].isoformat()
@@ -2968,11 +3018,13 @@ async def admin_save_case(request):
         currency = str(data.get("currency","RUB")).upper()
         raw_price = Decimal(str(data.get("price","0")).replace(",","."))
         price_minor = int(raw_price * 100)
+        raw_reference_price = Decimal(str(data.get("reference_price","0")).replace(",","."))
+        reference_price_minor = int(raw_reference_price * 100)
         image_url = str(data.get("image_url","")).strip()[:1000] or None
         active = bool(data.get("active", True))
     except (ValueError, TypeError, InvalidOperation, json.JSONDecodeError):
         raise web.HTTPBadRequest(text="Проверьте данные кейса")
-    if not title or currency not in {"RUB","EUR","USD"} or price_minor < 0:
+    if not title or currency not in {"RUB","EUR","USD"} or price_minor < 0 or reference_price_minor < 0:
         raise web.HTTPBadRequest(text="Название обязательно, цена не может быть отрицательной")
     if image_url and not image_url.startswith(("https://","http://")):
         raise web.HTTPBadRequest(text="Ссылка на изображение должна начинаться с http:// или https://")
@@ -2980,15 +3032,15 @@ async def admin_save_case(request):
         if case_id:
             row = await conn.fetchrow("""
                 UPDATE cases SET title=$1,description=$2,price_minor=$3,
-                    currency=$4,image_url=$5,active=$6 WHERE id=$7 RETURNING id
-            """,title,description,price_minor,currency,image_url,active,case_id)
+                    reference_price_minor=$4,currency=$5,image_url=$6,active=$7 WHERE id=$8 RETURNING id
+            """,title,description,price_minor,reference_price_minor,currency,image_url,active,case_id)
             if not row: raise web.HTTPNotFound(text="Кейс не найден")
             saved_id=case_id
         else:
             saved_id = await conn.fetchval("""
-                INSERT INTO cases(title,description,price_minor,currency,image_url,active)
-                VALUES($1,$2,$3,$4,$5,$6) RETURNING id
-            """,title,description,price_minor,currency,image_url,active)
+                INSERT INTO cases(title,description,price_minor,reference_price_minor,currency,image_url,active)
+                VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id
+            """,title,description,price_minor,reference_price_minor,currency,image_url,active)
     await write_audit(user["id"],"case_saved",{"case_id":saved_id})
     return web.json_response({"ok":True,"case_id":saved_id})
 
