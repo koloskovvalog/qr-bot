@@ -2064,6 +2064,43 @@ async def admin_toggle_product(request):
     })
 
 
+async def admin_get_dashboard(request):
+    require_admin(request)
+    async with db.acquire() as conn:
+        totals = await conn.fetchrow("""
+            SELECT COUNT(*)::BIGINT AS total_orders,
+                   COUNT(*) FILTER (WHERE status IN ('new','invoice_sent'))::BIGINT AS pending_orders,
+                   COUNT(*) FILTER (WHERE status IN ('paid','delivered'))::BIGINT AS paid_orders
+            FROM orders
+        """)
+        turnover = await conn.fetch("""
+            SELECT currency, COALESCE(SUM(amount_minor), 0)::BIGINT AS amount_minor
+            FROM orders
+            WHERE status IN ('paid','delivered')
+            GROUP BY currency ORDER BY currency
+        """)
+    return web.json_response({
+        "total_orders": totals["total_orders"],
+        "pending_orders": totals["pending_orders"],
+        "paid_orders": totals["paid_orders"],
+        "turnover": [{"currency": r["currency"], "amount_minor": r["amount_minor"]} for r in turnover],
+    })
+
+
+async def admin_get_products(request):
+    require_admin(request)
+    async with db.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, title, description, price_minor, currency, active, created_at
+            FROM products ORDER BY id DESC LIMIT 200
+        """)
+    return web.json_response({"items": [{
+        "id": r["id"], "title": r["title"], "description": r["description"],
+        "price_minor": r["price_minor"], "currency": r["currency"],
+        "active": r["active"], "created_at": r["created_at"].isoformat(),
+    } for r in rows]})
+
+
 async def admin_get_orders(request):
     require_admin(request)
 
