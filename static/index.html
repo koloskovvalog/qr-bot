@@ -363,6 +363,26 @@ main{max-width:1180px;padding:22px 22px 62px}
 .purchase-row{border-bottom:1px solid #2d323c;min-height:76px}.purchase-row:last-child{border-bottom:0}.purchase-product{display:flex;align-items:center;gap:11px;min-width:0}.purchase-product>div{min-width:0}.purchase-product strong{display:block;overflow-wrap:anywhere}.purchase-product small{display:block;color:#8f97a5;margin-top:4px}.purchase-icon{display:grid;place-items:center;flex:0 0 36px;height:36px;border-radius:10px;background:linear-gradient(145deg,#4a3b20,#242019);color:#e8c77d;border:1px solid #76602e}.purchase-amount{font-variant-numeric:tabular-nums;color:#f0d48d}.purchase-status{width:max-content;padding:5px 8px;border-radius:7px;background:#272b33;color:#d4d8df;font-size:11px}.status-paid,.status-delivered{background:#1b332a;color:#8ed6ad}.status-cancelled,.status-refunded{background:#392326;color:#e6a1a1}.purchase-date{font-size:11px;color:#a4aab5}.purchase-actions .buy{padding:8px 10px;font-size:11px}.purchase-footnote{margin:10px 2px 0}
 #profileView .profile-section-title{margin-top:22px}.case-drop-history{margin-top:10px}.case-drop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.case-drop-card{position:relative;display:flex;align-items:center;gap:11px;min-width:0;padding:12px;background:linear-gradient(145deg,#20242d,#12151a);border:1px solid #373e49;border-radius:14px}.case-drop-card>img,.case-drop-placeholder{width:66px;height:66px;object-fit:contain;flex:0 0 66px;background:#0d1015;border-radius:10px}.case-drop-placeholder{display:grid;place-items:center;color:#bda36d;font-weight:900}.case-drop-info{display:flex;flex-direction:column;gap:4px;min-width:0}.case-drop-info strong{font-size:12px;overflow-wrap:anywhere}.case-drop-info small,.case-drop-info time{font-size:10px;color:#929aa8}.case-drop-info b{font-size:12px;color:#e8c77d}.case-drop-card>.demo-pill{position:absolute;right:8px;top:8px;font-size:8px;padding:3px 5px}
 @media(max-width:640px){.purchase-table-head{display:none}.purchase-row{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:13px}.purchase-amount{justify-self:end}.purchase-status{grid-column:1;grid-row:2}.purchase-date{grid-column:2;grid-row:2;text-align:right}.purchase-actions{grid-column:1/-1}.purchase-actions .buy{width:100%}.case-drop-grid{grid-template-columns:1fr}.case-drop-card{padding:10px}.case-drop-card>img,.case-drop-placeholder{width:60px;height:60px;flex-basis:60px}}
+/* QR BOT PRO · Cases & Upgrader motion/performance pass */
+.case-reel{min-height:166px;contain:layout paint;border-radius:16px}
+#caseStage .case-reel{min-height:184px;padding:12px}
+#caseStage .reel-card{width:148px;height:148px;flex-basis:148px;gap:7px;border-radius:13px;box-shadow:0 6px 18px #0005}
+#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:78px}
+#caseStage.rolling .case-caption{animation:caseTitleGlow 1s ease-in-out infinite alternate}
+#caseStage.rolling .case-reel{animation:caseReelGlow 1.15s ease-in-out infinite alternate}
+#caseStage.rolling .case-reel:after{box-shadow:0 0 18px #fff0b8,0 0 32px #e4bd64}
+#upgradeView .upgrade-wheel-box{transition:filter .25s,transform .25s}
+#upgradeView .upgrade-wheel-box:has(.upgrade-wheel-pointer[style*="rotate("]){filter:drop-shadow(0 0 22px #e7c56e66)}
+#upgradeView .upgrade-wheel-pointer:before{box-shadow:0 0 12px #fff0b8,0 0 24px #e4bd6488}
+#upgradeView .upgrade-wheel-center strong{transition:transform .2s,text-shadow .2s}
+#upgradeView .upgrade-wheel-box:has(.upgrade-wheel-pointer[style*="rotate("]) .upgrade-wheel-center strong{transform:scale(1.06);text-shadow:0 0 22px #ffe5a0aa}
+#upgradeView .upgrade-result{animation:caseWinReveal .55s cubic-bezier(.16,1,.3,1) both}
+@keyframes caseTitleGlow{from{text-shadow:0 0 4px #e4bd6422}to{text-shadow:0 0 24px #e4bd64aa}}
+@keyframes caseReelGlow{from{box-shadow:inset 0 0 18px #0008,0 0 8px #e3b95a10}to{box-shadow:inset 0 0 28px #0008,0 0 28px #e3b95a40}}
+@keyframes caseWinReveal{0%{opacity:0;transform:translateY(18px) scale(.92);filter:brightness(1.7)}70%{transform:translateY(-3px) scale(1.015)}100%{opacity:1;transform:none;filter:none}}
+@media(max-width:600px){#caseStage .case-reel{min-height:158px;padding:8px}#caseStage .reel-card{width:120px;height:132px;flex-basis:120px}#caseStage .reel-card img,#caseStage .reel-image-placeholder{height:66px}}
+@media(prefers-reduced-motion:reduce){#caseStage.rolling .case-caption,#caseStage.rolling .case-reel{animation:none}#upgradeView .upgrade-result{animation:none}}
+
 </style>
 </head>
 <body><main>
@@ -561,7 +581,7 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Покупок пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<article class="purchase-row"><div class="purchase-product"><span class="purchase-icon">✦</span><div><strong>'+esc(o.product_title)+'</strong><small>Заказ #'+o.id+'</small></div></div><strong class="purchase-amount">'+money(o.amount_minor,o.currency)+'</strong><span class="purchase-status status-'+esc(o.status)+'">'+esc(orderStatusLabel(o.status))+'</span><div class="purchase-date">'+new Date(o.created_at).toLocaleDateString("ru-RU")+'</div><div class="purchase-actions">'+((["paid","delivered","cancelled","refunded"].includes(o.status))?"":'<button class="buy" data-demo-pay="'+o.id+'">Демо-оплата</button>')+'</div></article>').join("");document.querySelectorAll("[data-demo-pay]").forEach(b=>b.onclick=()=>createDemoPayment(Number(b.dataset.demoPay)))}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить покупки. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
-let homeCasePendingId=null;
+let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
  try{
@@ -604,16 +624,19 @@ function selectCase(caseId){
  renderCaseItems(c.items);
  if(c.items_total>c.items.length){$("caseItems").insertAdjacentHTML("beforeend",'<div class="empty">Показаны '+c.items.length+' из '+c.items_total+' предметов. Шансы открытия рассчитываются по полному составу кейса.</div>')}
 }
-async function loadCases(){
- try{
-  const d=await api("/api/cases");casesData=d.items||[];
+async function loadCases(force=false){
+ if(!force&&casesData.length&&Date.now()-casesLoadedAt<60000){renderCaseCards();if(!$("caseStage").dataset.caseId)selectCase((casesData.find(c=>c.id===Number(homeCasePendingId))||casesData[0]).id);return}
+ if(casesLoadPromise)return casesLoadPromise;
+ casesLoadPromise=(async()=>{try{
+  const d=await api("/api/cases");casesData=d.items||[];casesLoadedAt=Date.now();
   $("caseSearch").oninput=()=>{clearTimeout(caseSearchTimer);caseSearchTimer=setTimeout(renderCaseCards,120)};
   $("caseSort").onchange=renderCaseCards;
   if(!casesData.length){$("caseCatalogCount").textContent="0 кейсов";$("caseCards").innerHTML='<div class="empty">Пока нет доступных кейсов.</div>';$("caseStage").innerHTML='<div class="empty">Кейсы скоро появятся.</div>';return}
   renderCaseCards();
   const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));
   selectCase((preferred||casesData[0]).id);homeCasePendingId=null;
- }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}
+ }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}finally{casesLoadPromise=null}})();
+ return casesLoadPromise;
 }
 
 function skinMetaTags(x){
@@ -634,9 +657,9 @@ async function openCase(){
  const selectedCase=casesData.find(c=>c.id===Number(id)),pool=selectedCase?.items||[];
  if(!pool.length){toast("В этом кейсе пока нет предметов.");button.disabled=false;stage.classList.remove("rolling");return}
  const spinStartedAt=performance.now();
- const cardHtml=item=>'<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
+ const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" fetchpriority="low" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
  reel.classList.remove("stopping");
- reel.innerHTML='<div class="reel-track">'+Array.from({length:24},(_,n)=>cardHtml(pool[n%pool.length])).join("")+'</div>';
+ reel.innerHTML='<div class="reel-track">'+Array.from({length:24},(_,n)=>cardHtml(pool[n%pool.length],n%6===0)).join("")+'</div>';
  reel.classList.add("spinning");
  $("caseResult").innerHTML='<div class="case-result">Открываем кейс…</div>';
  try{
@@ -650,7 +673,7 @@ async function openCase(){
   const winnerIndex=60;
   const reelItems=Array.from({length:69},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
   reelItems[winnerIndex]=x;
-  reel.innerHTML='<div class="reel-track">'+reelItems.map(cardHtml).join("")+'</div>';
+  reel.innerHTML='<div class="reel-track">'+reelItems.map((item,index)=>cardHtml(item,Math.abs(index-winnerIndex)<=5)).join("")+'</div>';
   reel.classList.remove("spinning");
   reel.classList.add("stopping");
   const track=reel.querySelector(".reel-track");
@@ -741,10 +764,10 @@ async function loadUpgradeView(){
  $("applyCustomMultiplier").onclick=()=>applyUpgradePreset("multiplier",Number($("upgradeCustomMultiplier").value));
  $("applyCustomChance").onclick=()=>applyUpgradePreset("chance",Number($("upgradeCustomChance").value));
  try{
-  const [inv,hist]=await Promise.all([api("/api/inventory"),api("/api/upgrades/history")]);
+  const inv=await api("/api/inventory");
   upgradeInventory=inv.items||[];renderUpgradeSources();
   if(pendingUpgradeSourceId!==null){$("upgradeSource").value=String(pendingUpgradeSourceId);pendingUpgradeSourceId=null;}
-  $("upgradeHistory").innerHTML=(hist.items||[]).map(x=>'<div class="order"><strong>'+(x.success?'✓ Успех':'✕ Неудача')+' · '+esc(x.source_name)+' → '+esc(x.target_name)+'</strong><div>'+Number(x.chance_percent).toFixed(2)+'% · '+new Date(x.created_at).toLocaleString("ru-RU")+'</div></div>').join("")||'<div class="empty">Попыток пока нет.</div>';
+  // Upgrade history is not shown on this page; skip the extra API request.
   await loadUpgradeTargets(true);
   renderUpgradeChance();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
@@ -866,8 +889,8 @@ async function doUpgrade(){
   }
   if(!d||d.pending)throw new Error("Цены ещё обновляются. Предмет не списан — повтори апгрейд чуть позже.");
   const stopAngle=Number(d.roll_percent||0)*3.6;const finalAngle=2160+stopAngle;
-  if(typeof pointer.animate==="function"){const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:4200,easing:"cubic-bezier(.10,.72,.12,1)",fill:"forwards"});await spin.finished;pointer.style.transform="rotate("+stopAngle+"deg)";spin.cancel();}
-  else{pointer.style.transition="transform 4.2s cubic-bezier(.10,.72,.12,1)";requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");await new Promise(r=>setTimeout(r,4300));pointer.style.transition="none";pointer.style.transform="rotate("+stopAngle+"deg)";}
+  if(typeof pointer.animate==="function"){const spin=pointer.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:5200,easing:"cubic-bezier(.08,.76,.12,1)",fill:"forwards"});await spin.finished;pointer.style.transform="rotate("+stopAngle+"deg)";spin.cancel();}
+  else{pointer.style.transition="transform 5.2s cubic-bezier(.08,.76,.12,1)";requestAnimationFrame(()=>pointer.style.transform="rotate("+finalAngle+"deg)");await new Promise(r=>setTimeout(r,5300));pointer.style.transition="none";pointer.style.transform="rotate("+stopAngle+"deg)";}
   $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — стрелка остановилась в секторе":"✕ НЕУДАЧА — стрелка остановилась вне сектора";
   $("upgradeResult").innerHTML='<div class="upgrade-result"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'%</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
