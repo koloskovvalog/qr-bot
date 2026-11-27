@@ -4201,58 +4201,6 @@ async def admin_get_payment_transactions(request):
 # TELEGRAM COMMANDS
 # ============================================================
 
-@dp.message(Command("steam"))
-async def cmd_steam(message: types.Message):
-    if not PUBLIC_BASE_URL:
-        await message.answer("Авторизация Steam временно недоступна: адрес сайта не настроен.")
-        return
-    try:
-        async with db.acquire() as conn:
-            linked = await conn.fetchrow(
-                "SELECT steam_id64 FROM steam_identities WHERE user_id=$1",
-                message.from_user.id,
-            )
-        auth_url = await create_steam_auth_url(message.from_user.id)
-        status = (
-            f"Сейчас привязан SteamID64: <code>{linked['steam_id64']}</code>. Можно перепривязать аккаунт."
-            if linked else "Steam ещё не привязан к вашему профилю."
-        )
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🔐 Войти через Steam", url=auth_url)
-        ]])
-        await message.answer(
-            "🎮 <b>Привязка Steam</b>\\n\\n"
-            f"{status}\\n\\n"
-            "Нажмите кнопку ниже и авторизуйтесь на официальном сайте Steam. "
-            "Пароль и Steam Guard бот не запрашивает.",
-            reply_markup=keyboard,
-            parse_mode="HTML",
-        )
-    except Exception:
-        logger.exception("Could not start Steam auth from Telegram bot")
-        await message.answer("Не удалось создать ссылку Steam. Попробуйте ещё раз позже.")
-
-
-@dp.callback_query(lambda query: query.data == "steam_connect")
-async def callback_steam_connect(query: types.CallbackQuery):
-    try:
-        auth_url = await create_steam_auth_url(query.from_user.id)
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🔐 Войти через Steam", url=auth_url)
-        ]])
-        await query.message.answer(
-            "🎮 <b>Привязка Steam</b>\\n\\n"
-            "Нажмите кнопку и войдите на официальном сайте Steam. "
-            "Пароль и Steam Guard бот не запрашивает.",
-            reply_markup=keyboard,
-            parse_mode="HTML",
-        )
-        await query.answer()
-    except Exception:
-        logger.exception("Could not create Steam auth link from callback")
-        await query.answer("Не удалось создать ссылку. Попробуйте позже.", show_alert=True)
-
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     if not PUBLIC_BASE_URL:
@@ -4276,11 +4224,6 @@ async def cmd_start(message: types.Message):
         InlineKeyboardButton(
             text="🛍 Открыть магазин",
             web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
-        )
-    ], [
-        InlineKeyboardButton(
-            text="🎮 Подключить Steam",
-            callback_data="steam_connect",
         )
     ], [
         InlineKeyboardButton(
