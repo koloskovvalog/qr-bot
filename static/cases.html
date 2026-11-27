@@ -842,8 +842,9 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div class="notice">Бонусные баллы пока служат внутренней системой активности QR BOT PRO. Реальные платежи и денежные вознаграждения отключены.</div>
 </section>
 <section id="upgradeView" hidden>
-<div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
-<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE · LIVE</div><div class="upgrade-duel-cards"><div class="upgrade-duel-card" id="upgradeSourceCard"><small>ВАША СТАВКА</small><div class="upgrade-duel-placeholder">Выберите предмет</div><strong>Исходный предмет</strong><b>— ₽</b></div><div class="upgrade-duel-vs">VS</div><div class="upgrade-duel-card" id="upgradeTargetCard"><small>ЖЕЛАЕМАЯ ЦЕЛЬ</small><div class="upgrade-duel-placeholder">Выберите цель</div><strong>Целевой предмет</strong><b>— ₽</b></div></div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>SHIRPDROP</small><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-wheel-chance"><strong id="upgradeWheelPercent">—%</strong><span>ШАНС ВЫПАДЕНИЯ</span></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
+<div class="section"><h2>CS2 Upgrade</h2><span class="count">ПОДБОР ЦЕЛИ</span></div>
+<div class="notice">Выбери предмет из инвентаря, найди желаемый скин и посмотри предварительный шанс. Сейчас это только калькулятор: предметы не списываются, реальные апгрейды не запускаются.</div>
+<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE · PREVIEW</div><div class="upgrade-duel-cards"><div class="upgrade-duel-card" id="upgradeSourceCard"><small>ВАША СТАВКА</small><div class="upgrade-duel-placeholder">Выберите предмет</div><strong>Исходный предмет</strong><b>— ₽</b></div><div class="upgrade-duel-vs">VS</div><div class="upgrade-duel-card" id="upgradeTargetCard"><small>ЖЕЛАЕМАЯ ЦЕЛЬ</small><div class="upgrade-duel-placeholder">Выберите цель</div><strong>Целевой предмет</strong><b>— ₽</b></div></div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>SHIRPDROP</small><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-wheel-chance"><strong id="upgradeWheelPercent">—%</strong><span>РАСЧЁТНЫЙ ШАНС</span></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
 <select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
@@ -865,7 +866,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
   <div class="custom-upgrade-grid"><label>Свой множитель (X)<input id="upgradeCustomMultiplier" type="number" min="1.01" max="500" step="0.01" value="2"></label><button type="button" id="applyCustomMultiplier">Подобрать по X</button>
   <label>Свой шанс (%)<input id="upgradeCustomChance" type="number" min="0.1" max="74.99" step="0.1" value="35"></label><button type="button" id="applyCustomChance">Подобрать по %</button></div>
  </details>
- <div class="muted" id="upgradePresetStatus">Формула апгрейда фиксированная: шанс = стоимость исходного скина / стоимость цели × 75%. Теоретическая отдача — 75%, преимущество площадки — 25%. Все цены виртуальные, демо-режим.</div>
+ <div class="muted" id="upgradePresetStatus">Предварительный расчёт по рыночным котировкам: стоимость исходного предмета / стоимость цели × 75%. Это не запуск апгрейда и не обещание результата.</div>
 </div>
 <div class="upgrade-chance" id="upgradeChance">—%</div>
 <div class="muted" id="upgradeTargetInfo" style="text-align:center">Выбери цель улучшения</div>
@@ -1011,7 +1012,7 @@ function renderCaseCards(){
   return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
    '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
    '<div class="case-card-info"><div class="case-card-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+('КАТАЛОГ')+'</span></div><strong>'+esc(c.title)+'</strong>'+
-   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.reference_price_minor||0)>0?'CASER '+money(c.reference_price_minor,"RUB"):(Number(c.price_minor||0)===0?'0 ₽':'СКОРО'))+'</b></div></div></button>';
+   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.reference_price_minor||0)>0?'ориентир '+money(c.reference_price_minor,"RUB"):(Number(c.price_minor||0)===0?'0 ₽':'СКОРО'))+'</b></div></div></button>';
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
 }
@@ -1022,9 +1023,9 @@ function selectCase(caseId){
  $("caseStage").innerHTML=
   '<div class="case-detail-heading"><div class="case-detail-cover">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
   '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+('КАТАЛОГ')+'</span></div>'+
-  '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</p>'+
+  '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Состав и предметы этого кейса")+'</p>'+
   '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>'+(Number(c.reference_price_minor||0)>0?'Ориентир цены: '+money(c.reference_price_minor,"RUB"):'Цена уточняется')+'</span>'+('')+'</div></div></div>'+
-   '<div class="case-preview"><div class="case-preview-head"><strong>Что может выпасть</strong><span>'+Number(c.items_total||c.items.length)+' предметов в кейсе</span></div><div class="case-preview-grid" id="casePreviewItems"></div><button type="button" class="case-preview-more" id="casePreviewMore">Посмотреть все скины и шансы ↓</button></div>'+
+   '<div class="case-preview"><div class="case-preview-head"><strong>Что может выпасть</strong><span>'+Number(c.items_total||c.items.length)+' предметов в кейсе</span></div><div class="case-preview-grid" id="casePreviewItems"></div><button type="button" class="case-preview-more" id="casePreviewMore">Посмотреть весь состав ↓</button></div>'+
   '<div class="case-open-controls"><div class="notice"><strong>Открытие кейсов временно недоступно.</strong><br>Каталог и состав кейсов уже доступны для просмотра. Открытие включим после подключения поставщика реальных CS2-предметов и проверки платёжной модели.</div></div>'+
   '<div id="caseReel" class="case-reel" hidden></div>';
  $("backToCases").onclick=()=>{$("caseDetailPanel").hidden=true;$("caseCatalogPanel").hidden=false;$("caseResult").innerHTML="";};
@@ -1057,10 +1058,10 @@ function skinMetaTags(x){
 }
 function renderCasePreview(items){
  const host=$("casePreviewItems");if(!host)return;
- host.innerHTML=items.slice(0,6).map(i=>'<div class="case-preview-item">'+(i.image_url?'<img src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" loading="lazy" onerror="this.hidden=true">':'<div class="case-preview-fallback">CS2</div>')+'<strong>'+esc(i.name)+'</strong><span>'+esc(i.rarity)+'</span><b>'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</b><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("");
+ host.innerHTML=items.slice(0,6).map(i=>'<div class="case-preview-item">'+(i.image_url?'<img src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" loading="lazy" onerror="this.hidden=true">':'<div class="case-preview-fallback">CS2</div>')+'<strong>'+esc(i.name)+'</strong><span>'+esc(i.rarity)+'</span><b>'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</b><small>Вес в составе '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("");
  const more=$("casePreviewMore");if(more)more.onclick=()=> $("caseItems").scrollIntoView({behavior:"smooth",block:"start"});
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Рыночная цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Рыночная цена уточняется")+'</div><small>Вес в составе '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
 async function openCase(mode="spin"){
  if(!initData){toast("Откройте приложение через Telegram.");return}
@@ -1186,11 +1187,10 @@ function renderUpgradeSources(){
   renderUpgradeSources();renderUpgradeTargets();renderUpgradeChance();
  });
  $("upgradeSource").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;renderUpgradeSources();renderUpgradeTargets();renderUpgradeChance()};
- $("upgradeSourceInfo").textContent=selected?'Выбрано: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена уточняется"):(type==="case"?'Получите бесплатный тестовый кейс во вкладке «CS2 Кейсы».':'Выбери предмет из своего инвентаря.');
+ $("upgradeSourceInfo").textContent=selected?'Выбрано: '+selected.item_name+' · '+(selected.market_price_minor?money(selected.market_price_minor,"₽"):"цена уточняется"):(type==="case"?'Предметы-кейсы появятся после подключения реальной выдачи.':'Выбери предмет из своего инвентаря.');
 }
 async function applyUpgradePreset(mode,value){
  if($("upgradeMode").value!=="skin"){toast("Пресеты X и % доступны в режиме скинов");return}
- toast("Реальные апгрейды пока отключены. Сейчас доступны каталог, выбор цели и расчёт шанса.");return;
  const source=currentUpgradeSource();if(!source){toast("Сначала выбери скин из инвентаря");return}
  if(!Number.isFinite(value)||value<=0){toast("Укажи корректное значение");return}
  upgradePresetMode=mode;upgradePresetValue=value;
@@ -1312,6 +1312,7 @@ function renderUpgradeDuelCards(){
  renderCard($("upgradeTargetCard"),target,"ЖЕЛАЕМАЯ ЦЕЛЬ");
 }
 function renderUpgradeChance(){
+ $("doUpgrade").disabled=true;$("doUpgrade").textContent="Реальный апгрейд скоро";
  const source=currentUpgradeSource(),wheel=$("upgradeWheel");
  renderUpgradeDuelCards();
  const setEmpty=(message)=>{
@@ -1349,9 +1350,10 @@ function renderUpgradeChance(){
  wheel.style.setProperty("--chance",chance+"%");
  $("upgradeWheelStatus").textContent="Золотой сектор — успех · тёмный сектор — неудача";
  $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name+" · X"+multiplier.toFixed(2);
- $("doUpgrade").disabled=false;
+ $("doUpgrade").disabled=true;
 }
 async function doUpgrade(){
+ toast("Реальные апгрейды пока отключены. Сейчас доступны каталог, выбор цели и предварительный расчёт шанса.");return;
  const source=currentUpgradeSource(),target=selectedUpgradeTarget,type=$("upgradeMode").value;
  if(!source||!target)return;
  if(!confirm("Подтвердить демо-апгрейд? При неудаче предмет «"+source.item_name+"» будет списан из виртуального инвентаря. Это действие нельзя отменить."))return;
