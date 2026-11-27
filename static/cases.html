@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#090909">
-<title>ShirpDrop — CS2 Cases</title>
+<title>ShirpDrop — кейсы и скины CS2</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{color-scheme:dark;--bg:#090909;--panel:#151411;--panel2:#1d1b16;--line:#393326;--gold:#d8b45a;--gold2:#f2d98c;--muted:#a9a397;--white:#f7f3e9;--green:#80c69b;--red:#e58d80}
@@ -105,7 +105,7 @@ main{padding-bottom:28px}
 .ux-shortcuts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .ux-shortcut{border:1px solid #554629;background:#17140e;color:var(--gold2);border-radius:11px;padding:10px 7px;font-size:11px;font-weight:850}
 .ux-shortcut span{display:block;font-size:18px;margin-bottom:4px}
-.bottom-nav{position:fixed;z-index:8;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(6,1fr);gap:4px;background:#0d0c0bf2;border-top:1px solid #4b3c20;backdrop-filter:blur(16px)}
+.bottom-nav{position:fixed;z-index:8;left:0;right:0;bottom:0;padding:8px 8px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;background:#0d0c0bf2;border-top:1px solid #4b3c20;backdrop-filter:blur(16px)}
 .bottom-nav button{min-width:0;border:0;border-radius:11px;background:transparent;color:#aaa392;padding:7px 2px 6px;font-size:9px;font-weight:750;display:flex;flex-direction:column;align-items:center;gap:3px}
 .bottom-nav button span{font-size:18px;line-height:1.1}
 .bottom-nav button.active{background:#302515;color:var(--gold2)}
@@ -700,6 +700,9 @@ main{max-width:980px;padding:22px 18px calc(var(--nav-h) + 32px)}
 .inventory-actions .sell-item{display:none!important}
 .demo-pill{display:none!important}
 body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+.profile-order-link{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+.profile-order-link .muted{font-size:11px;line-height:1.45;margin-top:4px}
+.profile-order-link .buy{white-space:nowrap;min-height:40px}
 .case-open-controls{border:1px solid #373c47;border-radius:14px;padding:14px;background:#15191f}
 .case-demo-claim-panel{margin-top:14px;padding:12px 14px;border:1px solid #554629;border-radius:14px;background:linear-gradient(145deg,#19170f,#101114)}
 .case-demo-claim-panel .muted{font-size:11px;line-height:1.45}
@@ -719,6 +722,8 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
   <button class="ux-shortcut" data-go="upgrade"><span>✦</span>Апгрейд</button>
   <button class="ux-shortcut" data-go="inventory"><span>◇</span>Инвентарь</button>
   <button class="ux-shortcut" data-go="orders"><span>▤</span>Заказы</button>
+  <button class="ux-shortcut" data-go="skins"><span>◈</span>CS2 Скины</button>
+  <button class="ux-shortcut" data-go="profile"><span>♙</span>Профиль</button>
  </div>
 </div>
 <section class="home-cases-section">
@@ -758,7 +763,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div class="purchase-table"><div class="purchase-table-head"><span>ТОВАР</span><span>СУММА</span><span>СТАТУС</span><span>ДАТА</span></div><div class="orders" id="orders"><div class="empty">Загрузка…</div></div></div>
  <div class="muted purchase-footnote">Статус заказа обновляется после его обработки. Пополнение денежного баланса доступно в профиле.</div>
 </section>
-<section id="casesView" hidden><div class="section"><h2>CS2 Case Opening</h2><span class="count">DEMO MODE</span></div>
+<section id="casesView" hidden><div class="section"><h2>Кейсы CS2</h2><span class="count">КАТАЛОГ · ДЕМО</span></div>
 <div id="caseCatalogPanel">
 <div class="case-catalog-toolbar">
  <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
@@ -782,7 +787,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
 </div>
 </section>
 <section id="profileView" hidden>
- <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
+ <div class="section"><h2>Личный кабинет</h2><span class="count">АККАУНТ SHIRPDROP</span></div>
  <div class="wallet-card"><div><small>Денежный баланс</small><strong id="walletBalance">0,00 ₽</strong></div><span>₽ RUB</span></div>
  <div class="wallet-topup-panel">
   <button type="button" class="goldbtn wallet-topup-button" id="walletTopupBtn">＋ Пополнить баланс</button>
@@ -809,6 +814,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
   </div>
  </div>
  <div id="profileStats" class="profile-grid"><div class="empty">Загрузка профиля…</div></div>
+ <div class="order profile-order-link"><div><strong>История заказов</strong><div class="muted">Проверяй оплату, обработку и статус покупок</div></div><button type="button" class="buy" data-go="orders">Мои заказы →</button></div>
  <div class="order"><strong>Ваш реферальный код</strong><div id="myReferralCode" class="profile-code">—</div><button class="buy" id="copyReferralCode">Скопировать код</button><div class="muted">Поделитесь кодом с друзьями. Бонусы начисляются только после ручного подтверждения оплаты их первого заказа.</div></div>
  <div class="order"><strong>Применить код друга</strong><div class="profile-form"><input id="referralInput" maxlength="32" placeholder="Реферальный код"><button class="buy" id="applyReferralCode">Применить</button></div><div class="muted">Доступно до первого заказа, один раз.</div></div>
  <div class="section profile-section-title"><h2>Выпало из кейсов</h2><span class="count">CASE HISTORY</span></div>
@@ -897,15 +903,11 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
 <div class="cartbar" id="cartbar" hidden><div><div class="cartmeta" id="cartCount">Корзина · 0</div><div class="muted" id="cartTotal"></div></div><div class="cart-actions"><button class="cart-clear" id="clearCart" type="button">Очистить</button><button class="goldbtn" id="checkout">Оформить заказ</button></div></div>
 <div class="notice">Важно: оформление заказа не означает оплату. Оплата считается подтверждённой только после фактической проверки поступления средств. Перед запуском продаж укажите достоверные сведения о продавце, товарах, условиях оплаты, сроках исполнения, контактах и возвратах.</div>
 <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация">
- <button data-nav="catalog" class="active"><span>⌂</span>Магазин</button>
- <button data-nav="cases"><span>▣</span>Кейсы</button>
- <button data-nav="drops"><span>◉</span>Лента</button>
- <button data-nav="upgrade"><span>✦</span>Апгрейд</button>
- <button data-nav="inventory"><span>◇</span>Инвентарь</button>
- <button data-nav="orders"><span>▤</span>Заказы</button>
- <button data-nav="profile"><span>♙</span>Профиль</button>
- <button data-nav="creator"><span>✚</span>Авторские</button>
- <button data-nav="rewards"><span>★</span>Награды</button>
+ <button type="button" data-nav="catalog" class="active" aria-label="Главная"><span>⌂</span>Главная</button>
+ <button type="button" data-nav="cases"><span>▣</span>Кейсы</button>
+ <button type="button" data-nav="upgrade"><span>✦</span>Апгрейд</button>
+ <button type="button" data-nav="inventory"><span>◇</span>Инвентарь</button>
+ <button type="button" data-nav="profile"><span>♙</span>Профиль</button>
 </nav>
 </main><div class="toast" id="toast"></div>
 <script>
