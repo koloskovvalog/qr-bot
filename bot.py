@@ -1937,6 +1937,23 @@ async def get_live_drops(request):
                     ua.success,
                     ua.created_at
                 FROM upgrade_attempts ua
+
+                UNION ALL
+
+                SELECT
+                    'creator_case:' || co.id::text AS event_id,
+                    co.user_id,
+                    'case'::text AS event_type,
+                    co.item_name AS title,
+                    co.rarity,
+                    ci.image_url,
+                    COALESCE(ci.value_minor, 0)::BIGINT AS value_minor,
+                    c.title AS context,
+                    NULL::BOOLEAN AS success,
+                    co.created_at
+                FROM creator_case_openings co
+                JOIN creator_cases c ON c.id=co.creator_case_id
+                LEFT JOIN creator_case_items ci ON ci.id=co.item_id
             ) events
             ORDER BY created_at DESC
             LIMIT 40
