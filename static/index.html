@@ -623,8 +623,8 @@ body.cases-store #cartbar{display:none!important}
   <div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
  </div>
 </div>
-<button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
-<div class="muted" style="margin-top:7px">Один виртуальный тестовый кейс в день для режима «Апгрейд кейсов».</div>
+<button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px" disabled>Получить бесплатный тестовый скин для апгрейда</button>
+<div class="muted" style="margin-top:7px">Один виртуальный скин в день для тренировки подбора цели. Это не предмет Steam и его нельзя вывести.</div>
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
@@ -826,6 +826,7 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<article class="purchase-row"><div class="purchase-product"><span class="purchase-icon">✦</span><div><strong>'+esc(o.product_title)+'</strong><small>Заказ #'+o.id+'</small></div></div><strong class="purchase-amount">'+money(o.amount_minor,o.currency)+'</strong><span class="purchase-status status-'+esc(o.status)+'">'+esc(orderStatusLabel(o.status))+'</span><div class="purchase-date">'+new Date(o.created_at).toLocaleDateString("ru-RU")+'</div></article>').join("")}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
+let demoCaseClaimedToday=false;
 let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
@@ -867,10 +868,12 @@ function selectCase(caseId){
   '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>Серверный случайный результат</span></div></div></div>'+
   '<div class="case-open-controls"><label for="caseOpenCount">Количество открытий</label><select id="caseOpenCount" class="search"><option value="1">1 кейс</option><option value="2">2 кейса</option><option value="3">3 кейса</option><option value="4">4 кейса</option><option value="5">5 кейсов</option></select>'+
   '<div class="case-open-actions"><button id="quickOpenCase" class="case-quick-btn" type="button">⚡ Быстро открыть</button><button id="openCase" class="goldbtn" type="button">✦ Открыть с прокруткой</button></div>'+
-  '<small class="case-demo-note">'+(Number(c.price_minor||0)===0?'Демо-открытие · виртуальные предметы':'Этот кейс пока недоступен для открытия')+'</small></div>'+
+  '<small class="case-demo-note">'+(c.opening_enabled?'Демо-открытие · виртуальные предметы':(Number(c.price_minor||0)===0?'Каталог для просмотра · открытия временно отключены':'Этот кейс скоро появится'))+'</small></div>'+
   '<div id="caseReel" class="case-reel" hidden></div>';
- const disabled=!c.items?.length||Number(c.price_minor||0)!==0;
+ const disabled=!c.opening_enabled||!c.items?.length||Number(c.price_minor||0)!==0;
  $("openCase").disabled=disabled;$("quickOpenCase").disabled=disabled;
+ const demoClaim=$("claimDemoCase");
+ if(demoClaim){demoClaim.disabled=demoCaseClaimedToday||!c.items?.length;demoClaim.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":"Получить бесплатный тестовый скин для апгрейда";}
  $("openCase").onclick=()=>openCase("spin");$("quickOpenCase").onclick=()=>openCase("quick");
  $("backToCases").onclick=()=>{$("caseDetailPanel").hidden=true;$("caseCatalogPanel").hidden=false;$("caseResult").innerHTML="";};
  $("claimDemoCase").onclick=claimDemoCase;
@@ -902,7 +905,28 @@ function skinMetaTags(x){
  return tags.length?'<div class="skin-meta">'+tags.join("")+'</div>':'';
 }
 function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
-async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
+async function claimDemoCase(){
+ if(!initData){toast("Открой приложение через Telegram.");return}
+ const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
+ const button=$("claimDemoCase");
+ if(!c||!c.items?.length||demoCaseClaimedToday)return;
+ button.disabled=true;
+ try{
+  const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});
+  demoCaseClaimedToday=true;
+  button.textContent="Тестовый скин получен сегодня";
+  toast(d.message);
+  await showInventory();
+ }catch(e){
+  if(String(e.message||"").includes("уже получен сегодня")){
+   demoCaseClaimedToday=true;
+   button.textContent="Тестовый скин получен сегодня";
+  }else{
+   button.disabled=false;
+  }
+  toast(e.message);
+ }
+}
 async function openCase(mode="spin"){
  if(!initData){toast("Откройте приложение через Telegram.");return}
  const stage=$("caseStage"),id=stage.dataset.caseId,reel=$("caseReel");
