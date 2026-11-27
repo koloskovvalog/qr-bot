@@ -3126,16 +3126,16 @@ async def ensure_customer_profile(conn, user_id: int):
     raise web.HTTPConflict(text="Не удалось создать профиль. Повторите попытку.")
 
 
-async def start_steam_auth(request):
-    user = verify_telegram_user(request)
+async def create_steam_auth_url(user_id: int) -> str:
+    if not PUBLIC_BASE_URL:
+        raise RuntimeError("PUBLIC_BASE_URL не настроен")
     state = secrets.token_urlsafe(32)
     callback_url = f"{PUBLIC_BASE_URL}/api/steam/callback?state={state}"
-    realm = f"{PUBLIC_BASE_URL}/"
     params = {
         "openid.ns": "http://specs.openid.net/auth/2.0",
         "openid.mode": "checkid_setup",
         "openid.return_to": callback_url,
-        "openid.realm": realm,
+        "openid.realm": f"{PUBLIC_BASE_URL}/",
         "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
     }
@@ -3148,11 +3148,14 @@ async def start_steam_auth(request):
         await conn.execute("""
             INSERT INTO steam_auth_states(state,user_id)
             VALUES($1,$2)
-        """, state, user["id"])
-    return web.json_response({
-        "ok": True,
-        "auth_url": "https://steamcommunity.com/openid/login?" + urlencode(params)
-    })
+        """, state, user_id)
+    return "https://steamcommunity.com/openid/login?" + urlencode(params)
+
+
+async def start_steam_auth(request):
+    user = verify_telegram_user(request)
+    auth_url = await create_steam_auth_url(user["id"])
+    return web.json_response({"ok": True, "auth_url": auth_url})
 
 
 async def steam_auth_callback(request):
@@ -3222,8 +3225,16 @@ async def steam_auth_callback(request):
                 INSERT INTO audit_log(actor_id,action,details)
                 VALUES($1,'steam_account_linked',$2::jsonb)
             """, auth["user_id"], json.dumps({"steam_id64": steam_id64}))
+    try:
+        await bot.send_message(
+            auth["user_id"],
+            f"✅ <b>Steam успешно привязан!</b>\\n\\nSteamID64: <code>{steam_id64}</code>\\nТеперь аккаунт связан с вашим профилем ShirpDrop.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Could not notify Telegram user about Steam link")
     return web.Response(
-        text="<html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Steam подключён</title><body style='background:#101010;color:#f5e7c2;font:16px sans-serif;text-align:center;padding:48px 20px'><h2>Steam успешно привязан</h2><p>Аккаунт подтверждён. Вернитесь в Telegram и откройте профиль ShirpDrop.</p></body></html>",
+        text="<html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Steam подключён</title><body style='background:#101010;color:#f5e7c2;font:16px sans-serif;text-align:center;padding:48px 20px'><h2>Steam успешно привязан</h2><p>Вернитесь в Telegram — бот уже отправил подтверждение.</p></body></html>",
         content_type="text/html",
     )
 
@@ -4190,6 +4201,58 @@ async def admin_get_payment_transactions(request):
 # TELEGRAM COMMANDS
 # ============================================================
 
+@dp.message(Command("steam"))
+async def cmd_steam(message: types.Message):
+    if not PUBLIC_BASE_URL:
+        await message.answer("Авторизация Steam временно недоступна: адрес сайта не настроен.")
+        return
+    try:
+        async with db.acquire() as conn:
+            linked = await conn.fetchrow(
+                "SELECT steam_id64 FROM steam_identities WHERE user_id=$1",
+                message.from_user.id,
+            )
+        auth_url = await create_steam_auth_url(message.from_user.id)
+        status = (
+            f"Сейчас привязан SteamID64: <code>{linked['steam_id64']}</code>. Можно перепривязать аккаунт."
+            if linked else "Steam ещё не привязан к вашему профилю."
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔐 Войти через Steam", url=auth_url)
+        ]])
+        await message.answer(
+            "🎮 <b>Привязка Steam</b>\\n\\n"
+            f"{status}\\n\\n"
+            "Нажмите кнопку ниже и авторизуйтесь на официальном сайте Steam. "
+            "Пароль и Steam Guard бот не запрашивает.",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+    except Exception:
+        logger.exception("Could not start Steam auth from Telegram bot")
+        await message.answer("Не удалось создать ссылку Steam. Попробуйте ещё раз позже.")
+
+
+@dp.callback_query(lambda query: query.data == "steam_connect")
+async def callback_steam_connect(query: types.CallbackQuery):
+    try:
+        auth_url = await create_steam_auth_url(query.from_user.id)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔐 Войти через Steam", url=auth_url)
+        ]])
+        await query.message.answer(
+            "🎮 <b>Привязка Steam</b>\\n\\n"
+            "Нажмите кнопку и войдите на официальном сайте Steam. "
+            "Пароль и Steam Guard бот не запрашивает.",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        await query.answer()
+    except Exception:
+        logger.exception("Could not create Steam auth link from callback")
+        await query.answer("Не удалось создать ссылку. Попробуйте позже.", show_alert=True)
+
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     if not PUBLIC_BASE_URL:
@@ -4213,6 +4276,11 @@ async def cmd_start(message: types.Message):
         InlineKeyboardButton(
             text="🛍 Открыть магазин",
             web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
+        )
+    ], [
+        InlineKeyboardButton(
+            text="🎮 Подключить Steam",
+            callback_data="steam_connect",
         )
     ], [
         InlineKeyboardButton(
