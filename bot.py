@@ -2413,14 +2413,20 @@ async def cmd_start(message: types.Message):
         )
         return
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[
+    buttons = [[
+        InlineKeyboardButton(
+            text="🛍 Открыть магазин",
+            web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
+        )
+    ]]
+    if is_admin(message.from_user.id):
+        buttons.append([
             InlineKeyboardButton(
-                text="🛍 Открыть магазин",
-                web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/"),
+                text="⚙️ Админ-панель",
+                web_app=WebAppInfo(url=f"{PUBLIC_BASE_URL}/admin"),
             )
-        ]]
-    )
+        ])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await message.answer(
         "Добро пожаловать в QR BOT PRO!\n\n"
@@ -2676,6 +2682,8 @@ def create_app():
         "/api/admin/products/{product_id}/toggle",
         admin_toggle_product,
     )
+    app.router.add_get("/api/admin/dashboard", admin_get_dashboard)
+    app.router.add_get("/api/admin/products", admin_get_products)
     app.router.add_get("/api/admin/orders", admin_get_orders)
     app.router.add_post(
         "/api/admin/orders/{order_id}/status",
@@ -2695,6 +2703,12 @@ def create_app():
     async def index_handler(request):
         return web.FileResponse("static/index.html")
 
+    async def admin_page_handler(request):
+        require_admin(request)
+        return web.FileResponse("static/admin.html")
+
+    app.router.add_get("/admin", admin_page_handler)
+    app.router.add_get("/admin/", admin_page_handler)
     app.router.add_get("/", index_handler)
     app.router.add_static("/", path="static", show_index=False)
 
