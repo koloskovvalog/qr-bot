@@ -312,7 +312,8 @@ async def init_db():
                     fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 ALTER TABLE cs2_steam_prices
-                    ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'steam';
+                    ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'steam',
+                    ADD COLUMN IF NOT EXISTS image_url TEXT;
                 CREATE INDEX IF NOT EXISTS idx_cs2_steam_prices_fetched
                     ON cs2_steam_prices(fetched_at);
 
@@ -851,7 +852,14 @@ async def create_order(request):
 async def build_cases_response(request):
     try:
         catalog_skins = await load_cs2_catalog("skins")
-        skin_images = {item["name"]: item["image_url"] for item in catalog_skins}
+        skin_images = {}
+        for catalog_skin in catalog_skins:
+            for image_key in {
+                catalog_skin.get("name"), catalog_skin.get("base_name"),
+                catalog_skin.get("market_hash_name")
+            }:
+                if image_key:
+                    skin_images[str(image_key).strip().casefold()] = catalog_skin["image_url"]
         catalog_cases = await load_cs2_catalog("cases")
         fallback_case_image = next(
             (item["image_url"] for item in catalog_cases if "case" in item["name"].lower()),
@@ -1263,7 +1271,7 @@ async def build_cases_response(request):
             SELECT ci.case_id, ci.id, ci.name, ci.rarity, ci.weight,
                    ci.image_url, ci.value_minor, ci.market_hash_name, ci.wear,
                    ci.stattrak, ci.souvenir, ci.phase,
-                   p.lowest_price, p.fetched_at
+                   p.lowest_price, p.fetched_at, p.image_url AS price_image_url
             FROM case_items ci
             JOIN cases c ON c.id = ci.case_id
             LEFT JOIN cs2_steam_prices p ON p.market_hash_name=ci.market_hash_name
@@ -1293,7 +1301,9 @@ async def build_cases_response(request):
         grouped.setdefault(item["case_id"], []).append({
             "id": item["id"], "name": item["name"],
             "rarity": item["rarity"], "weight": item["weight"],
-            "image_url": item["image_url"] or skin_images.get(item["name"]),
+            "image_url": item["image_url"] or item.get("price_image_url") or
+                         skin_images.get(str(item["name"] or "").strip().casefold()) or
+                         skin_images.get(str(item["market_hash_name"] or "").strip().casefold()),
             "value_minor": item["value_minor"],
             "market_price_minor": market_minor,
             "market_price": item["lowest_price"] if fresh else None,
@@ -1394,10 +1404,13 @@ async def open_case(request):
                 selected = dict(selected)
                 if not selected["image_url"]:
                     cached_skins = CS2_CATALOG_CACHE.get("skins", [])
+                    selected_name = str(selected.get("name") or "").strip().casefold()
+                    selected_market = str(selected.get("market_hash_name") or "").strip().casefold()
                     selected["image_url"] = next(
                         (item["image_url"] for item in cached_skins
-                         if item["market_hash_name"] == selected.get("market_hash_name")
-                         or item["name"].casefold() == selected["name"].casefold()),
+                         if item["market_hash_name"].casefold() == selected_market
+                         or item["name"].casefold() == selected_name
+                         or item.get("base_name", "").casefold() == selected_name),
                         None,
                     )
 
@@ -1755,16 +1768,17 @@ async def _save_market_price_updates(updates):
         await conn.executemany("""
             INSERT INTO cs2_steam_prices(
                 market_hash_name, lowest_price, median_price,
-                volume, currency, fetched_at, price_source
+                volume, currency, fetched_at, price_source, image_url
             )
-            VALUES($1, $2, NULL, NULL, 'RUB', $3, $4)
+            VALUES($1, $2, NULL, NULL, 'RUB', $3, $4, $5)
             ON CONFLICT (market_hash_name) DO UPDATE SET
                 lowest_price=EXCLUDED.lowest_price,
                 median_price=NULL,
                 volume=NULL,
                 currency='RUB',
                 fetched_at=EXCLUDED.fetched_at,
-                price_source=EXCLUDED.price_source
+                price_source=EXCLUDED.price_source,
+                image_url=COALESCE(EXCLUDED.image_url, cs2_steam_prices.image_url)
         """, updates)
     return len(updates)
 
@@ -1852,7 +1866,10 @@ async def _fetch_openskin_prices(session, batch):
         # Keep the upstream observation time where supplied; this lets the
         # normal seven-day freshness check reject old market snapshots.
         fetched_at = updated_at or now
-        updates.append((market_name, f"{rub_price} ₽", fetched_at, provider))
+        image_url = str(item.get("icon_url") or item.get("image_url") or "").strip()
+        if not image_url.startswith("https://"):
+            image_url = None
+        updates.append((market_name, f"{rub_price} ₽", fetched_at, provider, image_url))
     return updates
 
 
@@ -1904,7 +1921,7 @@ async def _fetch_apiskins_prices(session, batch):
             except (InvalidOperation, TypeError, ValueError):
                 continue
             if rub_price > 0 and item.get("market_hash_name"):
-                updates.append((item["market_hash_name"], f"{rub_price} ₽", datetime.now(timezone.utc), provider))
+                updates.append((item["market_hash_name"], f"{rub_price} ₽", datetime.now(timezone.utc), provider, None))
         return updates
     except asyncio.CancelledError:
         raise
@@ -1921,7 +1938,7 @@ async def cs2_steam_price_worker():
         while True:
             first = await CS2_PRICE_QUEUE.get()
             batch = [first]
-            while len(batch) < 100:
+            while len(batch) < 500:
                 try:
                     batch.append(CS2_PRICE_QUEUE.get_nowait())
                 except asyncio.QueueEmpty:
@@ -1947,7 +1964,7 @@ async def cs2_steam_price_worker():
                 for market_name in batch:
                     CS2_PRICE_QUEUED.discard(market_name)
                     CS2_PRICE_QUEUE.task_done()
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.05)
 
 
 def queue_cs2_price_refresh(items):
@@ -2294,7 +2311,7 @@ async def suggest_upgrade_target(request):
             ) if provisional_desired else []
             queue_cs2_price_refresh(
                 [{"market_hash_name": source_market_name}] +
-                [{"market_hash_name": x["market_hash_name"]} for x in ranked_targets[:99]]
+                [{"market_hash_name": x["market_hash_name"]} for x in ranked_targets[:499]]
             )
             return web.json_response({
                 "pending": True,
@@ -2330,7 +2347,7 @@ async def suggest_upgrade_target(request):
             (x for x in catalog if x.get("market_hash_name")),
             key=lambda x: abs(cs2_virtual_value({"name": x.get("rarity", "")}) - desired) / max(desired, 1)
         )
-        queue_cs2_price_refresh(ranked[:100])
+        queue_cs2_price_refresh(ranked[:500])
         return web.json_response({
             "pending": True,
             "stage": "target_prices",

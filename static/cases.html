@@ -652,6 +652,27 @@ main{max-width:980px;padding:22px 18px calc(var(--nav-h) + 32px)}
 @media(max-width:380px){.bottom-nav{gap:1px;padding-left:4px;padding-right:4px}.bottom-nav button{font-size:8px}.bottom-nav button span{font-size:17px}.case-open-actions{flex-direction:column}.case-open-actions button{width:100%}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
+
+/* Mobile CS2 roulette and image/price polish */
+.case-open-actions{display:grid!important;grid-template-columns:minmax(0,.72fr) minmax(0,1.28fr)!important;gap:10px!important;width:100%;min-width:0}
+.case-open-actions>*{width:100%!important;min-width:0!important;max-width:100%!important;box-sizing:border-box;white-space:normal;line-height:1.25}
+.case-reel{padding:9px 5px!important;border-radius:18px!important;background:linear-gradient(180deg,#0d151c,#101a21)!important}
+.case-reel:before{content:"";position:absolute;z-index:7;top:0;left:50%;transform:translateX(-50%);width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #dfff91;filter:drop-shadow(0 2px 3px #0008);pointer-events:none}
+.case-reel:after{width:2px!important;background:linear-gradient(180deg,#e7ffad,#c8f36b88)!important;box-shadow:0 0 14px #c8f36b99!important}
+.reel-card{width:clamp(96px,28vw,122px)!important;flex-basis:clamp(96px,28vw,122px)!important;height:128px!important;box-sizing:border-box;background:linear-gradient(155deg,#202f39,#111a23)!important;border:1px solid #405363!important;border-radius:12px!important;color:#f4f7fb!important;padding:7px!important}
+.reel-card img{height:68px!important;object-fit:contain!important;filter:drop-shadow(0 5px 8px #0008)}
+.reel-image-placeholder,.item-thumb-placeholder,.upgrade-image-fallback,.upgrade-source-fallback{background:radial-gradient(circle,#263b35,#111a23)!important;color:#bfe77a!important}
+.reel-price{color:#dfff91!important;font-size:10px!important}
+.case-item .item-thumb,.case-preview-item img,.case-win-card>img{object-fit:contain!important;padding:5px;box-sizing:border-box;filter:drop-shadow(0 5px 9px #0007)}
+.case-item .item-thumb{height:112px!important}
+.case-preview-item img{height:84px!important;width:100%!important}
+.case-win-card>img{height:120px!important}
+.case-open-actions button{min-height:56px!important}
+.upgrade-wheel-pointer{background:transparent!important;border:0!important;outline:0!important;box-shadow:none!important;min-width:0!important;min-height:0!important;overflow:visible!important}
+.upgrade-wheel-pointer:before{content:""!important;display:block!important;position:absolute!important;left:calc(50% - 2px)!important;top:5%!important;width:4px!important;height:45%!important;border-radius:99px!important;background:linear-gradient(180deg,#f5ffd9,#b6e65b)!important;box-shadow:0 0 9px #c8f36b88!important}
+.upgrade-wheel-pointer:after{content:""!important;display:block!important;position:absolute!important;left:50%!important;top:1%!important;transform:translateX(-50%)!important;width:0!important;height:0!important;border-left:8px solid transparent!important;border-right:8px solid transparent!important;border-bottom:15px solid #e7ffad!important;border-top:0!important;background:transparent!important;box-shadow:none!important}
+@media(max-width:620px){.case-open-actions{grid-template-columns:minmax(0,1fr)!important}.case-open-actions>*{min-height:54px!important}.case-reel{padding:8px 4px!important}.reel-card{height:120px!important}.upgrade-wheel-pointer:before{width:3px!important;left:calc(50% - 1.5px)!important}}
+
 </style>
 </head>
 <body><main>
@@ -982,7 +1003,7 @@ function renderCasePreview(items){
  host.innerHTML=items.slice(0,6).map(i=>'<div class="case-preview-item">'+(i.image_url?'<img src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" loading="lazy" onerror="this.hidden=true">':'<div class="case-preview-fallback">CS2</div>')+'<strong>'+esc(i.name)+'</strong><span>'+esc(i.rarity)+'</span><b>'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена уточняется")+'</b><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("");
  const more=$("casePreviewMore");if(more)more.onclick=()=> $("caseItems").scrollIntoView({behavior:"smooth",block:"start"});
 }
-function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Цена Lis-Skins / Market.CSGO уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
+function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Рыночная цена уточняется")+'</div><small>Шанс '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
 async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
 async function openCase(mode="spin"){
  if(!initData){toast("Откройте приложение через Telegram.");return}
@@ -994,7 +1015,7 @@ async function openCase(mode="spin"){
  if(!pool.length){toast("В этом кейсе пока нет предметов.");return}
  quick.disabled=true;spin.disabled=true;stage.classList.add("rolling");
  $("caseResult").innerHTML='<div class="case-result"><small>'+(mode==="quick"?'ОТКРЫВАЕМ '+count+' КЕЙС(ОВ)…':'РУЛЕТКА ЗАПУЩЕНА…')+'</small><p class="muted">Сервер определяет результат каждого открытия.</p></div>';
- const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
+ const cardHtml=(item,index)=>'<div class="reel-card">'+(item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="'+(Math.abs(index-38)<=6?'eager':'lazy')+'" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>◇</div>':'<div class="reel-image-placeholder">◇</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
  try{
   const d=await api("/api/cases/"+id+"/open",{method:"POST",body:JSON.stringify({count})});
   if(Number(d.case_id)!==Number(id))throw new Error("Сервер вернул результат другого кейса.");
@@ -1003,10 +1024,10 @@ async function openCase(mode="spin"){
   if(mode==="spin"){
    const winnerIndex=38,reelItems=Array.from({length:45},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
    reel.classList.remove("spinning","stopping");reel.hidden=false;
-   reel.innerHTML='<div class="reel-track">'+reelItems.map((item,index)=>cardHtml(item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("")+'</div>';
+   reel.innerHTML='<div class="reel-track">'+reelItems.map((item,index)=>cardHtml(item,index)).join("")+'</div>';
    reel.classList.add("ready");
    const track=reel.querySelector(".reel-track");reelItems[winnerIndex]=wins[0];
-   track.innerHTML=reelItems.map((item,index)=>cardHtml(index===winnerIndex?wins[0]:item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("");
+   track.innerHTML=reelItems.map((item,index)=>cardHtml(index===winnerIndex?wins[0]:item,index)).join("");
    reel.classList.remove("ready");reel.classList.add("stopping");
    const winnerCard=track.children[winnerIndex],rr=reel.getBoundingClientRect(),wr=winnerCard.getBoundingClientRect();
    const stopX=Math.round(rr.left+reel.clientWidth/2-(wr.left+wr.width/2)),target="translateX("+stopX+"px)";
