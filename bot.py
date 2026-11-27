@@ -1378,6 +1378,10 @@ async def build_cases_response(request):
         )
     ])
 
+    demo_claimable_case_ids = {
+        item["case_id"] for item in items
+        if item["market_hash_name"] and int(item["value_minor"] or 0) > 0
+    }
     grouped = {}
     for item in items:
         fresh = bool(item["fetched_at"] and
@@ -1418,6 +1422,7 @@ async def build_cases_response(request):
             "catalog_only": True,
             "opening_enabled": False,
             "items_total": len(contents),
+            "demo_claim_available": case["id"] in demo_claimable_case_ids,
             "items": [{
                 "name": item["name"],
                 "rarity": item["rarity"],
