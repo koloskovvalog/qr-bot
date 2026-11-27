@@ -3263,7 +3263,8 @@ async def get_my_profile(request):
             ORDER BY co.id DESC LIMIT 50
         """, user["id"])
     return web.json_response({
-        "user_id": user["id"], "referral_code": profile["referral_code"],\n        "steam": {"connected": bool(steam), "steam_id64": steam["steam_id64"] if steam else None, "verified_at": steam["verified_at"].isoformat() if steam and steam["verified_at"] else None},
+        "user_id": user["id"], "referral_code": profile["referral_code"],
+        "steam": {"connected": bool(steam), "steam_id64": steam["steam_id64"] if steam else None, "verified_at": steam["verified_at"].isoformat() if steam and steam["verified_at"] else None},
         "has_referrer": profile["referred_by"] is not None,
         "points": points, "orders_count": stats["orders_count"],
         "paid_orders_count": stats["paid_orders_count"], "referrals_count": referrals,
