@@ -1545,10 +1545,21 @@ async def suggest_upgrade_target(request):
         source_market_name = source["market_hash_name"]
         if not source_market_name:
             source_label = str(source["item_name"] or "").strip().casefold()
+            # Legacy inventory rows can contain the base skin label while the
+            # canonical catalog stores wear-specific market hash names.
+            def normalize_skin_label(value):
+                label = str(value or "").strip().casefold()
+                label = label.replace("stattrak™ ", "").replace("stattrak ", "")
+                label = label.replace("souvenir ", "")
+                if label.endswith(")") and " (" in label:
+                    label = label.rsplit(" (", 1)[0].strip()
+                return " ".join(label.split())
+            normalized_source = normalize_skin_label(source_label)
             matches = [
                 x for x in catalog
-                if str(x.get("name") or "").strip().casefold() == source_label
-                or str(x.get("base_name") or "").strip().casefold() == source_label
+                if normalize_skin_label(x.get("name")) == normalized_source
+                or normalize_skin_label(x.get("base_name")) == normalized_source
+                or normalize_skin_label(x.get("market_hash_name")) == normalized_source
             ]
             if matches:
                 exact = [x for x in matches if str(x.get("name") or "").strip().casefold() == source_label]
