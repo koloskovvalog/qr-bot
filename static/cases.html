@@ -731,8 +731,8 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div id="homeCaseGrid" class="home-case-grid"><div class="empty">Загружаем кейсы…</div></div>
 </section>
 <div class="ux-hint"><strong>Как начать:</strong> открой кейс, забери предмет в виртуальный инвентарь и попробуй апгрейд.</div>
-<div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
-<input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
+<div class="section"><h2>Цифровые товары</h2><span class="count" id="count"></span></div>
+<input class="search" id="search" type="search" placeholder="⌕  Поиск по цифровым товарам…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
 <section id="dropsView" hidden>
  <div class="section"><h2>Live Drops</h2><span class="count">Последние события</span></div>
@@ -823,7 +823,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div class="notice">1 балл за каждые 100 ₽ подтверждённого заказа. Демо-платежи и виртуальные CS2-операции баллов не начисляют.</div>
 </section>
 <section id="inventoryView" hidden>
- <div class="section"><h2>Мой инвентарь</h2><span class="count">CS2 COLLECTION</span></div>
+ <div class="section"><h2>Мой инвентарь</h2><span class="count">КОЛЛЕКЦИЯ CS2</span></div>
  <div class="inventory-toolbar"><input id="inventorySearch" class="search" placeholder="Поиск предметов…"><select id="inventoryFilter" class="search"><option value="all">Все предметы</option><option value="favorites">Избранное</option><option value="skins">Только скины</option></select><select id="inventorySort" class="search"><option value="price">Сначала дорогие</option><option value="new">Сначала новые</option></select></div>
  <div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div>
 </section>
@@ -852,7 +852,7 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
  <div class="notice">Бонусные баллы пока служат внутренней системой активности QR BOT PRO. Реальные платежи и денежные вознаграждения отключены.</div>
 </section>
 <section id="upgradeView" hidden>
-<div class="section"><h2>CS2 Upgrade</h2><span class="count">ПОДБОР ЦЕЛИ</span></div>
+<div class="section"><h2>Апгрейд скинов</h2><span class="count">ПОДБОР ЦЕЛИ</span></div>
 <div class="notice">Выбери предмет из инвентаря, найди желаемый скин и посмотри предварительный шанс. Сейчас это только калькулятор: предметы не списываются, реальные апгрейды не запускаются.</div>
 <div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE · PREVIEW</div><div class="upgrade-duel-cards"><div class="upgrade-duel-card" id="upgradeSourceCard"><small>ВАША СТАВКА</small><div class="upgrade-duel-placeholder">Выберите предмет</div><strong>Исходный предмет</strong><b>— ₽</b></div><div class="upgrade-duel-vs">VS</div><div class="upgrade-duel-card" id="upgradeTargetCard"><small>ЖЕЛАЕМАЯ ЦЕЛЬ</small><div class="upgrade-duel-placeholder">Выберите цель</div><strong>Целевой предмет</strong><b>— ₽</b></div></div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>SHIRPDROP</small><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-wheel-chance"><strong id="upgradeWheelPercent">—%</strong><span>РАСЧЁТНЫЙ ШАНС</span></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
