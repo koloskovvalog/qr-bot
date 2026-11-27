@@ -1384,15 +1384,15 @@ async def build_cases_response(request):
                      (datetime.now(timezone.utc) - item["fetched_at"]).total_seconds() <= CS2_PRICE_USABLE_TTL_SECONDS)
         market_minor = steam_price_to_minor(item["lowest_price"]) if fresh else None
         grouped.setdefault(item["case_id"], []).append({
-            "id": item["id"], "name": item["name"],
-            "rarity": item["rarity"], "weight": item["weight"],
+            # Only fields consumed by the Mini App's case preview and reel.
+            # Keep the full weighted item pool in PostgreSQL for server-side rolls.
+            "name": item["name"],
+            "rarity": item["rarity"],
+            "weight": item["weight"],
             "image_url": item["image_url"] or item.get("price_image_url") or
                          skin_images.get(str(item["name"] or "").strip().casefold()) or
                          skin_images.get(str(item["market_hash_name"] or "").strip().casefold()),
-            "value_minor": item["value_minor"],
             "market_price_minor": market_minor,
-            "market_price": item["lowest_price"] if fresh else None,
-            "market_hash_name": item["market_hash_name"],
             "wear": item["wear"], "stattrak": item["stattrak"],
             "souvenir": item["souvenir"], "phase": item["phase"],
         })
