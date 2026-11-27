@@ -1649,9 +1649,22 @@ async def create_telebotly_topup(request):
             "purpose": "cash_wallet_topup"
         }
     }
+    if not (TELEBOTLY_PAY_KEY.startswith("tbp_test_") or TELEBOTLY_PAY_KEY.startswith("tbp_live_")):
+        raise web.HTTPServiceUnavailable(text="Нужен ключ TeleBotly Pay API с префиксом tbp_test_ или tbp_live_")
     timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"{TELEBOTLY_API_BASE}/project",
+                headers={"Authorization": f"Bearer {TELEBOTLY_PAY_KEY}"}
+            ) as project_response:
+                project_result = await project_response.json(content_type=None)
+                if project_response.status != 200:
+                    logger.warning("TeleBotly project check failed: status=%s", project_response.status)
+                    raise web.HTTPBadGateway(text="TeleBotly не подтвердил Pay API Key")
+                project = project_result.get("data") or project_result
+                if TELEBOTLY_PAY_KEY.startswith("tbp_live_") and not project.get("accepts_live_payments"):
+                    raise web.HTTPServiceUnavailable(text="TeleBotly пока не разрешил проекту принимать реальные платежи")
             async with session.post(
                 f"{TELEBOTLY_API_BASE}/payments",
                 json=payload,
@@ -1677,7 +1690,7 @@ async def create_telebotly_topup(request):
     payment = result.get("data") or result.get("payment") or {}
     payment_id = payment.get("id")
     payment_url = payment.get("url")
-    if not payment_id or not payment_url or payment.get("status") != "pending":
+    if not payment_id or not payment_url or not str(payment_url).startswith("https://pay.telebotly.app/") or payment.get("status") != "pending":
         async with db.acquire() as conn:
             await conn.execute("UPDATE wallet_topups SET status='failed', updated_at=NOW() WHERE id=$1", topup_id)
         raise web.HTTPBadGateway(text="TeleBotly вернул неполные данные платежа")
