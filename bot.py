@@ -35,6 +35,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 APISKINS_API_KEY = os.getenv("APISKINS_API_KEY", "").strip()
+APISKINS_COOLDOWN_UNTIL = 0
 USD_RUB_RATE = None
 USD_RUB_RATE_AT = 0
 CS2_PRICE_USABLE_TTL_SECONDS = 7 * 24 * 60 * 60  # last known quote remains usable for 7 days
@@ -1273,10 +1274,175 @@ async def get_usd_rub_rate(session):
     return USD_RUB_RATE
 
 
+async def _save_market_price_updates(updates):
+    if not updates:
+        return 0
+    async with db.acquire() as conn:
+        await conn.executemany("""
+            INSERT INTO cs2_steam_prices(
+                market_hash_name, lowest_price, median_price,
+                volume, currency, fetched_at, price_source
+            )
+            VALUES($1, $2, NULL, NULL, 'RUB', $3, $4)
+            ON CONFLICT (market_hash_name) DO UPDATE SET
+                lowest_price=EXCLUDED.lowest_price,
+                median_price=NULL,
+                volume=NULL,
+                currency='RUB',
+                fetched_at=EXCLUDED.fetched_at,
+                price_source=EXCLUDED.price_source
+        """, updates)
+    return len(updates)
+
+
+def _parse_market_timestamp(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _fetch_openskin_prices(session, batch):
+    """Fetch up to 500 exact market names from OpenSkin's public batch endpoint."""
+    try:
+        async with session.post(
+            "https://api-v2.openskin.dev/v1/prices/batch",
+            json={"items": batch},
+            headers={"Accept": "application/json"},
+        ) as response:
+            if response.status != 200:
+                body = (await response.text())[:250]
+                logger.warning("OpenSkin batch returned HTTP %s: %s", response.status, body)
+                return []
+            payload = await response.json(content_type=None)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("OpenSkin price batch failed", exc_info=True)
+        return []
+
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    if not isinstance(data, dict) or not data:
+        logger.info("OpenSkin returned no priced items for batch of %s", len(batch))
+        return []
+
+    now = datetime.now(timezone.utc)
+    fx_rate = None
+    updates = []
+    for market_name, item in data.items():
+        if not isinstance(item, dict):
+            continue
+        steam = item.get("steam") or {}
+        lowest = item.get("lowest_ask") or {}
+        # Prefer the Steam Community Market ask because QR BOT PRO displays
+        # Steam-based valuations. Use a named marketplace quote only if Steam
+        # has no ask for this exact market_hash_name.
+        price = steam.get("ask")
+        provider = "openskin_steam"
+        if price is None:
+            price = lowest.get("price")
+            marketplace = str(lowest.get("marketplace") or "market").strip().lower()
+            provider = "openskin_" + re.sub(r"[^a-z0-9_]+", "_", marketplace)[:32]
+        if price is None:
+            for marketplace in ("skinport", "csfloat", "buff", "youpin"):
+                quote = item.get(marketplace) or {}
+                if quote.get("ask") is not None:
+                    price = quote["ask"]
+                    provider = "openskin_" + marketplace
+                    break
+        try:
+            usd_price = Decimal(str(price))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if usd_price <= 0:
+            continue
+        updated_at = _parse_market_timestamp(item.get("updated_at") or payload.get("updated_at"))
+        if updated_at and (now - updated_at).total_seconds() > CS2_PRICE_USABLE_TTL_SECONDS:
+            continue
+        if updated_at and updated_at > now + timedelta(minutes=5):
+            continue
+        if fx_rate is None:
+            try:
+                fx_rate = await get_usd_rub_rate(session)
+            except Exception:
+                logger.warning("USD/RUB rate unavailable; OpenSkin quotes were not stored", exc_info=True)
+                return []
+        rub_price = (usd_price * fx_rate).quantize(Decimal("0.01"))
+        if rub_price <= 0:
+            continue
+        # Keep the upstream observation time where supplied; this lets the
+        # normal seven-day freshness check reject old market snapshots.
+        fetched_at = updated_at or now
+        updates.append((market_name, f"{rub_price} ₽", fetched_at, provider))
+    return updates
+
+
+async def _fetch_apiskins_prices(session, batch):
+    """Legacy paid-key provider fallback; a 429 is remembered instead of busy-looped."""
+    global APISKINS_COOLDOWN_UNTIL
+    if not APISKINS_API_KEY or time.time() < APISKINS_COOLDOWN_UNTIL:
+        return []
+    payload = {
+        "market_hash_names": batch,
+        "providers": ["lis_skins", "market_csgo", "cs_float", "skinport", "dmarket", "waxpeer"],
+    }
+    try:
+        async with session.post(
+            "https://api.apiskins.com/v1/offers/batch",
+            json=payload,
+            headers={"Accept": "application/json", "X-API-KEY": APISKINS_API_KEY},
+        ) as response:
+            if response.status == 429:
+                APISKINS_COOLDOWN_UNTIL = time.time() + 1800
+                logger.warning("API Skins rate limited; fallback disabled for 30 minutes")
+                return []
+            if response.status != 200:
+                body = (await response.text())[:250]
+                logger.warning("API Skins fallback returned HTTP %s: %s", response.status, body)
+                return []
+            offers_payload = await response.json(content_type=None)
+        if not isinstance(offers_payload, list):
+            return []
+        rate = await get_usd_rub_rate(session)
+        updates = []
+        for item in offers_payload:
+            if not isinstance(item, dict):
+                continue
+            by_provider = {
+                offer.get("provider"): offer.get("price")
+                for offer in item.get("offers", [])
+                if isinstance(offer, dict)
+            }
+            provider = next(
+                (name for name in ("lis_skins", "market_csgo", "cs_float", "skinport", "dmarket", "waxpeer")
+                 if by_provider.get(name) is not None),
+                None,
+            )
+            if not provider:
+                continue
+            try:
+                rub_price = (Decimal(str(by_provider[provider])) * rate).quantize(Decimal("0.01"))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if rub_price > 0 and item.get("market_hash_name"):
+                updates.append((item["market_hash_name"], f"{rub_price} ₽", datetime.now(timezone.utc), provider))
+        return updates
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("API Skins fallback failed", exc_info=True)
+        return []
+
+
 async def cs2_steam_price_worker():
-    """Fetch Lis-Skins first, then Market.CSGO as a per-item fallback."""
-    timeout = aiohttp.ClientTimeout(total=25)
-    headers = {"Accept": "application/json"}
+    """Refresh market quotes in one batch, preferring OpenSkin over quota-limited API Skins."""
+    timeout = aiohttp.ClientTimeout(total=35, connect=10)
+    headers = {"Accept": "application/json", "Accept-Encoding": "gzip, deflate, br"}
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
         while True:
             first = await CS2_PRICE_QUEUE.get()
@@ -1286,88 +1452,28 @@ async def cs2_steam_price_worker():
                     batch.append(CS2_PRICE_QUEUE.get_nowait())
                 except asyncio.QueueEmpty:
                     break
-            retry_later = False
             try:
-                if not APISKINS_API_KEY:
-                    logger.warning("APISKINS_API_KEY is not configured; marketplace price refresh is paused")
-                else:
-                    payload = {
-                        "market_hash_names": batch,
-                        "providers": ["lis_skins", "market_csgo", "cs_float", "skinport", "dmarket", "waxpeer"],
-                    }
-                    async with session.post(
-                        "https://api.apiskins.com/v1/offers/batch",
-                        json=payload,
-                        headers={**headers, "X-API-KEY": APISKINS_API_KEY},
-                    ) as response:
-                        if response.status == 429:
-                            logger.warning("API Skins rate limited; cooling down marketplace queue for 30 minutes")
-                            retry_later = True
-                        elif response.status == 200:
-                            offers_payload = await response.json(content_type=None)
-                            rate = await get_usd_rub_rate(session)
-                            updates = []
-                            for item in offers_payload if isinstance(offers_payload, list) else []:
-                                by_provider = {
-                                    offer.get("provider"): offer.get("price")
-                                    for offer in item.get("offers", [])
-                                    if isinstance(offer, dict)
-                                }
-                                provider_priority = (
-                                    "lis_skins", "market_csgo", "cs_float",
-                                    "skinport", "dmarket", "waxpeer"
-                                )
-                                provider = next(
-                                    (name for name in provider_priority if by_provider.get(name) is not None),
-                                    None,
-                                )
-                                usd_price = by_provider.get(provider) if provider else None
-                                if not usd_price:
-                                    continue
-                                try:
-                                    rub_price = (Decimal(str(usd_price)) * rate).quantize(Decimal("0.01"))
-                                    if rub_price > 0:
-                                        updates.append((item["market_hash_name"], f"{rub_price} ₽", provider))
-                                except (InvalidOperation, KeyError, TypeError):
-                                    continue
-                            if updates:
-                                async with db.acquire() as conn:
-                                    await conn.executemany("""
-                                        INSERT INTO cs2_steam_prices(
-                                            market_hash_name, lowest_price, median_price,
-                                            volume, currency, fetched_at, price_source
-                                        )
-                                        VALUES($1, $2, NULL, NULL, 'RUB', NOW(), $3)
-                                        ON CONFLICT (market_hash_name) DO UPDATE SET
-                                            lowest_price=EXCLUDED.lowest_price,
-                                            median_price=NULL,
-                                            volume=NULL,
-                                            currency='RUB',
-                                            fetched_at=NOW(),
-                                            price_source=EXCLUDED.price_source
-                                    """, updates)
-                            logger.info(
-                                "Marketplace prices refreshed: %s requested, %s updated",
-                                len(batch), len(updates)
-                            )
-                        else:
-                            body = (await response.text())[:400]
-                            logger.warning("API Skins price request returned HTTP %s: %s", response.status, body)
+                updates = await _fetch_openskin_prices(session, batch)
+                updated_names = {row[0] for row in updates}
+                missing = [name for name in batch if name not in updated_names]
+                if missing and not updates:
+                    # API Skins remains a secondary source only. Its 429 cooldown
+                    # cannot block the worker or prevent other users from pricing.
+                    updates.extend(await _fetch_apiskins_prices(session, missing))
+                saved = await _save_market_price_updates(updates)
+                logger.info(
+                    "CS2 market price batch completed: %s requested, %s updated (OpenSkin primary)",
+                    len(batch), saved
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning("Marketplace price refresh failed for batch of %s items", len(batch), exc_info=True)
+                logger.warning("CS2 market price worker failed for batch of %s", len(batch), exc_info=True)
             finally:
-                for market_hash_name in batch:
-                    CS2_PRICE_QUEUED.discard(market_hash_name)
+                for market_name in batch:
+                    CS2_PRICE_QUEUED.discard(market_name)
                     CS2_PRICE_QUEUE.task_done()
-                if retry_later:
-                    await asyncio.sleep(1800)
-                    for market_hash_name in batch:
-                        if market_hash_name not in CS2_PRICE_QUEUED:
-                            CS2_PRICE_QUEUED.add(market_hash_name)
-                            await CS2_PRICE_QUEUE.put(market_hash_name)
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.15)
 
 
 def queue_cs2_price_refresh(items):
