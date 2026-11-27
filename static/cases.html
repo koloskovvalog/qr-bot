@@ -696,8 +696,7 @@ main{max-width:980px;padding:22px 18px calc(var(--nav-h) + 32px)}
 [data-nav="drops"],[data-nav="creator"],[data-nav="rewards"],
 [data-go="drops"],[data-go="creator"],[data-go="rewards"],
 #dropsTab,#creatorTab,#rewardsTab,
-.creator-intro,.creator-builder,.rewards-hero,
-#claimDemoCase{display:none!important}
+.creator-intro,.creator-builder,.rewards-hero{display:none!important}
 .inventory-actions .sell-item{display:none!important}
 .demo-pill{display:none!important}
 body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important}
@@ -774,8 +773,8 @@ body.cases-store .bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!impor
   <div id="caseItems" class="case-items"><div class="empty">Загрузка…</div></div>
  </div>
 </div>
-<button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px">Получить бесплатный тестовый кейс для апгрейда</button>
-<div class="muted" style="margin-top:7px">Один виртуальный тестовый кейс в день для режима «Апгрейд кейсов».</div>
+<button id="claimDemoCase" class="goldbtn" style="width:100%;margin-top:12px" disabled>Получить бесплатный тестовый скин для апгрейда</button>
+<div class="muted" style="margin-top:7px">Один виртуальный скин в день для тренировки подбора цели. Это не предмет Steam и его нельзя вывести.</div>
 </section>
 <section id="profileView" hidden>
  <div class="section"><h2>Личный кабинет</h2><span class="count">QR BOT PRO</span></div>
@@ -986,6 +985,7 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<article class="purchase-row"><div class="purchase-product"><span class="purchase-icon">✦</span><div><strong>'+esc(o.product_title)+'</strong><small>Заказ #'+o.id+'</small></div></div><strong class="purchase-amount">'+money(o.amount_minor,o.currency)+'</strong><span class="purchase-status status-'+esc(o.status)+'">'+esc(orderStatusLabel(o.status))+'</span><div class="purchase-date">'+new Date(o.created_at).toLocaleDateString("ru-RU")+'</div></article>').join("")}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
+let demoCaseClaimedToday=false;
 let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
@@ -1018,6 +1018,8 @@ function renderCaseCards(){
 }
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
+ const demoClaim=$("claimDemoCase");
+ if(demoClaim){demoClaim.disabled=demoCaseClaimedToday||!c.items?.length;demoClaim.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":"Получить бесплатный тестовый скин для апгрейда";}
  $("caseCatalogPanel").hidden=true;$("caseDetailPanel").hidden=false;
  $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
@@ -1062,7 +1064,28 @@ function renderCasePreview(items){
  const more=$("casePreviewMore");if(more)more.onclick=()=> $("caseItems").scrollIntoView({behavior:"smooth",block:"start"});
 }
 function renderCaseItems(items){$("caseItems").innerHTML=items.map(i=>'<div class="case-item">'+(i.image_url?'<img class="item-thumb" src="'+esc(i.image_url)+'" alt="'+esc(i.name)+'" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="item-thumb-placeholder" hidden>CS2</div>':'<div class="item-thumb-placeholder">CS2</div>')+'<span class="rarity">'+esc(i.rarity)+'</span><strong>'+esc(i.name)+'</strong>'+skinMetaTags(i)+'<div class="case-chance">'+(i.market_price_minor?money(i.market_price_minor,"₽"):"Рыночная цена уточняется")+'</div><small>Вес в составе '+Number(i.chance_percent).toFixed(2)+'%</small></div>').join("")}
-async function claimDemoCase(){if(!initData){toast("Открой приложение через Telegram.");return}const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));if(!c)return;try{const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});toast(d.message);await showInventory()}catch(e){toast(e.message)}}
+async function claimDemoCase(){
+ if(!initData){toast("Открой приложение через Telegram.");return}
+ const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
+ const button=$("claimDemoCase");
+ if(!c||!c.items?.length||demoCaseClaimedToday)return;
+ button.disabled=true;
+ try{
+  const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});
+  demoCaseClaimedToday=true;
+  button.textContent="Тестовый скин получен сегодня";
+  toast(d.message);
+  await showInventory();
+ }catch(e){
+  if(String(e.message||"").includes("уже получен сегодня")){
+   demoCaseClaimedToday=true;
+   button.textContent="Тестовый скин получен сегодня";
+  }else{
+   button.disabled=false;
+  }
+  toast(e.message);
+ }
+}
 async function openCase(mode="spin"){
  if(!initData){toast("Откройте приложение через Telegram.");return}
  const stage=$("caseStage"),id=stage.dataset.caseId,reel=$("caseReel");
