@@ -533,6 +533,14 @@ main{max-width:1180px;padding:22px 22px 62px}
 .rewards-hero .goldbtn{width:100%;max-width:320px}
 @media(max-width:420px){.creator-cases-grid{grid-template-columns:1fr 1fr}.inventory-toolbar{grid-template-columns:1fr}.inventory-toolbar input{grid-column:auto}.creator-selected-row{grid-template-columns:40px minmax(0,1fr) 68px 24px}.creator-selected-row img{width:40px}.bottom-nav button{font-size:8px}}
 
+body.digital-store .home-cases-section,body.digital-store .ux-shortcut[data-go="cases"],body.digital-store .ux-shortcut[data-go="upgrade"],body.digital-store .ux-shortcut[data-go="inventory"]{display:none!important}
+body.digital-store .bottom-nav [data-nav="cases"],body.digital-store .bottom-nav [data-nav="drops"],body.digital-store .bottom-nav [data-nav="upgrade"],body.digital-store .bottom-nav [data-nav="inventory"],body.digital-store .bottom-nav [data-nav="creator"],body.digital-store .bottom-nav [data-nav="rewards"]{display:none!important}
+body.digital-store .bottom-nav{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+body.digital-store #casesView,body.digital-store #dropsView,body.digital-store #upgradeView,body.digital-store #inventoryView,body.digital-store #creatorCasesView,body.digital-store #rewardsView{display:none!important}
+body.cases-store .bottom-nav [data-nav="catalog"],body.cases-store .bottom-nav [data-nav="orders"]{display:none!important}
+body.cases-store .bottom-nav{grid-template-columns:repeat(7,minmax(0,1fr))!important}
+body.cases-store #catalogView,body.cases-store #skinsView,body.cases-store #ordersView{display:none!important}
+body.cases-store #cartbar{display:none!important}
 </style>
 </head>
 <body><main>
@@ -540,7 +548,7 @@ main{max-width:1180px;padding:22px 22px 62px}
 <div class="tabs"><button class="tab active" id="catalogTab">Каталог</button><button class="tab" id="skinsTab">CS2 Скины</button><button class="tab" id="casesTab">CS2 Кейсы</button><button class="tab" id="upgradeTab">Апгрейд</button><button class="tab" id="ordersTab">Заказы</button><button class="tab" id="inventoryTab">Инвентарь</button></div>
 <section id="catalogView">
 <div class="ux-home" id="uxHome">
- <div class="ux-welcome"><strong>Рады видеть в QR BOT PRO</strong><p>Выбирай цифровые товары, открывай виртуальные CS2-кейсы и пробуй улучшать предметы. Все игровые операции сейчас работают в демо-режиме.</p></div>
+ <div class="ux-welcome"><strong>Рады видеть в QR BOT PRO</strong><p>Выбирай цифровые товары и услуги, добавляй их в корзину и отслеживай заказы в личном кабинете.</p></div>
  <div class="ux-shortcuts">
   <button class="ux-shortcut" data-go="cases"><span>▣</span>Кейсы</button>
   <button class="ux-shortcut" data-go="upgrade"><span>✦</span>Апгрейд</button>
@@ -552,7 +560,7 @@ main{max-width:1180px;padding:22px 22px 62px}
  <div class="section"><h2>Популярные CS2-кейсы</h2><button class="text-link" type="button" data-go="cases">Все кейсы →</button></div>
  <div id="homeCaseGrid" class="home-case-grid"><div class="empty">Загружаем кейсы…</div></div>
 </section>
-<div class="ux-hint"><strong>Как начать:</strong> выбери товар в каталоге или открой бесплатный демо-кейс, затем попробуй апгрейд в отдельной вкладке.</div>
+<div class="ux-hint"><strong>Как начать:</strong> выбери нужный товар в каталоге, добавь его в корзину и оформи заказ.</div>
 <div class="section"><h2>Каталог товаров</h2><span class="count" id="count"></span></div>
 <input class="search" id="search" type="search" placeholder="⌕  Поиск по каталогу…">
 <div class="filters" id="filters"></div><div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div></section>
@@ -709,7 +717,7 @@ main{max-width:1180px;padding:22px 22px 62px}
 </main><div class="toast" id="toast"></div>
 <script>
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();const initData=tg?.initData||"";
-const headers={"Content-Type":"application/json","X-Telegram-Init-Data":initData};const $=id=>document.getElementById(id);
+const STORE_MODE="digital";const headers={"Content-Type":"application/json","X-Telegram-Init-Data":initData,"X-Store-Mode":STORE_MODE};const $=id=>document.getElementById(id);
 let products=[],cart=new Map(),category="Все",query="";
 const icons=[["chatgpt","✦"],["netflix","▶"],["spotify","♫"],["steam","◆"]];
 function iconFor(p){const s=(p.title+" "+p.description).toLowerCase();return icons.find(([k])=>s.includes(k))?.[1]||"◇"}
@@ -1198,8 +1206,9 @@ function switchTab(t){$("profileView").hidden=t!=="profile";$("catalogView").hid
 $("catalogTab").onclick=()=>switchTab("catalog");$("skinsTab").onclick=()=>switchTab("skins");$("casesTab").onclick=()=>switchTab("cases");$("ordersTab").onclick=()=>switchTab("orders");$("inventoryTab").onclick=()=>switchTab("inventory");$("upgradeTab").onclick=()=>switchTab("upgrade");$("doUpgrade").onclick=doUpgrade;initSkinCatalog();$("search").oninput=e=>{query=e.target.value.toLowerCase().trim();renderProducts()};$("checkout").onclick=checkout;
 $("clearCart").onclick=()=>{cart.clear();updateCart();renderProducts();toast("Корзина очищена")};
 async function createDemoPayment(orderId){try{const d=await api("/api/payments/demo/create",{method:"POST",body:JSON.stringify({order_id:orderId})});toast("Создана демо-транзакция #"+d.transaction_id+". Деньги не списываются.");await showOrders()}catch(e){toast(e.message)}}
+document.body.classList.add("digital-store");
 document.querySelectorAll("[data-nav],[data-go]").forEach(b=>b.onclick=()=>switchTab(b.dataset.nav||b.dataset.go));
-loadProducts();loadHomeCaseHighlights();$("refreshLiveDrops").onclick=()=>loadLiveDrops(true);loadLiveDrops();setInterval(()=>{if(!$("dropsView").hidden)loadLiveDrops(true)},30000);if(initData){showOrders()}
+loadProducts();$("refreshLiveDrops").onclick=()=>loadLiveDrops(true);if(initData){showOrders()}
 </script>
 <script src="/caser-features.js"></script>
 </body></html>

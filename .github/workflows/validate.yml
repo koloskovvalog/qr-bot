@@ -40,7 +40,7 @@ jobs:
           class Validator(HTMLParser):
               pass
 
-          for page in ("static/index.html", "static/admin.html"):
+          for page in ("static/index.html", "static/cases.html", "static/admin.html"):
               html = Path(page).read_text(encoding="utf-8")
               Validator().feed(html)
               scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
@@ -51,5 +51,6 @@ jobs:
               print(f"{page}: HTML parsed; inline JavaScript extracted")
           PY
           node --check /tmp/index.js
+          node --check /tmp/cases.js
           node --check /tmp/admin.js
           node --check static/caser-features.js
