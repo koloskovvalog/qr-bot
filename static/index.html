@@ -863,14 +863,14 @@ async function applyUpgradePreset(mode,value){
  presetButtons.forEach(b=>b.disabled=true);
  try{
   let d=null;
-  for(let attempt=0;attempt<15;attempt++){
+  for(let attempt=0;attempt<25;attempt++){
    d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
    if(!d.pending)break;
-   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" ("+(attempt+1)+"/15)";
-   await new Promise(resolve=>setTimeout(resolve,2000));
+   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" · проверка "+(attempt+1)+"/25";
+   await new Promise(resolve=>setTimeout(resolve,800));
   }
   if(!d||d.pending){
-   $("upgradePresetStatus").textContent="Цены ещё обновляются. Не нужно нажимать повторно — попробуй снова через 20–30 секунд.";
+   $("upgradePresetStatus").textContent="Рыночные котировки ещё обновляются. Попробуй повторить подбор чуть позже.";
    toast("Цены CS2 ещё загружаются");
    return;
   }
