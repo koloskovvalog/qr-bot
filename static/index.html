@@ -935,7 +935,7 @@ function upgradeInventoryItem(id,type){
 }
 
 let pendingUpgradeSourceId=null;
-let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetTotal=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null;
+let upgradeInventory=[],upgradeTargets=[],selectedUpgradeTarget=null,upgradeTargetPage=0,upgradeTargetTotal=0,upgradeTargetHasMore=false,upgradeTargetBusy=false,upgradeSearchTimer=null,upgradePresetMode=null,upgradePresetValue=null,upgradePricePollAttempts=0,upgradePricePollTimer=null,upgradePricePendingCount=0;
 async function loadUpgradeView(){
  if(!initData){$("upgradeTargets").innerHTML='<div class="empty">Откройте приложение через Telegram.</div>';return}
  $("upgradeMode").onchange=()=>{selectedUpgradeTarget=null;upgradePresetMode=null;$("upgradeResult").innerHTML="";loadUpgradeView()};
@@ -1005,8 +1005,10 @@ async function applyUpgradePreset(mode,value){
   presetButtons.forEach(b=>b.disabled=false);
  }
 }
-async function loadUpgradeTargets(reset=true){
+async function loadUpgradeTargets(reset=true,autoRefresh=false){
  if(upgradeTargetBusy)return;
+ if(autoRefresh&&($("upgradeView").hidden||selectedUpgradeTarget))return;
+ if(reset&&!autoRefresh){upgradePricePollAttempts=0;upgradePricePendingCount=0;clearTimeout(upgradePricePollTimer);}
  const type=$("upgradeMode").value;
  if(reset){upgradeTargetPage=0;upgradeTargetTotal=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
  const q=$("upgradeSearch").value.trim();
@@ -1024,6 +1026,7 @@ async function loadUpgradeTargets(reset=true){
    if($("upgradeStatTrak").checked)params.set("stattrak","1");
    if($("upgradeSouvenir").checked)params.set("souvenir","1");
    const d=await api("/api/cs2/skins?"+params.toString());
+   upgradePricePendingCount=Number(d.price_pending_count||0);
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
    upgradeTargetTotal=Number(d.total||0);
    upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
@@ -1031,7 +1034,23 @@ async function loadUpgradeTargets(reset=true){
   }
   renderUpgradeTargets();
  }catch(e){$("upgradeTargets").innerHTML='<div class="empty">'+esc(e.message)+'</div>';toast(e.message)}
- finally{upgradeTargetBusy=false;$("upgradeLoadMore").hidden=type!=="skin"||!upgradeTargetHasMore;$("upgradeLoadMore").textContent="Показать ещё 40 скинов";$("upgradeLoadMore").disabled=upgradeTargetBusy}
+ finally{
+  upgradeTargetBusy=false;
+  $("upgradeLoadMore").hidden=type!=="skin"||!upgradeTargetHasMore;
+  $("upgradeLoadMore").textContent="Показать ещё 40 скинов";
+  $("upgradeLoadMore").disabled=upgradeTargetBusy;
+  if(type==="skin"&&upgradePricePendingCount>0&&!selectedUpgradeTarget&&!$("upgradeView").hidden&&upgradePricePollAttempts<12){
+   upgradePricePollAttempts++;
+   clearTimeout(upgradePricePollTimer);
+   upgradePricePollTimer=setTimeout(()=>loadUpgradeTargets(true,true),1100);
+   $("upgradePriceNote").textContent="Получаем цены Steam для видимых скинов… "+upgradePricePollAttempts+"/12. Уже загруженные цены не пропадают.";
+  }else if(type==="skin"&&upgradePricePendingCount===0){
+   upgradePricePollAttempts=0;
+   $("upgradePriceNote").textContent="Цены Steam загружены для доступных предметов. Если у отдельного скина нет котировки, он останется недоступен для честного расчёта.";
+  }else if(upgradePricePollAttempts>=12&&upgradePricePendingCount>0){
+   $("upgradePriceNote").textContent="Часть цен пока не опубликована рынком. Попробуй позже; предметы без реальной котировки не допускаются к апгрейду.";
+  }
+ }
 }
 function currentUpgradeSource(){return upgradeInventory.find(x=>x.id===Number($("upgradeSource").value))}
 function renderUpgradeTargets(){
@@ -1045,7 +1064,7 @@ function renderUpgradeTargets(){
  $("upgradeTargetCount").textContent=upgradePresetMode&&selectedUpgradeTarget?"Автоподбор · 1 цель":(upgradeTargetTotal?list.length+" из "+upgradeTargetTotal+" скинов":list.length+" на странице");
  if(!list.length){$("upgradeTargets").innerHTML='<div class="empty">'+(source?'Нет целей дороже выбранного предмета с полученной ценой Steam. Попробуй другой запрос или диапазон.':'Сначала выбери предмет из инвентаря.')+'</div>';$("doUpgrade").disabled=!selectedUpgradeTarget;return}
  $("upgradeTargets").innerHTML=list.map(x=>{const price=Number(x.market_price_minor||0),available=$("upgradeMode").value!=="skin"||(price>=200&&price<=10000000);return '<button class="upgrade-target '+(selectedUpgradeTarget?.id===x.id?'selected':'')+(!available?' unpriced':'')+'" data-target="'+esc(x.id)+'" '+(!available?'disabled aria-disabled="true"':'')+'>'+(x.image_url?'<img src="'+esc(x.image_url)+'" alt="'+esc(x.name)+'" loading="lazy" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="upgrade-image-fallback" hidden>CS2</div>':'<div class="upgrade-image-fallback">CS2</div>')+'<strong>'+esc(x.name)+'</strong><small>'+esc(x.rarity)+' · '+(available?((x.market_price_stale?"≈ ":"")+money(price,"₽")):"Цена обновляется")+'</small>'+skinMetaTags(x)+'</button>'}).join("");
- document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
+ document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{clearTimeout(upgradePricePollTimer);upgradePricePendingCount=0;upgradePricePollAttempts=0;selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
 function renderUpgradeDuelCards(){
