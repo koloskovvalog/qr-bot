@@ -410,6 +410,36 @@ main{max-width:1180px;padding:22px 22px 62px}
 
 /* Caser-inspired dedicated case page */
 .case-detail-page{animation:casePageIn .28s ease both}.case-back{border:1px solid #454957;background:#171a21;color:#f0d48a;border-radius:12px;padding:11px 15px;font-weight:850;margin:2px 0 16px}.case-detail-heading{display:flex;align-items:center;gap:22px;text-align:left}.case-detail-cover{width:190px;height:176px;flex:0 0 190px;display:grid;place-items:center;border:1px solid #6c5730;border-radius:18px;background:radial-gradient(circle,#514027,#171a21 70%)}.case-detail-cover img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 12px 20px #0009)}.case-detail-cover span{font-size:38px;font-weight:1000;color:#e8c66f}.case-detail-info{min-width:0}.case-detail-info .case-caption{font-size:clamp(20px,4vw,30px);margin:10px 0}.case-detail-info .case-sub{margin:0 0 12px}.case-open-controls{margin:20px 0 14px;padding:16px;border:1px solid #454957;border-radius:16px;background:linear-gradient(145deg,#1d2028,#111319)}.case-open-controls>label{display:block;color:#c5cbd4;font-size:12px;font-weight:800;margin-bottom:8px}.case-open-controls select{width:100%;margin-bottom:12px}.case-open-actions{display:grid;grid-template-columns:1fr 1.3fr;gap:10px}.case-open-actions button{min-height:48px}.case-quick-btn,.case-upgrade-btn{border:1px solid #8a713d;border-radius:12px;background:#282315;color:#f6d987;font-weight:900;padding:12px}.case-demo-note{display:block;color:#a8adba;font-size:11px;margin-top:10px}.case-results-heading{display:flex;justify-content:space-between;align-items:center;margin:20px 2px 12px;color:#f1d58f}.case-results-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.case-win-card{min-width:0;padding:12px;border:1px solid #454957;border-radius:14px;background:linear-gradient(155deg,#20242d,#11141a);display:flex;flex-direction:column;gap:7px}.case-win-card>img,.case-win-card>.item-thumb-placeholder{width:100%;height:110px;object-fit:contain;background:radial-gradient(circle,#3c3528,#151820);border-radius:10px}.case-win-card>small{font-size:9px;color:#d4b96e;letter-spacing:1px}.case-win-card>strong{font-size:12px;line-height:1.35}.case-win-card>span{font-size:10px;color:#b9bfca}.case-win-card>b{color:#f2d98c}.case-win-actions{display:grid;gap:6px;margin-top:auto}.case-win-actions button{font-size:10px;padding:9px}.case-win-actions .sell-item{width:100%}.case-detail-contents{margin-top:24px}#caseDetailPanel .case-stage{padding:18px;margin-top:0}#caseDetailPanel .case-reel{margin:18px 0 4px}#caseDetailPanel .case-reel[hidden]{display:none}@keyframes casePageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@media(max-width:600px){.case-detail-heading{align-items:flex-start;gap:12px}.case-detail-cover{width:116px;height:126px;flex-basis:116px}.case-detail-info .case-caption{font-size:18px}.case-open-actions{grid-template-columns:1fr}.case-results-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Large Caser-inspired upgrader wheel */
+.upgrade-live-panel{position:relative;top:auto;z-index:2;width:100%;max-width:760px;margin:12px auto 18px;padding:22px 18px 18px;gap:14px;overflow:hidden;background:radial-gradient(ellipse at 50% 42%,#342817 0%,#1a1711 48%,#0d0d0c 100%);border:1px solid #8e713a;box-shadow:0 18px 55px #000b,inset 0 1px 0 #f4d88b22}
+.upgrade-wheel-title{font-size:12px;letter-spacing:2.8px;text-align:center;text-shadow:0 0 18px #e4bd5b55}
+.upgrade-live-panel .upgrade-wheel-box{width:min(88vw,490px);max-width:490px;aspect-ratio:1;margin:8px auto 12px;isolation:isolate;filter:drop-shadow(0 15px 26px #000a)}
+.upgrade-wheel-box:before{content:"";position:absolute;inset:-9px;border-radius:50%;border:2px solid #d5ad59;box-shadow:0 0 0 5px #342817,0 0 0 7px #92713a66,0 0 38px #d8b45a44;pointer-events:none}
+.upgrade-wheel-box:after{content:"";position:absolute;inset:-2px;border-radius:50%;background:repeating-conic-gradient(from 0deg,#f5d98b 0deg 1deg,transparent 1deg 7.5deg);mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));opacity:.8;pointer-events:none}
+.upgrade-wheel{border:10px solid #d2a64e;box-shadow:0 0 0 5px #211a0d,0 0 0 8px #f4d78a55,0 0 45px #d8b45a44,inset 0 0 22px #000b;transition:none;will-change:transform}
+.upgrade-wheel:before{inset:12px;border:2px dashed #fff0bb88;box-shadow:inset 0 0 18px #0008}
+.upgrade-wheel:after{inset:34%;border:5px solid #e5bf69;background:radial-gradient(circle at 35% 28%,#564326 0%,#21190d 55%,#0b0a08 100%);box-shadow:0 0 0 5px #1a140b,0 0 28px #000d,inset 0 0 16px #000}
+.upgrade-wheel-pointer{z-index:7;inset:0;filter:drop-shadow(0 3px 6px #000)}
+.upgrade-wheel-pointer:before{left:calc(50% - 2px);top:-1%;width:4px;height:13%;border-radius:0 0 5px 5px;background:linear-gradient(90deg,#9b762d,#fff3bd 45%,#b78934);box-shadow:0 0 12px #ffe8a3}
+.upgrade-wheel-pointer:after{top:7%;left:50%;transform:translateX(-50%);border-left:13px solid transparent;border-right:13px solid transparent;border-top:23px solid #ffe6a0;border-bottom:0;filter:drop-shadow(0 2px 2px #000)}
+.upgrade-wheel-center{z-index:6;inset:34%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:4px}
+.upgrade-wheel-center small{font-size:clamp(8px,2vw,11px);letter-spacing:1.6px;color:#dfc98f;font-weight:900}
+.upgrade-wheel-center strong{font-size:clamp(27px,7vw,46px);line-height:1;color:#fff0bd;text-shadow:0 0 14px #f2c65a88,0 3px 8px #000}
+.upgrade-wheel-center b{font-size:clamp(7px,1.8vw,10px);letter-spacing:1px;color:#d4b36d;text-align:center;white-space:nowrap}
+.upgrade-live-controls{width:100%;max-width:560px;display:grid;gap:11px}
+.upgrade-wheel-status{font-size:13px;min-height:20px;color:#e3d4b0;font-weight:750}
+.upgrade-wheel-legend{font-size:11px;color:#c6bda8;gap:22px}
+.upgrade-wheel-legend span:before{width:10px;height:10px;box-shadow:0 0 8px #e7c56e88}
+.upgrade-wheel-legend span+span:before{background:#51452e;box-shadow:none}
+.upgrade-live-controls .goldbtn{min-height:54px;font-size:15px;letter-spacing:.5px;border:1px solid #ffe6a0;box-shadow:0 8px 26px #d8b45a44, inset 0 1px 0 #fff8}
+.upgrade-live-panel.wheel-spinning .upgrade-wheel-box{animation:wheelGlow .75s ease-in-out infinite alternate}
+.upgrade-live-panel.wheel-spinning .upgrade-wheel{filter:brightness(1.13) saturate(1.18)}
+.upgrade-live-panel.wheel-success .upgrade-wheel-box{filter:drop-shadow(0 0 24px #d7b24d99)}
+.upgrade-live-panel.wheel-success .upgrade-wheel-center strong{color:#fff3b7}
+@keyframes wheelGlow{from{filter:drop-shadow(0 12px 20px #0009)}to{filter:drop-shadow(0 12px 38px #e6bd5b66)}}
+@media(min-width:700px){.upgrade-live-panel .upgrade-wheel-box{width:min(46vw,490px)}}
+@media(max-width:480px){.upgrade-live-panel{padding:18px 12px 14px;border-radius:16px}.upgrade-live-panel .upgrade-wheel-box{width:min(86vw,410px)}.upgrade-wheel{border-width:8px}.upgrade-wheel:before{inset:9px}.upgrade-wheel-pointer:after{top:7%;border-left-width:11px;border-right-width:11px;border-top-width:19px}.upgrade-wheel-center{inset:34%}}
 </style>
 </head>
 <body><main>
@@ -491,7 +521,7 @@ main{max-width:1180px;padding:22px 22px 62px}
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
-<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><strong id="upgradeWheelPercent">—%</strong><small>CHANCE</small></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
+<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>ШАНС УСПЕХА</small><strong id="upgradeWheelPercent">—%</strong><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
 <select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
@@ -889,21 +919,33 @@ function renderUpgradeTargets(){
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
 function renderUpgradeChance(){
- const source=currentUpgradeSource();
- if(!source||!selectedUpgradeTarget){$("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";$("upgradeWheel").style.setProperty("--chance","0%");$("upgradeWheel").style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Выбери предмет и цель — колесо покажет шанс";$("upgradeTargetInfo").textContent="Выбери цель улучшения";$("doUpgrade").disabled=true;return}
+ const source=currentUpgradeSource(),wheel=$("upgradeWheel");
+ const setEmpty=(message)=>{
+  $("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";
+  $("upgradeWheelMultiplier").textContent="ВЫБЕРИ ЦЕЛЬ";
+  wheel.style.setProperty("--chance","0%");wheel.style.transform="rotate(0deg)";
+  $("upgradeWheelStatus").textContent=message;
+  $("upgradeTargetInfo").textContent="Выбери цель улучшения";
+  $("doUpgrade").disabled=true;
+ };
+ if(!source||!selectedUpgradeTarget){setEmpty("Выбери предмет для ставки и целевой скин");return}
  const sourceValue=Number($("upgradeMode").value==="skin"?source.market_price_minor:source.value_minor);
  const targetValue=Number($("upgradeMode").value==="skin"?selectedUpgradeTarget.market_price_minor:selectedUpgradeTarget.value_minor);
- if(!sourceValue||!targetValue){$("upgradeChance").textContent="Цена уточняется";$("doUpgrade").disabled=true;return}
  if(!sourceValue||!targetValue){
   $("upgradeChance").textContent="Цена уточняется";$("upgradeWheelPercent").textContent="—%";
-  $("upgradeWheel").style.setProperty("--chance","0%");
-  $("upgradeWheelStatus").textContent="Ожидаем актуальную цену предмета для честного расчёта";
+  $("upgradeWheelMultiplier").textContent="ЦЕНА УТОЧНЯЕТСЯ";
+  wheel.style.setProperty("--chance","0%");
+  $("upgradeWheelStatus").textContent="Ожидаем актуальную цену предметов для точного расчёта";
   $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
   $("doUpgrade").disabled=true;return;
  }
  const chance=Math.min(75,Math.max(.01,Math.round(sourceValue/targetValue*7500)/100));
- $("upgradeChance").textContent=chance.toFixed(2)+"%";$("upgradeWheelPercent").textContent=chance.toFixed(1)+"%";$("upgradeWheel").style.setProperty("--chance",chance+"%");$("upgradeWheelStatus").textContent="Сектор успеха подсвечен золотым";
  const multiplier=targetValue/sourceValue;
+ $("upgradeChance").textContent=chance.toFixed(2)+"%";
+ $("upgradeWheelPercent").textContent=chance.toFixed(2)+"%";
+ $("upgradeWheelMultiplier").textContent="МНОЖИТЕЛЬ ×"+multiplier.toFixed(2);
+ wheel.style.setProperty("--chance",chance+"%");
+ $("upgradeWheelStatus").textContent="Золотой сектор — успех · тёмный сектор — неудача";
  $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name+" · X"+multiplier.toFixed(2);
  $("doUpgrade").disabled=false;
 }
@@ -912,7 +954,8 @@ async function doUpgrade(){
  if(!source||!target)return;
  if(!confirm("Подтвердить демо-апгрейд? При неудаче предмет «"+source.item_name+"» будет списан из виртуального инвентаря. Это действие нельзя отменить."))return;
  $("doUpgrade").disabled=true;$("upgradeResult").innerHTML='<div class="upgrade-result">Апгрейд запускается…</div>';$("upgradeWheelStatus").textContent="Запрашиваем результат…";
- const wheel=$("upgradeWheel");
+ const wheel=$("upgradeWheel"),wheelPanel=wheel.closest(".upgrade-wheel-panel");
+ wheelPanel?.classList.add("wheel-spinning");
  wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;
  try{
   let d=null;
@@ -928,7 +971,7 @@ async function doUpgrade(){
   const rollAngle=Number(d.roll_percent||0)*3.6;
   const finalAngle=2160+360-rollAngle;
   if(typeof wheel.animate==="function"){
-   const spin=wheel.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:4800,easing:"cubic-bezier(.12,.78,.12,1)",fill:"forwards"});
+   const spin=wheel.animate([{transform:"rotate(0deg)"},{transform:"rotate("+finalAngle+"deg)"}],{duration:5600,easing:"cubic-bezier(.10,.78,.12,1)",fill:"forwards"});
    await spin.finished;
    wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
    spin.cancel();
@@ -938,12 +981,14 @@ async function doUpgrade(){
    await new Promise(resolve=>setTimeout(resolve,4900));
    wheel.style.transition="none";wheel.style.transform="rotate("+(360-rollAngle)+"deg)";
   }
-  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — маркер остановился в золотом секторе":"✕ НЕУДАЧА — маркер остановился в тёмном секторе";
+  wheelPanel?.classList.remove("wheel-spinning");
+  wheelPanel?.classList.toggle("wheel-success",!!d.success);
+  $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — указатель остановился в золотом секторе":"✕ НЕУДАЧА — указатель остановился в тёмном секторе";
   $("upgradeResult").innerHTML='<div class="upgrade-result '+(d.success?'is-success':'is-fail')+'"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'% · результат сервера: '+(d.success?'успех':'неудача')+'</div><p class="muted">'+esc(d.message)+'</p></div>';
   const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
   await showInventory();
   await loadUpgradeTargets(true);
- }catch(e){wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
+ }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
 }
 async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
 const drops=d.case_drops||[];
