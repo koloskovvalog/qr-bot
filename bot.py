@@ -1284,13 +1284,17 @@ async def get_cs2_skins(request):
     phase_filter = request.query.get("phase", "").strip().casefold()
     stattrak_only = request.query.get("stattrak") == "1"
     souvenir_only = request.query.get("souvenir") == "1"
-    # The public skin catalog is intentionally bounded to the requested
-    # market-price range. Defaults include both endpoints: 2 RUB .. 100,000 RUB.
-    min_price_minor = steam_price_to_minor(request.query.get("min_price") or "2")
-    max_price_minor = steam_price_to_minor(request.query.get("max_price") or "100000")
-    min_price_minor = max(200, min_price_minor or 200)
-    max_price_minor = min(10000000, max_price_minor or 10000000)
-    if min_price_minor > max_price_minor:
+    # No implicit price filter: return every matching CS2 skin variant.
+    # Price bounds are applied only when the user explicitly enters them.
+    min_raw = request.query.get("min_price", "").strip()
+    max_raw = request.query.get("max_price", "").strip()
+    min_price_minor = steam_price_to_minor(min_raw) if min_raw else None
+    max_price_minor = steam_price_to_minor(max_raw) if max_raw else None
+    if min_price_minor is not None:
+        min_price_minor = max(200, min_price_minor)
+    if max_price_minor is not None:
+        max_price_minor = min(10000000, max_price_minor)
+    if min_price_minor is not None and max_price_minor is not None and min_price_minor > max_price_minor:
         raise web.HTTPBadRequest(text="Минимальная цена не может быть выше максимальной")
     sort = request.query.get("sort", "name")
     try:
