@@ -11,6 +11,12 @@ services:
       - key: BOT_TOKEN
         sync: false
 
+      - key: CASES_BOT_TOKEN
+        sync: false
+
+      - key: CASES_WEBHOOK_SECRET
+        generateValue: true
+
       - key: ADMIN_IDS
         sync: false
 
