@@ -63,7 +63,7 @@ main{max-width:760px;margin:auto;padding:20px 16px 54px}.top{display:flex;align-
 .upgrade-wheel-pointer{position:absolute;z-index:5;inset:0;width:100%;height:100%;border:0;background:transparent;transform:rotate(0deg);transform-origin:50% 50%;pointer-events:none;filter:drop-shadow(0 2px 4px #000)}
 .upgrade-wheel-pointer:before{content:"";position:absolute;left:calc(50% - 2px);top:5%;width:4px;height:45%;border-radius:4px;background:linear-gradient(180deg,#fff3bd,#d7a83e)}
 .upgrade-wheel-pointer:after{content:"";position:absolute;left:50%;top:2%;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:15px solid #fff0b2}
-.upgrade-wheel{transform:none!important;transition:none!important}
+.upgrade-wheel{transform:rotate(0deg);transition:none}
 .upgrade-preset-panel{border:1px solid #4d4027;border-radius:14px;background:#100f0c;padding:12px;margin:12px 0}
 .preset-heading{font-size:12px;font-weight:900;color:var(--gold2);margin-bottom:9px}
 .preset-label{font-size:10px;color:var(--muted);font-weight:800;margin:8px 0 6px}
@@ -687,7 +687,7 @@ async function openCase(){
  const cardHtml=(item,withImage=false)=>'<div class="reel-card">'+(withImage&&item.image_url?'<img src="'+esc(item.image_url)+'" alt="'+esc(item.name)+'" loading="lazy" decoding="async" fetchpriority="low" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="reel-image-placeholder" hidden>CS2</div>':'<div class="reel-image-placeholder">CS2</div>')+'<strong>'+esc(item.name)+'</strong><span>'+esc(item.rarity)+'</span><b class="reel-price">'+(item.market_price_minor?money(item.market_price_minor,"₽"):"Цена уточняется")+'</b></div>';
  const winnerIndex=38;
  const reelItems=Array.from({length:45},(_,n)=>pool[Math.floor(Math.random()*pool.length)]);
- const trackHtml=items=>items.map((item,index)=>cardHtml(item,index%7===0)).join("");
+ const trackHtml=items=>items.map((item,index)=>cardHtml(item,index%7===0||Math.abs(index-winnerIndex)<=5)).join("");
  reel.classList.remove("spinning","stopping");
  reel.innerHTML='<div class="reel-track">'+trackHtml(reelItems)+'</div>';
  reel.classList.add("ready");
