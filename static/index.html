@@ -980,11 +980,11 @@ async function applyUpgradePreset(mode,value){
  presetButtons.forEach(b=>b.disabled=true);
  try{
   let d=null;
-  for(let attempt=0;attempt<25;attempt++){
+  for(let attempt=0;attempt<18;attempt++){
    d=await api("/api/upgrades/suggest",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,item_type:"skin",mode,value})});
    if(!d.pending)break;
-   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" · проверка "+(attempt+1)+"/25";
-   await new Promise(resolve=>setTimeout(resolve,800));
+   $("upgradePresetStatus").textContent=(d.message||"Получаем цены рынка…")+" · "+(attempt+1)+"/18";
+   await new Promise(resolve=>setTimeout(resolve,1000));
   }
   if(!d||d.pending){
    $("upgradePresetStatus").textContent="Рыночные котировки ещё обновляются. Попробуй повторить подбор чуть позже.";
@@ -1110,13 +1110,13 @@ async function doUpgrade(){
  wheel.style.transition="none";wheel.style.transform="rotate(0deg)";void wheel.offsetWidth;
  try{
   let d=null;
-  for(let attempt=0;attempt<15;attempt++){
+  for(let attempt=0;attempt<18;attempt++){
    d=await api("/api/upgrades/attempt",{method:"POST",body:JSON.stringify({source_inventory_id:source.id,target_id:target.id,item_type:type})});
    if(!d.pending)break;
-   $("upgradeWheelStatus").textContent=(d.message||"Обновляем рыночные цены…")+" ("+(attempt+1)+"/15)";
-   await new Promise(resolve=>setTimeout(resolve,2000));
+   $("upgradeWheelStatus").textContent=(d.message||"Обновляем рыночные цены…")+" · "+(attempt+1)+"/18";
+   await new Promise(resolve=>setTimeout(resolve,1000));
   }
-  if(!d||d.pending)throw new Error("Цены ещё обновляются. Предмет не списан — повтори апгрейд чуть позже.");
+  if(!d||d.pending)throw new Error("Цена пока не получена от рынка. Предмет сохранён — повтори попытку позже.");
   // Caser-style: keep the wheel and sectors stationary; rotate the pointer
   // around the inner rim so its tip lands exactly on the server's roll angle.
   const pointer=wheel.parentElement.querySelector(".upgrade-wheel-pointer");
