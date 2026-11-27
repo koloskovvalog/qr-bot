@@ -835,8 +835,8 @@ function renderCaseCards(){
   const count=Number(c.items_total||c.items?.length||0);
   return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
    '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
-   '<div class="case-card-info"><div class="case-card-kicker"><span>SHIRPDROP • THEMATIC DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO':'COMING SOON')+'</span></div><strong>'+esc(c.title)+'</strong>'+
-   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.price_minor||0)===0?'0 ₽':'СКОРО')+'</b></div></div></button>';
+   '<div class="case-card-info"><div class="case-card-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'НЕДОСТУПЕН')+'</span></div><strong>'+esc(c.title)+'</strong>'+
+   '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.reference_price_minor||0)>0?'CASER '+money(c.reference_price_minor,"RUB"):(Number(c.price_minor||0)===0?'0 ₽':'СКОРО'))+'</b></div></div></button>';
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
 }
@@ -846,13 +846,13 @@ function selectCase(caseId){
  $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
   '<div class="case-detail-heading"><div class="case-detail-cover">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
-  '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • THEMATIC DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'СКОРО')+'</span></div>'+
+  '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • CS2 DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'НЕДОСТУПЕН')+'</span></div>'+
   '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</p>'+
-  '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>Серверный случайный результат</span></div></div></div>'+
+  '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>'+(Number(c.reference_price_minor||0)>0?'Ориентир Caser: '+money(c.reference_price_minor,"RUB"):'Демо-кейс')+'</span>'+(c.estimated_rtp_percent!==null&&c.estimated_rtp_percent!==undefined?'<span>Оценка возврата: '+Number(c.estimated_rtp_percent).toFixed(2)+'%</span>':'')+'</div></div></div>'+
    '<div class="case-preview"><div class="case-preview-head"><strong>Что может выпасть</strong><span>'+Number(c.items_total||c.items.length)+' предметов в кейсе</span></div><div class="case-preview-grid" id="casePreviewItems"></div><button type="button" class="case-preview-more" id="casePreviewMore">Посмотреть все скины и шансы ↓</button></div>'+
   '<div class="case-open-controls"><label for="caseOpenCount">Количество открытий</label><select id="caseOpenCount" class="search"><option value="1">1 кейс</option><option value="2">2 кейса</option><option value="3">3 кейса</option><option value="4">4 кейса</option><option value="5">5 кейсов</option></select>'+
   '<div class="case-open-actions"><button id="quickOpenCase" class="case-quick-btn" type="button">⚡ Быстро открыть</button><button id="openCase" class="goldbtn" type="button">✦ Открыть с прокруткой</button></div>'+
-  '<small class="case-demo-note">'+(Number(c.price_minor||0)===0?'Демо-открытие · виртуальные предметы':'Этот кейс пока недоступен для открытия')+'</small></div>'+
+  '<small class="case-demo-note">'+(Number(c.price_minor||0)===0?'Бесплатное демо-открытие. Цена Caser указана только как ориентир и не списывается.':'Этот кейс пока недоступен для открытия')+'</small></div>'+
   '<div id="caseReel" class="case-reel" hidden></div>';
  const disabled=!c.items?.length||Number(c.price_minor||0)!==0;
  $("openCase").disabled=disabled;$("quickOpenCase").disabled=disabled;
