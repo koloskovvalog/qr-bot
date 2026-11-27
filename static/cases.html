@@ -595,7 +595,7 @@ body.cases-store #cartbar{display:none!important}
  <input id="caseSearch" class="search" type="search" placeholder="⌕  Найти кейс по названию…">
  <select id="caseSort" class="search" aria-label="Сортировка кейсов"><option value="featured">Рекомендуемые</option><option value="name">По названию</option><option value="items">Больше предметов</option><option value="newest">Сначала новые</option></select>
 </div>
-<div class="case-catalog-caption"><span id="caseCatalogCount">Загружаем кейсы…</span><span>CS2 · DEMO COLLECTION</span></div>
+<div class="case-catalog-caption"><span id="caseCatalogCount">Загружаем кейсы…</span><span>SHIRPDROP ORIGINALS · DEMO</span></div>
 <div id="caseCards" class="case-catalog-grid"><div class="empty">Загрузка каталога кейсов…</div></div>
 </div>
 <div id="caseDetailPanel" class="case-detail-page" hidden>
@@ -810,7 +810,7 @@ function renderCaseCards(){
   const count=Number(c.items_total||c.items?.length||0);
   return '<button class="case-card '+(Number($("caseStage").dataset.caseId)===Number(c.id)?'selected':'')+'" type="button" data-case-select="'+esc(c.id)+'">'+
    '<div class="case-card-art">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" loading="lazy" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
-   '<div class="case-card-info"><div class="case-card-kicker"><span>QR CASE SERIES</span><span>'+(Number(c.price_minor||0)===0?'DEMO':'COMING SOON')+'</span></div><strong>'+esc(c.title)+'</strong>'+
+   '<div class="case-card-info"><div class="case-card-kicker"><span>SHIRPDROP • THEMATIC DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO':'COMING SOON')+'</span></div><strong>'+esc(c.title)+'</strong>'+
    '<div class="case-card-bottom"><span>'+count+' предметов</span><b>'+(Number(c.price_minor||0)===0?'0 ₽':'СКОРО')+'</b></div></div></button>';
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
@@ -821,7 +821,7 @@ function selectCase(caseId){
  $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
   '<div class="case-detail-heading"><div class="case-detail-cover">'+(c.image_url?'<img src="'+esc(c.image_url)+'" alt="'+esc(c.title)+'" onerror="this.hidden=true;this.parentElement.classList.add(\'no-image\')">':'<span>CS2</span>')+'</div>'+
-  '<div class="case-detail-info"><div class="case-stage-kicker"><span>QR CASE SERIES</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'СКОРО')+'</span></div>'+
+  '<div class="case-detail-info"><div class="case-stage-kicker"><span>SHIRPDROP • THEMATIC DROP</span><span>'+(Number(c.price_minor||0)===0?'DEMO · БЕСПЛАТНО':'СКОРО')+'</span></div>'+
   '<h2 class="case-caption">'+esc(c.title)+'</h2><p class="case-sub">'+esc(c.description||"Открой виртуальный кейс и получи предмет в инвентарь")+'</p>'+
   '<div class="case-stage-meta"><span>✦ '+Number(c.items_total||c.items.length)+' предметов</span><span>Серверный случайный результат</span></div></div></div>'+
   '<div class="case-open-controls"><label for="caseOpenCount">Количество открытий</label><select id="caseOpenCount" class="search"><option value="1">1 кейс</option><option value="2">2 кейса</option><option value="3">3 кейса</option><option value="4">4 кейса</option><option value="5">5 кейсов</option></select>'+
@@ -1014,15 +1014,15 @@ async function loadUpgradeTargets(reset=true,autoRefresh=false){
  if(autoRefresh&&($("upgradeView").hidden||selectedUpgradeTarget))return;
  if(reset&&!autoRefresh){upgradePricePollAttempts=0;upgradePricePendingCount=0;clearTimeout(upgradePricePollTimer);}
  const type=$("upgradeMode").value;
- if(reset){upgradeTargetPage=0;upgradeTargetTotal=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
+ if(reset&&!autoRefresh){upgradeTargetPage=0;upgradeTargetTotal=0;upgradeTargets=[];selectedUpgradeTarget=null;upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(b=>b.classList.remove("active"));}
  const q=$("upgradeSearch").value.trim();
- upgradeTargetBusy=true;$("upgradeTargets").innerHTML=reset?'<div class="empty">Загружаем каталог CS2…</div>':$("upgradeTargets").innerHTML;
+ upgradeTargetBusy=true;$("upgradeTargets").innerHTML=reset&&!autoRefresh?'<div class="empty">Загружаем каталог CS2…</div>':$("upgradeTargets").innerHTML;
  try{
   if(type==="case"){
    const d=await api("/api/cs2/catalog?kind=cases&limit=160");
    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);upgradeTargetTotal=upgradeTargets.length;upgradeTargetHasMore=false;
   }else{
-   const params=new URLSearchParams({q,page:String(upgradeTargetPage),limit:"40",sort:$("upgradeSort").value});
+   const params=new URLSearchParams({q,page:String(autoRefresh?Math.max(0,upgradeTargetPage-1):upgradeTargetPage),limit:"40",sort:$("upgradeSort").value});
    if($("upgradeMinPrice").value)params.set("min_price",$("upgradeMinPrice").value);
    if($("upgradeMaxPrice").value)params.set("max_price",$("upgradeMaxPrice").value);
    if($("upgradeWear").value)params.set("wear",$("upgradeWear").value);
@@ -1031,9 +1031,16 @@ async function loadUpgradeTargets(reset=true,autoRefresh=false){
    if($("upgradeSouvenir").checked)params.set("souvenir","1");
    const d=await api("/api/cs2/skins?"+params.toString());
    upgradePricePendingCount=Number(d.price_pending_count||0);
-   upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
+   if(autoRefresh){
+    const refreshed=new Map(upgradeTargets.map(x=>[String(x.id),x]));
+    (d.items||[]).forEach(x=>refreshed.set(String(x.id),{...(refreshed.get(String(x.id))||{}),...x}));
+    upgradeTargets=Array.from(refreshed.values());
+   }else{
+    upgradeTargets=reset?(d.items||[]):upgradeTargets.concat(d.items||[]);
+   }
    upgradeTargetTotal=Number(d.total||0);
-   upgradeTargetHasMore=Boolean(d.has_more);upgradeTargetPage=Number(d.page||0)+1;
+   upgradeTargetHasMore=Boolean(d.has_more);
+   if(!autoRefresh)upgradeTargetPage=Number(d.page||0)+1;
    $("upgradePriceNote").textContent="Полный каталог CS2, загрузка по 40 скинов. Цены берутся из кэша до 7 дней, обновление выполняется в фоне; знак ≈ означает сохранённую цену, которая может быть не самой свежей. Скины без котировки не допускаются к апгрейду.";
   }
   renderUpgradeTargets();
@@ -1043,10 +1050,10 @@ async function loadUpgradeTargets(reset=true,autoRefresh=false){
   $("upgradeLoadMore").hidden=type!=="skin"||!upgradeTargetHasMore;
   $("upgradeLoadMore").textContent="Показать ещё 40 скинов";
   $("upgradeLoadMore").disabled=upgradeTargetBusy;
-  if(type==="skin"&&upgradePricePendingCount>0&&!selectedUpgradeTarget&&!$("upgradeView").hidden&&upgradePricePollAttempts<12){
+  if(type==="skin"&&upgradePricePendingCount>0&&!selectedUpgradeTarget&&!$("upgradeView").hidden&&upgradePricePollAttempts<20){
    upgradePricePollAttempts++;
    clearTimeout(upgradePricePollTimer);
-   upgradePricePollTimer=setTimeout(()=>loadUpgradeTargets(true,true),1100);
+   upgradePricePollTimer=setTimeout(()=>loadUpgradeTargets(true,true),1200);
    $("upgradePriceNote").textContent="Получаем цены Steam для видимых скинов… "+upgradePricePollAttempts+"/12. Уже загруженные цены не пропадают.";
   }else if(type==="skin"&&upgradePricePendingCount===0){
    upgradePricePollAttempts=0;
