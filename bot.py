@@ -4910,6 +4910,8 @@ def create_app():
     app.router.add_post("/api/inventory/{inventory_id}/favorite", toggle_inventory_favorite)
     app.router.add_get("/api/rewards", get_rewards)
     app.router.add_get("/api/inventory", get_inventory)
+    # Read-only upgrade target discovery used by the Mini App auto-picker.
+    app.router.add_post("/api/upgrades/suggest", suggest_upgrade_target)
     app.router.add_get("/api/wallet", get_wallet)
     app.router.add_get("/api/wallet/cash", get_cash_wallet)
     app.router.add_post("/api/wallet/topups", create_telebotly_topup)
