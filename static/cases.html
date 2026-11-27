@@ -992,7 +992,7 @@ function initSkinCatalog(){
 function orderStatusLabel(status){return ({created:"Создан",pending:"Ожидает оплаты",pending_payment:"Ожидает оплаты",invoice_sent:"Счёт отправлен",paid:"Оплачен",delivered:"Выдан",cancelled:"Отменён",refunded:"Возвращён"})[status]||status}
 async function showOrders(){try{const d=await api("/api/orders");if(!d.items.length){$("orders").innerHTML='<div class="empty">Заказов пока нет.</div>';return}$("orders").innerHTML=d.items.map(o=>'<article class="purchase-row"><div class="purchase-product"><span class="purchase-icon">✦</span><div><strong>'+esc(o.product_title)+'</strong><small>Заказ #'+o.id+'</small></div></div><strong class="purchase-amount">'+money(o.amount_minor,o.currency)+'</strong><span class="purchase-status status-'+esc(o.status)+'">'+esc(orderStatusLabel(o.status))+'</span><div class="purchase-date">'+new Date(o.created_at).toLocaleDateString("ru-RU")+'</div></article>').join("")}catch(e){$("orders").innerHTML='<div class="empty">Не удалось загрузить заказы. Откройте Mini App из Telegram.</div>'}}
 let casesData=[];
-let demoCaseClaimedToday=false;
+let demoCaseClaimedToday=false,demoClaimStatusLoaded=false;
 let homeCasePendingId=null,casesLoadedAt=0,casesLoadPromise=null;
 async function loadHomeCaseHighlights(){
  const host=$("homeCaseGrid");if(!host)return;
@@ -1023,10 +1023,27 @@ function renderCaseCards(){
  }).join("");
  host.querySelectorAll("[data-case-select]").forEach(b=>b.onclick=()=>selectCase(b.dataset.caseSelect));
 }
+function updateDemoClaimButton(){
+ const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
+ const button=$("claimDemoCase");
+ if(!button||!c)return;
+ button.disabled=!demoClaimStatusLoaded||demoCaseClaimedToday||!c.demo_claim_available;
+ button.textContent=!demoClaimStatusLoaded?"Проверяем доступность…":(demoCaseClaimedToday?"Тестовый скин получен сегодня":(c.demo_claim_available?"Получить бесплатный тестовый скин для апгрейда":"В этом кейсе нет предмета для демо-апгрейда"));
+}
+async function loadDemoClaimStatus(){
+ if(!initData){demoClaimStatusLoaded=false;updateDemoClaimButton();return}
+ try{
+  const d=await api("/api/demo-claim-status");
+  demoCaseClaimedToday=Boolean(d.claimed_today);
+  demoClaimStatusLoaded=true;
+ }catch(_){demoClaimStatusLoaded=false}
+ updateDemoClaimButton();
+}
 function selectCase(caseId){
  const c=casesData.find(x=>x.id===Number(caseId));if(!c)return;
  const demoClaim=$("claimDemoCase");
- if(demoClaim){demoClaim.disabled=demoCaseClaimedToday||!c.demo_claim_available;demoClaim.textContent=demoCaseClaimedToday?"Тестовый скин получен сегодня":(c.demo_claim_available?"Получить бесплатный тестовый скин для апгрейда":"В этом кейсе нет предмета для демо-апгрейда");demoClaim.onclick=claimDemoCase;}
+ if(demoClaim)demoClaim.onclick=claimDemoCase;
+ updateDemoClaimButton();
  $("caseCatalogPanel").hidden=true;$("caseDetailPanel").hidden=false;
  $("caseStage").dataset.caseId=c.id;
  $("caseStage").innerHTML=
@@ -1053,7 +1070,12 @@ async function loadCases(force=false){
   renderCaseCards();
   if(homeCasePendingId){const preferred=casesData.find(c=>c.id===Number(homeCasePendingId));if(preferred)selectCase(preferred.id);homeCasePendingId=null;}
   else {$("caseCatalogPanel").hidden=false;$("caseDetailPanel").hidden=true;}
- }catch(e){$("caseStage").innerHTML='<div class="empty">Не удалось загрузить кейсы. Откройте Mini App через Telegram.</div>'}finally{casesLoadPromise=null}})();
+ }catch(e){
+  $("caseCatalogCount").textContent="Ошибка загрузки";
+  $("caseCards").innerHTML='<div class="empty">Не удалось загрузить каталог. Проверь подключение и попробуй ещё раз.<br><button type="button" class="buy" id="retryCases">Повторить загрузку</button></div>';
+  $("retryCases").onclick=()=>loadCases(true);
+  $("caseStage").innerHTML='<div class="empty">Каталог временно недоступен.</div>';
+ }finally{casesLoadPromise=null}})();
  return casesLoadPromise;
 }
 
@@ -1076,17 +1098,18 @@ async function claimDemoCase(){
  const c=casesData.find(x=>x.id===Number($("caseStage").dataset.caseId));
  const button=$("claimDemoCase");
  if(!c||!c.demo_claim_available||demoCaseClaimedToday)return;
+ if(!demoClaimStatusLoaded){toast("Проверяем доступность бесплатного скина. Попробуй ещё раз через секунду.");return;}
  button.disabled=true;
  try{
   const d=await api("/api/cases/"+c.id+"/claim",{method:"POST",body:"{}"});
   demoCaseClaimedToday=true;
-  button.textContent="Тестовый скин получен сегодня";
+  updateDemoClaimButton();
   toast(d.message);
   await showInventory();
  }catch(e){
   if(String(e.message||"").includes("уже получен сегодня")){
    demoCaseClaimedToday=true;
-   button.textContent="Тестовый скин получен сегодня";
+   updateDemoClaimButton();
   }else{
    button.disabled=false;
   }
@@ -1482,6 +1505,7 @@ document.querySelector(".ux-welcome p").textContent="Смотри каталог
 document.querySelectorAll("[data-nav],[data-go]").forEach(b=>b.onclick=()=>switchTab(b.dataset.nav||b.dataset.go));
 $("walletTopupBtn").onclick=openWalletTopup;$("walletTopupClose").onclick=closeWalletTopup;$("walletTopupPay").onclick=submitWalletTopup;document.querySelectorAll("[data-topup-amount]").forEach(b=>b.onclick=()=>{$("walletTopupCustom").value=(Number(b.dataset.topupAmount)/100).toString();document.querySelectorAll("[data-topup-amount]").forEach(x=>x.classList.toggle("active",x===b))});$("walletTopupModal").addEventListener("click",e=>{if(e.target.id==="walletTopupModal")closeWalletTopup()});
 $("refreshLiveDrops").onclick=()=>loadLiveDrops(true);
+loadDemoClaimStatus();
 switchTab("cases");
 setInterval(()=>{if(!$("dropsView").hidden)loadLiveDrops(true)},30000);
 </script>
