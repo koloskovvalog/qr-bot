@@ -41,7 +41,7 @@ async function loadOrders(){const d=await api("/api/admin/orders");allOrders=d.i
 $("orderSearch").oninput=()=>{const q=$("orderSearch").value.toLowerCase();$("ordersTable").innerHTML=orderTable(allOrders.filter(o=>[o.id,o.user_id,o.username,o.product_title,o.status].join(" ").toLowerCase().includes(q)))};
 window.setStatus=async id=>{try{const status=$("st"+id).value;if(status==="paid"&&!confirm("Вы проверили фактическое поступление оплаты?"))return;await api("/api/admin/orders/"+id+"/status",{method:"POST",body:JSON.stringify({status})});await refresh();alert("Статус заказа обновлён")}catch(e){alert(e.message)}};
 async function loadStats(){const d=await api("/api/admin/dashboard");$("ordersTotal").textContent=d.total_orders;$("ordersPending").textContent=d.pending_orders;$("ordersPaid").textContent=d.paid_orders;$("turnover").textContent=(d.turnover||[]).map(x=>money(x.amount_minor,x.currency)).join(" / ")||"0.00 ₽";$("turnoverBreakdown").innerHTML=(d.turnover||[]).map(x=>'<div style="padding:9px 0;border-bottom:1px solid #303744"><b>'+esc(x.currency)+'</b><span style="float:right">'+money(x.amount_minor,x.currency)+'</span></div>').join("")||"Подтверждённой выручки пока нет"}
-let productData={};let productData={};
+let productData={};
 async function loadProducts(){
  const d=await api("/api/admin/products");
  productData=Object.fromEntries((d.items||[]).map(p=>[p.id,p]));
