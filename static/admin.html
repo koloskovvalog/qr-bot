@@ -46,6 +46,8 @@ if(STORE_MODE==="cases"){
  document.querySelectorAll('[data-page="overview"],[data-page="orders"],[data-page="products"],[data-page="payments"]').forEach(b=>b.hidden=true);
  const backLink=document.querySelector(".top a");if(backLink)backLink.href="/cases";
  showPage("cases");
+}else{
+ document.querySelectorAll('[data-page="cases"],[data-page="users"]').forEach(b=>b.hidden=true);
 }
 function orderTable(items){if(!items.length)return '<div class="empty">Заказов пока нет</div>';return '<table><thead><tr><th>Заказ</th><th>Покупатель</th><th>Товар</th><th>Сумма</th><th>Дата</th><th>Статус / действие</th></tr></thead><tbody>'+items.map(o=>'<tr><td>#'+o.id+'</td><td>'+esc(o.username||("ID "+o.user_id))+'</td><td>'+esc(o.product_title)+'</td><td>'+money(o.amount_minor,o.currency)+'</td><td>'+new Date(o.created_at).toLocaleString("ru-RU")+'</td><td><div class="row"><select id="st'+o.id+'">'+Object.entries(statusName).map(([v,n])=>'<option value="'+v+'" '+(o.status===v?"selected":"")+'>'+n+'</option>').join("")+'</select><button class="btn" onclick="setStatus('+o.id+')">Сохранить</button></div><span class="status '+esc(o.status)+'">'+esc(statusName[o.status]||o.status)+'</span></td></tr>').join("")+'</tbody></table>'}
 async function loadOrders(){const d=await api("/api/admin/orders");allOrders=d.items||[];$("ordersTable").innerHTML=orderTable(allOrders);$("recentOrders").innerHTML=orderTable(allOrders.slice(0,8))}
@@ -100,7 +102,7 @@ window.saveAntilopayDemoProfile=async()=>{try{await api("/api/admin/payment-prov
 window.simulateDemoPayment=async(id,outcome)=>{try{const d=await api("/api/admin/payment-transactions/"+id+"/simulate",{method:"POST",body:JSON.stringify({outcome})});alert(d.message);await loadPayments()}catch(e){alert(e.message)}};
 async function refresh(){
  if(STORE_MODE==="cases"){await Promise.all([loadCases(),loadWalletUsers()]);return}
- await Promise.all([loadStats(),loadOrders(),loadProducts(),loadCases(),loadWalletUsers(),loadPayments()]);
+ await Promise.all([loadStats(),loadOrders(),loadProducts(),loadPayments()]);
 }
 (async()=>{if(!initData){$("accessError").hidden=false;$("accessError").textContent="Откройте админ-панель через Telegram Mini App. Авторизация Telegram обязательна.";return}try{await refresh();$("app").hidden=false}catch(e){$("accessError").hidden=false;$("accessError").textContent=e.message.includes("403")?"Доступ запрещён. Эта страница доступна только администраторам.":e.message}})();
 </script></body></html>
