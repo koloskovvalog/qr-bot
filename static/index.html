@@ -440,6 +440,19 @@ main{max-width:1180px;padding:22px 22px 62px}
 @keyframes wheelGlow{from{filter:drop-shadow(0 12px 20px #0009)}to{filter:drop-shadow(0 12px 38px #e6bd5b66)}}
 @media(min-width:700px){.upgrade-live-panel .upgrade-wheel-box{width:min(46vw,490px)}}
 @media(max-width:480px){.upgrade-live-panel{padding:18px 12px 14px;border-radius:16px}.upgrade-live-panel .upgrade-wheel-box{width:min(86vw,410px)}.upgrade-wheel{border-width:8px}.upgrade-wheel:before{inset:9px}.upgrade-wheel-pointer:after{top:7%;border-left-width:11px;border-right-width:11px;border-top-width:19px}.upgrade-wheel-center{inset:34%}}
+
+/* Upgrade 2.0: always keep the full wheel visible, including legacy mobile grid overrides. */
+#upgradeView .upgrade-live-panel{display:flex!important;flex-direction:column;align-items:center;gap:14px;width:100%;max-width:900px;margin:12px auto 20px;padding:22px 18px 18px}
+#upgradeView .upgrade-live-panel .upgrade-wheel-box{width:min(88vw,490px)!important;max-width:490px!important;flex:0 0 auto;margin:8px auto 12px}
+.upgrade-duel-cards{width:100%;display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);align-items:center;gap:10px;max-width:720px}
+.upgrade-duel-card{min-width:0;min-height:148px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:12px 9px;border:1px solid #6f5a32;border-radius:15px;background:linear-gradient(145deg,#282319,#111216);text-align:center;box-shadow:inset 0 1px 0 #fff1}
+.upgrade-duel-card small{font-size:9px;letter-spacing:1.2px;color:#d9bd79;font-weight:900}
+.upgrade-duel-card img{width:100%;height:78px;object-fit:contain;filter:drop-shadow(0 5px 8px #0009)}
+.upgrade-duel-card strong{font-size:11px;line-height:1.35;max-width:100%;overflow-wrap:anywhere}
+.upgrade-duel-card b{font-size:13px;color:#f2d98c}
+.upgrade-duel-placeholder{height:78px;width:100%;display:grid;place-items:center;color:#8f8777;font-size:12px;border:1px dashed #50442d;border-radius:9px;background:#0d0e12}
+.upgrade-duel-vs{font-size:11px;font-weight:1000;letter-spacing:1px;color:#f2d98c;text-align:center;text-shadow:0 0 12px #d8b45a66}
+@media(max-width:480px){#upgradeView .upgrade-live-panel{padding:16px 10px 13px}.upgrade-duel-cards{grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr);gap:6px}.upgrade-duel-card{min-height:132px;padding:9px 5px}.upgrade-duel-card img,.upgrade-duel-placeholder{height:64px}.upgrade-duel-card strong{font-size:10px}.upgrade-duel-card b{font-size:11px}.upgrade-duel-vs{font-size:9px}}
 </style>
 </head>
 <body><main>
@@ -521,7 +534,7 @@ main{max-width:1180px;padding:22px 22px 62px}
 <section id="inventoryView" hidden><div class="section"><h2>Мой инвентарь</h2></div><div id="inventory" class="inventory"><div class="empty">Загрузка…</div></div></section>
 <section id="upgradeView" hidden>
 <div class="section"><h2>CS2 Upgrade</h2><span class="count">DEMO MODE</span></div>
-<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE WHEEL · LIVE</div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>ШАНС УСПЕХА</small><strong id="upgradeWheelPercent">—%</strong><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
+<div class="upgrade-wheel-panel upgrade-live-panel"><div class="upgrade-wheel-title">CS2 UPGRADE · LIVE</div><div class="upgrade-duel-cards"><div class="upgrade-duel-card" id="upgradeSourceCard"><small>ВАША СТАВКА</small><div class="upgrade-duel-placeholder">Выберите предмет</div><strong>Исходный предмет</strong><b>— ₽</b></div><div class="upgrade-duel-vs">VS</div><div class="upgrade-duel-card" id="upgradeTargetCard"><small>ЖЕЛАЕМАЯ ЦЕЛЬ</small><div class="upgrade-duel-placeholder">Выберите цель</div><strong>Целевой предмет</strong><b>— ₽</b></div></div><div class="upgrade-wheel-box" aria-label="Колесо шанса апгрейда"><div class="upgrade-wheel" id="upgradeWheel" style="--chance:25%"></div><div class="upgrade-wheel-pointer" id="upgradeWheelPointer"></div><div class="upgrade-wheel-center"><small>ШАНС УСПЕХА</small><strong id="upgradeWheelPercent">—%</strong><b id="upgradeWheelMultiplier">ВЫБЕРИ ЦЕЛЬ</b></div></div><div class="upgrade-live-controls"><div class="upgrade-wheel-status" id="upgradeWheelStatus">Выбери предмет и цель — колесо покажет шанс</div><div class="upgrade-wheel-legend"><span>Успех</span><span>Неудача</span></div><button class="goldbtn" id="doUpgrade" disabled>✦ Запустить апгрейд</button><div id="upgradeResult"></div></div></div>
 <div class="upgrade-panel">
 <label class="muted">Режим улучшения</label>
 <select id="upgradeMode" class="search"><option value="skin">Оружие и скины</option><option value="case">Кейсы</option></select>
@@ -918,8 +931,21 @@ function renderUpgradeTargets(){
  document.querySelectorAll("[data-target]").forEach(b=>b.onclick=()=>{selectedUpgradeTarget=upgradeTargets.find(x=>x.id===b.dataset.target);upgradePresetMode=null;document.querySelectorAll("[data-upgrade-mult],[data-upgrade-chance]").forEach(p=>p.classList.remove("active"));renderUpgradeTargets();renderUpgradeChance()});
  if(!source){$("doUpgrade").disabled=true;$("upgradeChance").textContent="—%";return}
 }
+function renderUpgradeDuelCards(){
+ const source=currentUpgradeSource(),target=selectedUpgradeTarget;
+ const renderCard=(node,item,kind)=>{
+  if(!node)return;
+  if(!item){node.innerHTML='<small>'+kind+'</small><div class="upgrade-duel-placeholder">'+(kind==="ВАША СТАВКА"?"Выберите предмет из инвентаря":"Выберите желаемый скин")+'</div><strong>Предмет не выбран</strong><b>— ₽</b>';return}
+  const image=item.image_url?'<img src="'+esc(item.image_url)+'" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">':'<div class="upgrade-duel-placeholder">CS2</div>';
+  const value=Number(item.market_price_minor||item.value_minor||0);
+  node.innerHTML='<small>'+kind+'</small>'+image+'<strong>'+esc(item.item_name||item.name)+'</strong><b>'+(value?money(value,"₽"):"Цена уточняется")+'</b>';
+ };
+ renderCard($("upgradeSourceCard"),source,"ВАША СТАВКА");
+ renderCard($("upgradeTargetCard"),target,"ЖЕЛАЕМАЯ ЦЕЛЬ");
+}
 function renderUpgradeChance(){
  const source=currentUpgradeSource(),wheel=$("upgradeWheel");
+ renderUpgradeDuelCards();
  const setEmpty=(message)=>{
   $("upgradeChance").textContent="—%";$("upgradeWheelPercent").textContent="—%";
   $("upgradeWheelMultiplier").textContent="ВЫБЕРИ ЦЕЛЬ";
@@ -936,6 +962,14 @@ function renderUpgradeChance(){
   $("upgradeWheelMultiplier").textContent="ЦЕНА УТОЧНЯЕТСЯ";
   wheel.style.setProperty("--chance","0%");
   $("upgradeWheelStatus").textContent="Ожидаем актуальную цену предметов для точного расчёта";
+  $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
+  $("doUpgrade").disabled=true;return;
+ }
+ if(targetValue<=sourceValue){
+  $("upgradeChance").textContent="Цель дешевле";$("upgradeWheelPercent").textContent="—%";
+  $("upgradeWheelMultiplier").textContent="ВЫБЕРИ ДОРОЖЕ";
+  wheel.style.setProperty("--chance","0%");
+  $("upgradeWheelStatus").textContent="Целевой предмет должен быть дороже исходного";
   $("upgradeTargetInfo").textContent=source.item_name+" → "+selectedUpgradeTarget.name;
   $("doUpgrade").disabled=true;return;
  }
@@ -985,10 +1019,11 @@ async function doUpgrade(){
   wheelPanel?.classList.toggle("wheel-success",!!d.success);
   $("upgradeWheelStatus").textContent=d.success?"✓ УСПЕХ — указатель остановился в золотом секторе":"✕ НЕУДАЧА — указатель остановился в тёмном секторе";
   $("upgradeResult").innerHTML='<div class="upgrade-result '+(d.success?'is-success':'is-fail')+'"><strong>'+(d.success?'✓ УСПЕШНО!':'✕ НЕ ПОВЕЗЛО')+'</strong><div>'+esc(d.source_name)+' → '+esc(d.target.name)+'</div><div class="muted">Шанс: '+Number(d.chance_percent).toFixed(2)+'% · результат сервера: '+(d.success?'успех':'неудача')+'</div><p class="muted">'+esc(d.message)+'</p></div>';
-  const inv=await api("/api/inventory");upgradeInventory=inv.items||[];renderUpgradeSources();
+  const inv=await api("/api/inventory");upgradeInventory=inv.items||[];selectedUpgradeTarget=null;renderUpgradeSources();
   await showInventory();
   await loadUpgradeTargets(true);
- }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>'}
+  renderUpgradeChance();
+ }catch(e){wheelPanel?.classList.remove("wheel-spinning","wheel-success");wheel.style.transition="none";wheel.style.transform="rotate(0deg)";$("upgradeWheelStatus").textContent="Апгрейд не выполнен";$("upgradeResult").innerHTML='<div class="upgrade-result">'+esc(e.message)+'</div>';renderUpgradeChance()}
 }
 async function loadProfile(){try{const [d,w]=await Promise.all([api("/api/profile"),api("/api/wallet")]);$("walletBalance").textContent=money(w.balance_minor||0,"₽");$("profileStats").innerHTML='<div class="profile-stat"><strong>'+Number(d.points||0)+'</strong><small>Бонусных баллов</small></div><div class="profile-stat"><strong>'+Number(d.orders_count||0)+'</strong><small>Всего заказов</small></div><div class="profile-stat"><strong>'+Number(d.paid_orders_count||0)+'</strong><small>Оплачено</small></div><div class="profile-stat"><strong>'+Number(d.referrals_count||0)+'</strong><small>Приглашено друзей</small></div>';$("myReferralCode").textContent=d.referral_code;$("copyReferralCode").onclick=async()=>{try{await navigator.clipboard.writeText(d.referral_code);toast("Код скопирован")}catch(e){toast("Ваш код: "+d.referral_code)}};$("applyReferralCode").onclick=async()=>{try{const code=$("referralInput").value.trim();const r=await api("/api/referrals/apply",{method:"POST",body:JSON.stringify({code})});toast(r.message);$("referralInput").value="";loadProfile()}catch(e){toast(e.message)}};$("loyaltyHistory").innerHTML=(d.ledger||[]).map(x=>'<div class="order"><strong>'+(x.points_delta>0?"+":"")+x.points_delta+' баллов</strong><div>'+esc(x.reason==="purchase_reward"?"Покупка":x.reason==="referral_reward"?"Реферальный бонус":x.reason)+'</div><small>'+new Date(x.created_at).toLocaleString("ru-RU")+'</small></div>').join("")||'<div class="empty">Начислений пока нет.</div>';
 const drops=d.case_drops||[];
