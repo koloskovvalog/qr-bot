@@ -2726,7 +2726,8 @@ def create_app():
         return web.FileResponse("static/index.html")
 
     async def admin_page_handler(request):
-        require_admin(request)
+        # Serve only the static shell here. Telegram initData is not attached to
+        # the initial document navigation; every admin API request verifies it.
         return web.FileResponse("static/admin.html")
 
     app.router.add_get("/admin", admin_page_handler)
