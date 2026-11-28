@@ -3273,15 +3273,16 @@ async def steam_auth_callback(request):
                 VALUES($1,'steam_account_linked',$2::jsonb)
             """, auth["user_id"], json.dumps({"steam_id64": steam_id64}))
     try:
-        await bot.send_message(
+        notifier = cases_bot or bot
+        await notifier.send_message(
             auth["user_id"],
-            f"✅ <b>Steam успешно привязан!</b>\\n\\nSteamID64: <code>{steam_id64}</code>\\nТеперь аккаунт связан с вашим профилем ShirpDrop.",
+            f"✅ <b>Steam успешно привязан к ShirpDrop!</b>\\n\\nSteamID64: <code>{steam_id64}</code>\\nВернитесь в Mini App и откройте профиль, чтобы увидеть статус подключения.",
             parse_mode="HTML",
         )
     except Exception:
-        logger.exception("Could not notify Telegram user about Steam link")
+        logger.exception("Could not notify ShirpDrop user about Steam link")
     return web.Response(
-        text="<html lang='ru'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Steam подключён</title><body style='background:#101010;color:#f5e7c2;font:16px sans-serif;text-align:center;padding:48px 20px'><h2>Steam успешно привязан</h2><p>Вернитесь в Telegram — бот уже отправил подтверждение.</p></body></html>",
+        text=f"""<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Steam подключён — ShirpDrop</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0d121a;color:#eef4fc;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;box-sizing:border-box"><main style="width:min(100%,420px);text-align:center;padding:28px 22px;border:1px solid #29415b;border-radius:22px;background:linear-gradient(145deg,#17283a,#111923);box-shadow:0 20px 60px #0006"><div style="width:58px;height:58px;margin:0 auto 18px;border-radius:18px;display:grid;place-items:center;background:#174b3a;color:#72e0ad;font-size:30px">✓</div><h2 style="margin:0 0 10px">Steam успешно подключён</h2><p style="color:#aebdce;line-height:1.55;margin:0 0 20px">Аккаунт Steam подтверждён и связан с вашим профилем ShirpDrop. Вернитесь в Telegram и обновите профиль.</p><a href="https://t.me/ShirpDrop_bot" style="display:block;padding:14px;border-radius:12px;background:#285783;color:#fff;text-decoration:none;font-weight:700">Вернуться в ShirpDrop</a><small style="display:block;color:#8091a5;margin-top:16px">SteamID64: {steam_id64}</small></main></body></html>""",
         content_type="text/html",
     )
 
